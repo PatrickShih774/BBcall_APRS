@@ -1,0 +1,20 @@
+# 便携工具链（TinyCC 解压在 third_party/，不进版本库）
+third_party/
+
+# 构建产物
+*.exe
+*.o
+*.d
+*.elf
+*.bin
+*.map
+*.list
+*.su
+*.cyclo
+build/
+Debug/
+Release/
+
+# Python
+__pycache__/
+*.pyc
