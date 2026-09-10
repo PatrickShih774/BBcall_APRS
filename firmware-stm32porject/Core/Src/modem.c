@@ -35,6 +35,15 @@ static uint8_t s_last_tone = 0;        /* 0=无 1=mark 2=space */
 static uint16_t s_mark_hits = 0;
 static uint16_t s_space_hits = 0;
 static uint16_t s_other_hits = 0;
+static ax25_hdlc_t s_tr_hdlc;
+static int32_t s_tr_last_sign = 0;
+static int32_t s_tr_cand_sign = 0;
+static uint8_t s_tr_cand_cnt = 0;
+static uint32_t s_tr_ncross = 0;
+static int32_t s_tr_next_sample = -1;
+static uint8_t s_tr_prev_tone = 0;
+static uint8_t s_tr_have_tone = 0;
+static uint8_t s_tr_have_sign = 0;
 
 /* 8 点 × 1200/2200Hz 的 cos/sin 表，缩放 64 倍（9600Hz 采样） */
 static const int8_t K_COS1[8] = { 64, 45,   0, -45, -64, -45,   0,  45 };
@@ -69,6 +78,9 @@ void modem_reset_sync(void)
   s_mark_hits = 0;
   s_space_hits = 0;
   s_other_hits = 0;
+  ax25_hdlc_init(&s_tr_hdlc);
+  s_tr_last_sign = 0; s_tr_cand_sign = 0; s_tr_cand_cnt = 0; s_tr_ncross = 0;
+  s_tr_next_sample = -1; s_tr_prev_tone = 0; s_tr_have_tone = 0; s_tr_have_sign = 0;
 }
 
 static void feed_dec(uint8_t idx, uint8_t tone)
@@ -128,6 +140,37 @@ void modem_adc_sample(uint16_t adc)
   uint8_t base = (uint8_t)((2u * (s_nsamp - 1u)) & (MODEM_NPHASE - 1u));
   feed_dec(base, tone_full);
   feed_dec((uint8_t)(base + 1u), tone_half);
+
+  /* --- 第 3 条路径：音调跳变重新对齐位时钟（抗 1200 baud/9600Hz 时钟漂移） ---
+   * 相关窗中心比实际时间晚约 3.5 采样；检测到跳变后把采样点定在
+   * n_cross+4（T/2），之后按 8 采样/bit 自由运行，遇到下一次跳变再对齐。 */
+  int tr_sign = (v > 0) ? 1 : ((v < 0) ? -1 : 0);
+  if (tr_sign != 0) {
+    if (tr_sign == s_tr_cand_sign) s_tr_cand_cnt++;
+    else { s_tr_cand_sign = tr_sign; s_tr_cand_cnt = 1; s_tr_ncross = s_nsamp - 1u; }
+  }
+  if (s_tr_cand_sign != 0 && s_tr_cand_cnt >= 2u &&
+      (!s_tr_have_sign || s_tr_cand_sign != s_tr_last_sign)) {
+    s_tr_last_sign = s_tr_cand_sign;
+    s_tr_have_sign = 1;
+    s_tr_next_sample = (int32_t)s_tr_ncross + 4;
+  }
+  if (s_tr_next_sample >= 0 && (int32_t)(s_nsamp - 1u) >= s_tr_next_sample) {
+    uint8_t tone = (v >= 0) ? 0u : 1u;
+    if (s_tr_have_tone) {
+      uint8_t bit = (tone == s_tr_prev_tone) ? 1u : 0u;
+      ax25_frame_t f;
+      if (ax25_hdlc_feed_bit(&s_tr_hdlc, bit, &f)) {
+        if (ax25_check_frame(f.frame, f.len)) {
+          memcpy(&s_frame, &f, sizeof(f));
+          s_frame_ready = 1;
+        }
+      }
+    }
+    s_tr_prev_tone = tone;
+    s_tr_have_tone = 1;
+    s_tr_next_sample += 8;
+  }
 
   s_last_tone = (uint8_t)(tone_full + 1u);
   if (tone_full == 0u) s_mark_hits++; else s_space_hits++;
