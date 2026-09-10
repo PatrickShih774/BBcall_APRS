@@ -2,15 +2,17 @@
  * 1200 baud Bell202 AFSK 解调（ADC 版）
  *
  * PA1 = ADC1_IN1，由 TIM3 以 9600Hz（1200 baud × 8）采样。
- * 每个采样点对最近 8 点做 1200/2200Hz 定点相关（Goertzel），
- * 比较两路幅度判音调，比数过零更抗衰减和噪声。
- * 再按采样相位分成 8 路并行 NRZI + HDLC 解码，CRC 正确的帧才入邮箱。
- * 这样不需要外部比较器，也不依赖单个周期捕获。
+ * 每个采样点对最近 8 点做 1200/2200Hz 定点相关（Goertzel），比较幅度判音调。
+ * 为覆盖比特边界落在任意半采样点的情况，用相邻采样插值出半采样相位，
+ * 共 16 路并行 NRZI + HDLC 解码；只有 CRC 正确的帧才入邮箱。
+ *
+ * 幅度门限只在极弱（m1+m2<500）时才丢弃，避免弱信号被误判成噪声
+ * （原门限 20000 会丢掉大量有效比特，导致成功率很低）。
  */
 #include "modem.h"
 #include <string.h>
 
-#define MODEM_NPHASE 8u
+#define MODEM_NPHASE 16u
 
 typedef struct {
   uint8_t have;
@@ -22,22 +24,23 @@ static modem_dec_t s_dec[MODEM_NPHASE];
 static ax25_frame_t s_frame;
 static uint8_t s_frame_ready = 0;
 
-static int16_t s_ring[MODEM_NPHASE];   /* 最近 8 个去直流样本 */
+static int16_t s_ring[8];              /* 最近 8 个去直流样本 */
 static uint32_t s_nsamp = 0;           /* 累计采样数 */
 static int32_t s_dc = 0;               /* 直流（VDD/2 偏置）跟踪 */
+static int32_t s_prev_v = 0;           /* 上一次相关差，用于半采样插值 */
 static uint16_t s_last_adc = 0;
-static uint8_t s_last_tone = 0;        /* 0=无 1=mark 2=space */
 static uint16_t s_adc_min = 0xFFFFu;
 static uint16_t s_adc_max = 0;
+static uint8_t s_last_tone = 0;        /* 0=无 1=mark 2=space */
 static uint16_t s_mark_hits = 0;
 static uint16_t s_space_hits = 0;
 static uint16_t s_other_hits = 0;
 
 /* 8 点 × 1200/2200Hz 的 cos/sin 表，缩放 64 倍（9600Hz 采样） */
-static const int8_t K_COS1[8] = { 64,  45,   0, -45, -64, -45,   0,  45 };
-static const int8_t K_SIN1[8] = {  0,  45,  64,  45,   0, -45, -64, -45 };
-static const int8_t K_COS2[8] = { 64,   8, -62, -24,  55,  39, -45, -51 };
-static const int8_t K_SIN2[8] = {  0,  63,  17, -59, -32,  51,  45, -39 };
+static const int8_t K_COS1[8] = { 64, 45,   0, -45, -64, -45,   0,  45 };
+static const int8_t K_SIN1[8] = {  0, 45,  64,  45,   0, -45, -64, -45 };
+static const int8_t K_COS2[8] = { 64,  8, -62, -24,  55,  39, -45, -51 };
+static const int8_t K_SIN2[8] = {  0, 63,  17, -59, -32,  51,  45, -39 };
 
 static void dec_reset(modem_dec_t *d)
 {
@@ -57,12 +60,35 @@ void modem_reset_sync(void)
   memset(s_ring, 0, sizeof(s_ring));
   s_nsamp = 0;
   s_dc = 0;
+  s_prev_v = 0;
   s_last_adc = 0;
+  s_adc_min = 0xFFFFu;
+  s_adc_max = 0;
   s_last_tone = 0;
   s_frame_ready = 0;
   s_mark_hits = 0;
   s_space_hits = 0;
   s_other_hits = 0;
+}
+
+static void feed_dec(uint8_t idx, uint8_t tone)
+{
+  modem_dec_t *d = &s_dec[idx & (MODEM_NPHASE - 1u)];
+  if (!d->have) {
+    d->have = 1;
+    d->prev_tone = tone;
+    return;
+  }
+  uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;  /* NRZI: 不变=1, 跳变=0 */
+  d->prev_tone = tone;
+
+  ax25_frame_t f;
+  if (ax25_hdlc_feed_bit(&d->hdlc, bit, &f)) {
+    if (ax25_check_frame(f.frame, f.len)) {
+      memcpy(&s_frame, &f, sizeof(f));
+      s_frame_ready = 1;
+    }
+  }
 }
 
 void modem_adc_sample(uint16_t adc)
@@ -75,14 +101,14 @@ void modem_adc_sample(uint16_t adc)
   s_dc += ((int32_t)adc - s_dc) >> 4;
   int16_t x = (int16_t)((int32_t)adc - s_dc);
 
-  s_ring[s_nsamp & (MODEM_NPHASE - 1u)] = x;
+  s_ring[s_nsamp & 7u] = x;
   s_nsamp++;
-  if (s_nsamp < MODEM_NPHASE) return;
+  if (s_nsamp < 8u) return;
 
   /* 最近 8 点与 1200/2200Hz 做相关，比较幅度 */
   int32_t i1 = 0, q1 = 0, i2 = 0, q2 = 0;
-  for (uint8_t i = 0; i < MODEM_NPHASE; i++) {
-    int16_t xv = s_ring[(uint16_t)(s_nsamp - MODEM_NPHASE + i) & (MODEM_NPHASE - 1u)];
+  for (uint8_t i = 0; i < 8u; i++) {
+    int16_t xv = s_ring[(uint16_t)(s_nsamp - 8u + i) & 7u];
     i1 += (int32_t)xv * K_COS1[i];
     q1 += (int32_t)xv * K_SIN1[i];
     i2 += (int32_t)xv * K_COS2[i];
@@ -90,31 +116,21 @@ void modem_adc_sample(uint16_t adc)
   }
   int32_t m1 = (i1 < 0 ? -i1 : i1) + (q1 < 0 ? -q1 : q1);
   int32_t m2 = (i2 < 0 ? -i2 : i2) + (q2 < 0 ? -q2 : q2);
-  if ((m1 + m2) < 20000) { s_other_hits++; return; }   /* 幅度太低，判为噪声 */
+  if ((m1 + m2) < 500) { s_other_hits++; return; }   /* 只在极弱时才丢弃 */
 
-  uint8_t tone = (m1 >= m2) ? 0u : 1u;   /* 0=1200Hz mark, 1=2200Hz space */
-  if (tone == 0u) s_mark_hits++; else s_space_hits++;
-  s_last_tone = (uint8_t)(tone + 1u);
+  int32_t v = m1 - m2;
+  uint8_t tone_full = (v >= 0) ? 0u : 1u;                 /* 0=mark, 1=space */
+  int32_t vh = (v + s_prev_v) / 2;                        /* 半采样插值 */
+  uint8_t tone_half = (vh >= 0) ? 0u : 1u;
+  s_prev_v = v;
 
-  /* 第 (n mod 8) 路解码器每 8 个采样得到一次判决（1200 baud） */
-  modem_dec_t *d = &s_dec[(s_nsamp - 1u) & (MODEM_NPHASE - 1u)];
-  if (!d->have) {
-    d->have = 1;
-    d->prev_tone = tone;
-    return;
-  }
+  /* 16 相位：2n 用整采样相位，2n+1 用半采样相位，每个解码器每 8 个采样得到 1 bit */
+  uint8_t base = (uint8_t)((2u * (s_nsamp - 1u)) & (MODEM_NPHASE - 1u));
+  feed_dec(base, tone_full);
+  feed_dec((uint8_t)(base + 1u), tone_half);
 
-  uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;  /* NRZI: 不变=1, 跳变=0 */
-  d->prev_tone = tone;
-
-  ax25_frame_t f;
-  if (ax25_hdlc_feed_bit(&d->hdlc, bit, &f)) {
-    /* 只有 CRC 正确的帧才入邮箱，滤掉 8 路错误相位产生的垃圾 */
-    if (ax25_check_frame(f.frame, f.len)) {
-      memcpy(&s_frame, &f, sizeof(f));
-      s_frame_ready = 1;
-    }
-  }
+  s_last_tone = (uint8_t)(tone_full + 1u);
+  if (tone_full == 0u) s_mark_hits++; else s_space_hits++;
 }
 
 /* ---------- 旧 TIM2 捕获接口（保留以兼容调用，不再产生数据） ---------- */
