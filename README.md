@@ -430,7 +430,7 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 1. **BSD-2 / MIT 代码并入 GPL-3.0 是允许的**，但要保留原版权声明、许可全文和免责声明。
 2. 发布 HEX/BIN/Release 时，二进制分发同样需要附带 `LICENSE`、`licenses/` 与 `THIRD_PARTY_NOTICES.md`（或在 Release 说明中给出链接）。
 3. **不要直接复制 BG7QKU 仓库的代码**：该仓库未声明 LICENSE，默认保留所有权利。
-4. `BK4802P.pdf` 是 Beken 标注 *Confidential / NDA* 的数据手册，放在公开仓库有版权/NDA 风险，建议从公开仓库移除（本地保留）。
+4. `BK4802P.pdf` 作为 BK4802P 参考数据手册保留在仓库中；版权归 Beken 所有，仅供学习与开发参考。
 5. 本项目只做接收（RX-only）。
 ## 10. 参考项目
 

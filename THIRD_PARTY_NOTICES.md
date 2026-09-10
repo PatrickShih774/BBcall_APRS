@@ -38,8 +38,8 @@
 - 许可：随 STM32CubeIDE 工程生成，目录内附有 `LICENSE.txt`（STM32 HAL/CMSIS 的 BSD-3-Clause 等条款）。
 - 合规说明：保留 `Drivers/` 下的原始版权与许可文件，不修改许可声明。
 
-## BK4802P.pdf（重要提醒）
+## BK4802P.pdf（参考数据手册）
 
-- `BK4802P.pdf` 是 Beken 的数据手册，封面标注 *Beken Confidential / covered under NDA*。
-- 该文件目前被提交到公开仓库，存在版权/NDA 合规风险。
-- 建议：从公开仓库移除（本地保留），不要在 Release 附件中分发；需要公开说明时只给厂商官方链接或自行获取说明。
+- `BK4802P.pdf` 是 Beken 的 BK4802P 数据手册，作为本项目的硬件参考手册保留在仓库中。
+- 版权归 Beken 所有，仅供学习与开发参考；如需商用或再分发请遵循厂商授权。
+- 若权利人提出要求，可将其从仓库中移除。
