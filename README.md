@@ -1,5 +1,21 @@
 # BBcall_APRS
 
+> **应用参考 / Application Reference**
+>
+> 本项目的参考项目与工程底座是 **[MM-Radio](https://github.com/doublehan07/MM-Radio)**
+> （BSD 2-Clause License，Copyright (c) 2024 Han Zhang）。
+> 工程结构、BK4802 驱动思路和部分寄存器初始化参考/移植自 MM-Radio；
+> 依据 BSD-2-Clause 保留原作者版权与许可声明，详见「许可与合规」。
+> 本项目自身以 **GPL-3.0** 发布（见根目录 `LICENSE`）。
+> 许可证兼容性：**BSD-2-Clause → GPL-3.0 兼容**，不冲突。
+
+### 快速导航
+
+- [硬件/引脚](#2-引脚分配)
+- [调试全过程（含所有踩坑记录）](#4-调试过程记录)
+- [串口输出说明](#5-串口诊断字段说明)
+- [许可与合规](#9-许可与合规)
+
 用 **BK4802P（玩具对讲 FM 收发芯片）+ STM32F103C8T6 + ST7567 12864 LCD**
 复刻一台 APRS 寻呼机（BB 机）。仅接收（RX-only），默认频率 **144.640MHz**，
 目标是把空中收到的 APRS 数据包解出来并显示在 LCD 上。
@@ -7,6 +23,7 @@
 当前状态：**RF → 音频 → ADC → 判频 → NRZI → HDLC → AX.25 → APRS 全链路已打通**，
 已用实机收到并解析真实 APRS 数据包（见下文「成功解码记录」）。LCD 尚未焊接，
 当前通过 USART3（PB10/PB11，115200）输出调试信息。
+
 
 ---
 
@@ -366,7 +383,33 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 
 ---
 
-## 9. 参考项目
+## 9. 许可与合规
+
+### 本项目
+
+- 许可证：**GNU General Public License v3.0（GPL-3.0）**，见根目录 `LICENSE`。
+- 代码与文档如无特别说明，均按 GPL-3.0 分发。
+
+### 参考项目许可证与兼容性
+
+| 项目 | 许可证 | 与本项目 GPL-3.0 是否兼容 | 说明 |
+|---|---|---|---|
+| [MM-Radio](https://github.com/doublehan07/MM-Radio) | **BSD-2-Clause** (c) 2024 Han Zhang | 兼容 | 主参考/工程底座；保留其版权与许可声明 |
+| [BG5ESN FMO-Radio-Module-BK4802-V2.00](https://github.com/BG5ESN/FMO-Radio-Module-BK4802-V2.00) | **MIT** (c) 2025 BG5ESN | 兼容 | 频率字计算参考 |
+| [VP-Digi](https://github.com/sq8vps/vp-digi) | **GPL-3.0** | 兼容 | AFSK/AX.25/APRS 资料参考 |
+| [BG7QKU STM32_SIMPLE_CONTROL_BK4802N](https://github.com/BG7QKU/STM32_SIMPLE_CONTROL_BK4802N) | **未声明 LICENSE**（默认保留所有权利） | 不可直接复制代码 | 仅作资料参考；引用代码需作者授权 |
+| STM32 HAL / CMSIS（`Drivers/`） | ST 工程自带许可（目录内 `LICENSE.txt`） | 兼容（保留声明） | CubeIDE 生成代码，勿删许可文件 |
+
+许可证原文放在 `licenses/`，第三方组件说明见 `THIRD_PARTY_NOTICES.md`。
+
+### 合规要点
+
+1. **BSD-2 / MIT 代码并入 GPL-3.0 是允许的**，但要保留原版权声明、许可全文和免责声明。
+2. 发布 HEX/BIN/Release 时，二进制分发同样需要附带 `LICENSE`、`licenses/` 与 `THIRD_PARTY_NOTICES.md`（或在 Release 说明中给出链接）。
+3. **不要直接复制 BG7QKU 仓库的代码**：该仓库未声明 LICENSE，默认保留所有权利。
+4. `BK4802P.pdf` 是 Beken 标注 *Confidential / NDA* 的数据手册，放在公开仓库有版权/NDA 风险，建议从公开仓库移除（本地保留）。
+5. 本项目只做接收（RX-only）。
+## 10. 参考项目
 
 - [MM-Radio](https://github.com/doublehan07/MM-Radio)
 - [BG7QKU STM32_SIMPLE_CONTROL_BK4802N](https://github.com/BG7QKU)
