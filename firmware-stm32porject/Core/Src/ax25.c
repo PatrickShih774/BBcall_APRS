@@ -78,6 +78,7 @@ uint8_t ax25_decode(const uint8_t *body, uint16_t len, ax25_decoded_t *out)
   decode_call(&body[idx], out->src, &out->src_ssid);
   idx += 7;
   while ((body[idx - 1] & 0x01u) == 0u && out->npath < 4u && (idx + 6u) < len) {
+    out->path_h[out->npath] = (uint8_t)((body[idx + 6u] & 0x80u) ? 1u : 0u);
     decode_call(&body[idx], (char *)out->path[out->npath], &out->path_ssid[out->npath]);
     idx += 7;
     out->npath++;

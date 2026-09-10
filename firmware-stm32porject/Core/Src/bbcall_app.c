@@ -125,12 +125,45 @@ void bbcall_app_loop(void)
     if (ax25_decode(fr.frame, fr.len, &d)) {
       hw_console_puts("\r\n[FRAME] src=");
       hw_console_puts(d.src);
+      hw_console_puts(" dest=");
+      hw_console_puts(d.dest);
+      hw_console_puts(" path=");
+      if (d.npath == 0u) hw_console_puts("(none)");
+      for (uint8_t i = 0; i < d.npath; i++) {
+        if (i) hw_console_putc(',');
+        hw_console_puts((const char *)d.path[i]);
+        hw_console_putc('-');
+        hw_console_u8(d.path_ssid[i]);
+        if (d.path_h[i]) hw_console_putc('*');
+      }
       hw_console_puts(" ctrl=");
       hw_console_u8(d.control);
       hw_console_puts(" info=");
       for (uint8_t i = 0; i < d.info_len; i++) hw_console_putc((char)d.info[i]);
       hw_console_puts("\r\n");
-      aprs_message_t m;
+      /* Mic-E 的目标呼号包含位置模糊度空格，必须用原始地址字节（保留空格） */
+      char mice_dest[7];
+      for (uint8_t i = 0; i < 6u; i++) {
+        uint8_t c = (uint8_t)((fr.frame[i] >> 1) & 0x7Fu);
+        mice_dest[i] = (char)((c == 0u) ? ' ' : (char)c);
+      }
+      mice_dest[6] = '\0';
+      aprs_mice_t mi;
+      if (aprs_parse_mice(mice_dest, d.info, d.info_len, &mi)) {
+        hw_console_puts(" [MICE] lat=");
+        hw_console_puts(mi.lat);
+        hw_console_puts(" lon=");
+        hw_console_puts(mi.lon);
+        hw_console_puts(" spd=");
+        hw_console_u16(mi.speed_kmh);
+        hw_console_puts("km/h crs=");
+        hw_console_u16(mi.course);
+        hw_console_puts(" msg=");
+        hw_console_puts(mi.mtype);
+        hw_console_puts(" comment=");
+        hw_console_puts(mi.comment);
+        hw_console_puts("\r\n");
+      }      aprs_message_t m;
       if (aprs_parse_message(d.info, d.info_len, &m)) {
         hw_console_puts(" msg=");
         for (uint8_t i = 0; i < m.body_len; i++) hw_console_putc((char)m.body[i]);
@@ -181,12 +214,22 @@ void bbcall_app_loop(void)
     t_smet = HAL_GetTick();
     /* 诊断：打印读回的寄存器原始值，判断 I2C 读与 S-meter 映射 */
     uint16_t r24 = bk4802_read_reg(24);
+    uint8_t rssi_now = (uint8_t)(r24 & 0x00FFu);
+    /* 自适应中频增益（带迟滞）：弱信号提高增益、强信号降低，5km 弱台可多 3~6dB */
+    static uint8_t if_code = BK4802_IF_GAIN_CODE;
+    uint8_t new_code = if_code;
+    if (if_code >= 6u) { if (rssi_now >= 105u) new_code = 5u; }
+    else if (if_code == 5u) { if (rssi_now >= 115u) new_code = 4u; else if (rssi_now < 90u) new_code = 6u; }
+    else { if (rssi_now < 100u) new_code = 5u; }
+    if (new_code != if_code) { if_code = new_code; bk4802_set_if_gain_code(if_code); }
     hw_console_puts("R19=");
     hw_console_u16(bk4802_read_reg(19));
     hw_console_puts(" RSSI=");
     hw_console_u16(r24 & 0x00FFu);
     hw_console_puts(" SNR=");
     hw_console_u16((r24 & 0x3F00u) >> 8);
+    hw_console_puts(" G=");
+    hw_console_u8(if_code);
     hw_console_puts(" AFC=");
     hw_console_u16(bk4802_read_reg(25) & 0x00FFu);
     hw_console_puts(" EXN=");

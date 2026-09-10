@@ -177,6 +177,13 @@ void bk4802_apply_audio_config(void)
   bk4802_write_reg(7, r7);
 }
 
+void bk4802_set_if_gain_code(uint8_t code)
+{
+  /* reg7 B15:B13：BK4802P 接收中频增益，3dB/级（0=0dB ... 7=21dB） */
+  uint16_t r7 = 0xED00u & (uint16_t)~0xE000u;
+  r7 |= (uint16_t)((code & 0x07u) << 13);
+  bk4802_write_reg(7, r7);
+}
 void bk4802_set_squelch(uint8_t thr)
 {
   uint16_t r = bk4802_read_reg(22) & 0xFF00u;

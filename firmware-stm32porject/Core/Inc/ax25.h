@@ -21,6 +21,7 @@ typedef struct {
     uint8_t src_ssid;
     uint8_t path[4][7];
     uint8_t path_ssid[4];
+    uint8_t path_h[4];      /* 1=该中继地址已被转发（H bit） */
     uint8_t npath;
     uint8_t control;
     uint8_t pid;
