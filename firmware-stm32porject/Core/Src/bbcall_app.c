@@ -127,6 +127,7 @@ void bbcall_app_loop(void)
 
   if (modem_get_frame(&fr)) {
     if (modem_frame_was_fixed()) hw_console_puts("[FIX] ");
+    else if (modem_frame_was_repeat()) hw_console_puts("[REP] ");
     /* 重复包抑制：同一帧 60s 内只打印一次，避免串口刷屏 */
     uint16_t fh = 0;
     for (uint16_t i = 0; i < fr.len; i++) fh = (uint16_t)((fh << 5) ^ (fh >> 2) ^ fr.frame[i]);
@@ -139,7 +140,7 @@ void bbcall_app_loop(void)
       if (dup_name[i][0] && dup_hash[i] == fh && strcmp(dup_name[i], fname) == 0 &&
           (now_ms - dup_time[i]) < 60000u) { is_dup = 1; break; }
     }
-    if (is_dup) {
+    if (is_dup && !modem_frame_was_repeat()) {
       dup_count++;
       hw_console_puts("[DUP] src=");
       hw_console_puts(fname);
@@ -297,6 +298,7 @@ void bbcall_app_loop(void)
     hw_console_puts(" DUP="); hw_console_u16((uint16_t)dup_count);
     hw_console_puts(" FIX="); hw_console_u16(modem_get_fix_count());
     hw_console_puts(" FIX2="); hw_console_u16(modem_get_fix2_count());
+    hw_console_puts(" REP="); hw_console_u16(modem_get_rep_count());
     hw_console_puts(" AFC=");
     hw_console_u16(bk4802_read_reg(25) & 0x00FFu);
     hw_console_puts(" EXN=");

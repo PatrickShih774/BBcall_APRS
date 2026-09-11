@@ -21,4 +21,6 @@ uint8_t modem_get_frame(ax25_frame_t *out);
 uint16_t modem_get_fix_count(void);
 uint8_t modem_frame_was_fixed(void);
 uint16_t modem_get_fix2_count(void);
+uint8_t modem_frame_was_repeat(void);
+uint16_t modem_get_rep_count(void);
 #endif

@@ -30,6 +30,14 @@ static volatile uint8_t s_bad_head = 0, s_bad_tail = 0;
 static uint16_t s_fix_count = 0;
 static uint16_t s_fix2_count = 0;
 static uint8_t s_last_fixed = 0;
+#define REF_N 4u
+#define REF_MAX_LEN 160u
+#define REF_MAX_DIFF 8u
+typedef struct { uint8_t valid; uint16_t len; uint8_t frame[REF_MAX_LEN]; } ref_t;
+static ref_t s_ref[REF_N];
+static uint8_t s_ref_pos = 0;
+static uint16_t s_rep_count = 0;
+static uint8_t s_last_rep = 0;
 
 static int16_t s_ring[8];              /* 最近 8 个去直流样本 */
 static uint32_t s_nsamp = 0;           /* 累计采样数 */
@@ -65,7 +73,72 @@ static const int8_t K_SIN1[8] = {  0, 45,  64,  45,   0, -45, -64, -45 };
 static const int8_t K_COS2[8] = { 64,  8, -62, -24,  55,  39, -45, -51 };
 static const int8_t K_SIN2[8] = {  0, 63,  17, -59, -32,  51,  45, -39 };
 
-static void modem_push_frame(const ax25_frame_t *f)
+
+static uint8_t frame_src_info(const uint8_t *frame, uint16_t len, uint8_t *src, const uint8_t **info, uint16_t *ilen)
+{
+  if (!frame || len < 16u) return 0;
+  for (uint8_t i = 0; i < 6u; i++) src[i] = (uint8_t)((frame[7u + i] >> 1) & 0x7Fu);
+  src[6] = 0;
+  uint16_t idx = 14u;
+  while ((frame[idx - 1u] & 0x01u) == 0u) {
+    if ((idx + 7u) > len || idx > 70u) return 0;
+    idx += 7u;
+  }
+  if ((idx + 2u) > len) return 0;
+  *info = frame + idx + 2u;
+  *ilen = (uint16_t)(len - idx - 2u);
+  return 1;
+}
+
+static void ref_store(const ax25_frame_t *f)
+{
+  if (!f || f->len > REF_MAX_LEN) return;
+  uint8_t src[7];
+  const uint8_t *info; uint16_t ilen;
+  if (!frame_src_info(f->frame, f->len, src, &info, &ilen)) return;
+  for (uint8_t i = 0; i < REF_N; i++) {
+    if (!s_ref[i].valid) continue;
+    uint8_t rsrc[7]; const uint8_t *rinfo; uint16_t rilen;
+    if (!frame_src_info(s_ref[i].frame, s_ref[i].len, rsrc, &rinfo, &rilen)) continue;
+    if (memcmp(src, rsrc, 6u) == 0 && ilen == rilen && memcmp(info, rinfo, ilen) == 0) {
+      s_ref[i].len = f->len;
+      memcpy(s_ref[i].frame, f->frame, f->len);
+      return;
+    }
+  }
+  s_ref[s_ref_pos].valid = 1;
+  s_ref[s_ref_pos].len = f->len;
+  memcpy(s_ref[s_ref_pos].frame, f->frame, f->len);
+  s_ref_pos = (uint8_t)((s_ref_pos + 1u) & (REF_N - 1u));
+}
+
+static uint8_t ref_match(const ax25_frame_t *f, ax25_frame_t *out)
+{
+  if (!f || !out || f->len > REF_MAX_LEN) return 0;
+  uint8_t src[7]; const uint8_t *info; uint16_t ilen;
+  if (!frame_src_info(f->frame, f->len, src, &info, &ilen)) return 0;
+  for (uint8_t i = 0; i < REF_N; i++) {
+    if (!s_ref[i].valid) continue;
+    uint8_t rsrc[7]; const uint8_t *rinfo; uint16_t rilen;
+    if (!frame_src_info(s_ref[i].frame, s_ref[i].len, rsrc, &rinfo, &rilen)) continue;
+    if (memcmp(src, rsrc, 6u) != 0 || ilen != rilen) continue;
+    uint16_t diff = 0;
+    for (uint16_t k = 0; k < ilen; k++) {
+      uint8_t x = (uint8_t)(info[k] ^ rinfo[k]);
+      while (x) { diff++; x &= (uint8_t)(x - 1u); }
+      if (diff > REF_MAX_DIFF) break;
+    }
+    if (diff <= REF_MAX_DIFF) {
+      out->len = s_ref[i].len;
+      memcpy(out->frame, s_ref[i].frame, s_ref[i].len);
+      s_rep_count++;
+      s_last_rep = 1;
+      s_last_fixed = 0;
+      return 1;
+    }
+  }
+  return 0;
+}static void modem_push_frame(const ax25_frame_t *f)
 {
   uint8_t nh = (uint8_t)((s_q_head + 1u) & (MODEM_QN - 1u));
   if (nh == s_q_tail) return;          /* 队列满：丢弃最新帧 */
@@ -259,6 +332,16 @@ uint16_t modem_get_fix2_count(void)
   return s_fix2_count;
 }
 
+uint8_t modem_frame_was_repeat(void)
+{
+  return s_last_rep;
+}
+
+uint16_t modem_get_rep_count(void)
+{
+  return s_rep_count;
+}
+
 uint8_t modem_get_frame(ax25_frame_t *out)
 {
   if (!out) return 0;
@@ -266,6 +349,8 @@ uint8_t modem_get_frame(ax25_frame_t *out)
     *out = s_q[s_q_tail];
     s_q_tail = (uint8_t)((s_q_tail + 1u) & (MODEM_QN - 1u));
     s_last_fixed = 0;
+    s_last_rep = 0;
+    ref_store(out);
     return 1;
   }
   while (s_bad_tail != s_bad_head) {
@@ -274,6 +359,7 @@ uint8_t modem_get_frame(ax25_frame_t *out)
     if (ax25_correct_single_bit(f.frame, f.len)) {
       s_fix_count++;
       s_last_fixed = 1;
+      s_last_rep = 0;
       *out = f;
       return 1;
     }
@@ -281,7 +367,11 @@ uint8_t modem_get_frame(ax25_frame_t *out)
       s_fix2_count++;
       s_fix_count++;
       s_last_fixed = 1;
+      s_last_rep = 0;
       *out = f;
+      return 1;
+    }
+    if (ref_match(&f, out)) {
       return 1;
     }
   }
