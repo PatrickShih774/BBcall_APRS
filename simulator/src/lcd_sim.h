@@ -22,6 +22,7 @@ void lcd_sim_toggle_invert(void);
 void lcd_sim_toggle_backlight(void);
 void lcd_sim_toggle_panel(void);
 int  lcd_sim_get_key(void);
+int  lcd_sim_get_char(void);   /* COMPOSE 用：PC 键盘字符输入 */
 
 /* 供 lcd_st7567.c 的 LCD_SIM 分支调用 */
 void lcd_sim_reset(void);

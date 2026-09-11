@@ -9,6 +9,7 @@
 #include "lcd_sim.h"
 #include "ui_harness.h"
 #include "sim_feed.h"
+#include "msg_store.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,12 @@ static int parse_screen(const char *s)
   if (!strcmp(s, "inbox")   || !strcmp(s, "i")) return UI_SCREEN_INBOX;
   if (!strcmp(s, "detail")  || !strcmp(s, "d")) return UI_SCREEN_DETAIL;
   if (!strcmp(s, "home")    || !strcmp(s, "h")) return UI_SCREEN_HOME;
+  if (!strcmp(s, "messenger") || !strcmp(s, "msg")) return UI_SCREEN_MSG_HUB;
+  if (!strcmp(s, "msginbox")) return UI_SCREEN_MSG_INBOX;
+  if (!strcmp(s, "msgsent"))  return UI_SCREEN_MSG_SENT;
+  if (!strcmp(s, "msgread"))  return UI_SCREEN_MSG_READ;
+  if (!strcmp(s, "compose"))  return UI_SCREEN_MSG_COMPOSE;
+  if (!strcmp(s, "heard"))    return UI_SCREEN_INBOX;
   if (!strcmp(s, "menu")    || !strcmp(s, "m")) return UI_SCREEN_MENU;
   if (!strcmp(s, "radio")   || !strcmp(s, "r")) return UI_SCREEN_RADIO;
   if (!strcmp(s, "about")) return UI_SCREEN_ABOUT;
@@ -34,7 +41,7 @@ static void usage(void)
          "  --scale N        放大倍数 1..12（默认 4）\n"
          "  --selftest       无窗口渲染一帧并写出 BMP\n"
          "  --out FILE       自检输出文件名（默认 sim_selftest.bmp）\n"
-         "  --screen NAME    boot|standby|inbox|detail|pattern\n"
+         "  --screen NAME    boot|home|menu|inbox|detail|radio|about|confirm|pattern|messenger|msginbox|msgsent|msgread|compose\n"
          "  --wav FILE       WAV -> modem.c 解调 -> 收件箱\n"
          "  --replay FILE    串口日志 [RAW] hex= 回放到收件箱\n"
          "  --clock SEC      主页大时钟的固定值（自检截图用）\n"
@@ -79,7 +86,10 @@ int main(int argc, char **argv)
 
   if (wav) sim_feed_wav(wav);
   if (log) sim_feed_log(log);
-  if (demo || (!wav && !log)) sim_feed_demo();
+  if (demo || (!wav && !log)) {
+    sim_feed_demo();
+    msg_store_add_demo();     /* Sent/Drafts 侧演示数据（本项目不发射） */
+  }
 
   printf("[sim] 收件箱 %u 条（未读 %u）/ 累计收到 %u 帧（重复抑制 %u）\n",
          (unsigned)ui_inbox_count(), (unsigned)ui_unread_count(), (unsigned)ui_rx_total(),
@@ -98,7 +108,9 @@ int main(int argc, char **argv)
   while (!lcd_sim_should_quit()) {
     int key;
     lcd_sim_poll_events();
+    int ch;
     while ((key = lcd_sim_get_key()) != 0) ui_handle_key(key);
+    while ((ch = lcd_sim_get_char()) != 0) ui_handle_text(ch);
     ui_tick(16);
     lcd_sim_render();
     SDL_Delay(16);

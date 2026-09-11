@@ -16,6 +16,7 @@ add_executable(bbcall_sim
   src/lcd_sim.c
   src/ui_harness.c
   src/sim_feed.c
+  src/msg_store.c
   ${FW}/Core/Src/lcd_st7567.c
   ${FW}/Core/Src/ax25.c
   ${FW}/Core/Src/aprs.c

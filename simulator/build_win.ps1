@@ -46,6 +46,7 @@ $srcs = @(
   (Join-Path $sim 'src\lcd_sim.c'),
   (Join-Path $sim 'src\ui_harness.c'),
   (Join-Path $sim 'src\sim_feed.c'),
+  (Join-Path $sim 'src\msg_store.c'),
   (Join-Path $fw  'Src\lcd_st7567.c'),
   (Join-Path $fw  'Src\ax25.c'),
   (Join-Path $fw  'Src\aprs.c'),

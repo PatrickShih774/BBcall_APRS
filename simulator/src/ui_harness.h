@@ -18,6 +18,12 @@
 #define UI_SCREEN_DETAIL  10
 #define UI_SCREEN_BOOT    11
 #define UI_SCREEN_CONFIRM 12    /* 删除确认弹窗（叠在列表上） */
+/* Messenger（参考 GOGUFW 的 Messenger UI 版面） */
+#define UI_SCREEN_MSG_HUB     20
+#define UI_SCREEN_MSG_INBOX   21
+#define UI_SCREEN_MSG_SENT    22
+#define UI_SCREEN_MSG_READ    23
+#define UI_SCREEN_MSG_COMPOSE 24
 #define UI_SCREEN_MENU    13
 #define UI_SCREEN_RADIO   14
 #define UI_SCREEN_ABOUT   15
@@ -25,6 +31,7 @@
 
 void     ui_init(void);
 void     ui_handle_key(int key);
+void     ui_handle_text(int ch);   /* 组包时的字符输入（COMPOSE） */
 void     ui_tick(uint32_t ms);
 void     ui_show(int screen);
 

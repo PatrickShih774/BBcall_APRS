@@ -674,7 +674,13 @@ y48  |1/2    RELAY    |
 - 数据全部来自真实来源：状态栏信号格与 `radio` 页的 RSSI/SNR/AFC/EXN 取自日志里真实的
   `S=` 与 `R19=` 行；本板没有电池采样电路，所以电池位保留但留空，不画假电量。
 
-屏幕：`boot` / `home`（16x32 大时钟）/ `menu`（6 项图标菜单）/ `inbox`（最新在上）/ `detail`
+Messenger 界面族（INBOX / HEARD / COMPOSE / SENT）的版面参考
+[GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)（Apache-2.0，
+同样是 128x64 单色 LCD 的对讲机固件）：采用它的 36 字符正文上限、`NOW`/`12m`/`3h` 年龄列、
+未读 `*`、送达 `+`/`x`/`-`、按 `(from,id)` 去重、`ackNNN` 送达确认与点状分隔线；
+偏离处（标题放进状态栏、首页保留大图标、6x8 字体）逐条记在 [UISkill.md](UISkill.md) 第 11 节。
+
+屏幕：`boot` / `home`（16x32 大时钟）/ `menu`（6 项图标菜单）/ `inbox`（HEARD，最新在上）/ `detail`
 （5 行正文 + `RELAY` 中继路径）/ `radio` / `about` / `confirm`（内嵌双线框模态）/ `pattern`（字体样张）。
 
 用真实 5km 日志回放（`tools/sample_aprs_log.txt`，已补齐每帧之前最近的真实状态行）：

@@ -32,6 +32,18 @@
 - 用途：仅作为 BK4802 寄存器行为的资料参考，不直接复制其代码。
 - 合规说明：由于未声明开源许可，本项目不把其代码纳入源码树；如需引用其代码，应先取得作者授权。
 
+## GOGUFW-UV-K1-Messenger（UI 参考）
+
+- 仓库：https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger
+- 许可：**Apache License 2.0**
+- 用途：Messenger 界面族的**设计参考**。其目标硬件泉盛 UV-K1 / UV-K5 V3 使用同样 128x64 的单色 LCD，
+  因此本项目参考了它的消息模型与版面参数：正文 36 字符上限、Inbox 16 / Sent 8 / Drafts 8、
+  `NOW`/`12m`/`3h` 年龄列、未读 `*`、送达 `+`/`x`/`-`、按 `(from,id)` 去重、`ackNNN` 送达确认、
+  点状分隔线（1 实 3 空）、右对齐计数留安全边距、启动器选中项右侧大图标。
+- **未复制其代码**：本项目的实现（`simulator/src/msg_store.c`、`ui_harness.c` 的 Messenger 段）
+  按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `UISkill.md` 第 11 节。
+- 合规说明：Apache-2.0 与 GPL-3.0 兼容；本项目未纳入其源码，仅作设计参考并在文档中标注出处。
+  如后续需要直接复用其代码，应保留 Apache-2.0 许可与 NOTICE 要求。
 ## STMicroelectronics STM32 HAL / CMSIS
 
 - 位置：`firmware-stm32porject/Drivers/`

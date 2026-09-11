@@ -234,6 +234,12 @@ UI harness: simulator/src/ui_harness.c（待机/收件箱/详情/删除 + 收件
   新增 `home`（16x32 大时钟）、`menu`（6 项图标菜单）、`radio`（真实 RSSI/SNR/AFC/EXN）、
   `about`、`confirm`；`inbox` 改为最新在上；新增 6x8 字体与细线 / 矩形 / 放大绘制图元。
   诚实留白：电池位未启用（无采样电路）、大时钟为开机计时（无 RTC）、Contrast 项模拟器空操作。
+- **Messenger 界面族**（版面参考 [GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)，
+  Apache-2.0，同样是 128x64 单色 LCD）：新增 `messenger`（启动器 + 24x24 大图标）、
+  `msginbox`（`*` 未读 + 正文预览 + `NOW`/`12m`/`3h` 年龄）、`msgsent`（送达 `+`/`x`/`-`）、
+  `msgread`（`FROM:`/`TO:` + 正文 + `REPLY`/`DEL`）、`compose`（`n/36` 计数 + `TX OFF`）；
+  数据模型 `simulator/src/msg_store.c` 支持 `ackNNN` 送达确认与按 `(from,id)` 去重。
+  取舍与偏离见 [UISkill.md](UISkill.md) 第 11 节。
 
 ### 8.4 后续（S4 候选）
 
