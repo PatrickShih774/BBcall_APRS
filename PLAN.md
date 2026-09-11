@@ -163,7 +163,44 @@ BK4802P FM 接收 → EAROP 音频（D 类 PWM）
 | 静噪影响解码 | 解码时保持音频通路常开；软件静噪默认关闭 |
 | 双向发射合规 | v1.0 前评估执照与发射滤波/天线切换 |
 
-## 8. 参考项目与许可
+## 8. PC 端 LCD 模拟器（SDL2）
+
+目标：在 PC 上用 SDL2 模拟 ST7567 128×64 单色点阵，**直接编译固件里的 `lcd_st7567.c` 绘图代码**，无需烧录 STM32 即可看到屏幕效果；并可注入测试 APRS 帧验证 UI。
+
+### 8.1 架构
+
+```text
+固件代码（复用）: lcd_st7567.c / font8x16.h / ax25.c / aprs.c
+        │ LCD_SIM 分支
+        ▼
+PC 后端: simulator/src/lcd_sim.c（SDL2 + ST7567 命令状态机）
+        │
+        ▼
+UI harness: simulator/src/ui_harness.c（棋盘格/待机/消息/收件箱）
+        │
+        ▼
+主程序: simulator/src/main.c（SDL 事件循环、按键、自检截图）
+```
+
+- `lcd_st7567.c` 加 `#ifdef LCD_SIM`：命令/数据走 `lcd_sim_*`，绘图/fb/字体完全复用；真机仍走 HAL GPIO。
+- `sim_hal.c`：最小 HAL/GPIO/延时桩，让 `lcd_st7567.c` 可在 PC 编译。
+- `lcd_sim.c`：实现 ST7567 命令子集（页/列地址、显示开关、反显、全亮、起始行、SEG/COM 方向），SDL2 渲染 128×64，支持放大、反显、背光、截图。
+- `ui_harness.c`：测试图案、待机界面、消息详情、收件箱；S2 接入真实 APRS 帧/日志回放。
+- 构建：`simulator/CMakeLists.txt`，SDL2 支持 MSYS2 / vcpkg / 便携 w64devkit+SDL2。
+
+### 8.2 阶段与验收
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| S1 | SDL2 骨架 + LCD 后端 + 测试画面 | 窗口显示 128×64；棋盘格/文字/反显/背光/截图正常；真机固件回归编译通过 |
+| S2 | UI harness + 按键 + 测试帧注入 | 收件箱/详情/删除可用；能显示 `test_aprs_144.wav` 的 APRS 消息 |
+| S3（可选） | PC 端 modem 仿真（WAV → DFT/HDLC → UI） | 不烧单片机即可跑通"音频→解码→LCD"全链路 |
+
+### 8.3 当前状态
+
+- S1 代码已写入 `simulator/`（`CMakeLists.txt`、`src/*.c/.h`、`README.md`），真机固件回归编译通过；
+- 本机当前没有 SDL2 与 x86 编译器，模拟器构建需先安装 SDL2 + MinGW/MSVC（见 `simulator/README.md`）。
+## 9. 参考项目与许可
 
 - MM-Radio（BSD-2-Clause，主参考/工程底座）；
 - BG5ESN FMO（MIT，频率字参考）；

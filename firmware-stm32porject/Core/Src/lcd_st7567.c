@@ -1,8 +1,16 @@
 /*
  * ST7567 128x64 LCD 驱动（GPIO 位敲 SPI：CS/CLK/MOSI + A0 + RST）
  * 帧缓冲 1024 字节（8 页 x 128 列），配合 font8x16.h（ASCII 8x16）。
+ *
+ * PC 模拟器：定义 LCD_SIM 时，命令/数据改走 lcd_sim_*（SDL2 后端），
+ * 绘图逻辑、fb、字体完全复用；真机仍走 HAL GPIO。
  */
+#ifdef LCD_SIM
+#include "sim_hal.h"
+#include "lcd_sim.h"
+#else
 #include "main.h"
+#endif
 #include "bbcall_cfg.h"
 #include "bbcall_hw.h"
 #include "lcd_st7567.h"
@@ -10,6 +18,7 @@
 
 static uint8_t fb[LCD_FB_BYTES];
 
+#ifndef LCD_SIM
 static void pin_hi(uint16_t p){ HAL_GPIO_WritePin(LCD_GPIO, p, GPIO_PIN_SET); }
 static void pin_lo(uint16_t p){ HAL_GPIO_WritePin(LCD_GPIO, p, GPIO_PIN_RESET); }
 
@@ -23,34 +32,51 @@ static void lcd_byte(uint8_t b)
     pin_lo(LCD_CLK_PIN);
   }
 }
+#endif
 
 static void lcd_cmd(uint8_t c)
 {
+#ifdef LCD_SIM
+  lcd_sim_cmd(c);
+#else
   pin_lo(LCD_CS_PIN);
   pin_lo(LCD_A0_PIN);            /* 命令 */
   lcd_byte(c);
   pin_hi(LCD_CS_PIN);
+#endif
 }
 
 static void lcd_cmd2(uint8_t c1, uint8_t c2)
 {
+#ifdef LCD_SIM
+  lcd_sim_cmd(c1);
+  lcd_sim_cmd(c2);
+#else
   pin_lo(LCD_CS_PIN);
   pin_lo(LCD_A0_PIN);
   lcd_byte(c1);
   lcd_byte(c2);
   pin_hi(LCD_CS_PIN);
+#endif
 }
 
 static void lcd_data_bytes(const uint8_t *d, uint16_t n)
 {
+#ifdef LCD_SIM
+  lcd_sim_data_bytes(d, n);
+#else
   pin_lo(LCD_CS_PIN);
   pin_hi(LCD_A0_PIN);            /* 数据 */
   for (uint16_t i = 0; i < n; i++) lcd_byte(d[i]);
   pin_hi(LCD_CS_PIN);
+#endif
 }
 
 void lcd_init(void)
 {
+#ifdef LCD_SIM
+  lcd_sim_reset();
+#else
   GPIO_InitTypeDef g = {0};
   __HAL_RCC_GPIOB_CLK_ENABLE();
   g.Pin = LCD_CS_PIN | LCD_CLK_PIN | LCD_MOSI_PIN | LCD_A0_PIN | LCD_RST_PIN;
@@ -67,6 +93,7 @@ void lcd_init(void)
   HAL_Delay(5);
   pin_hi(LCD_RST_PIN);
   HAL_Delay(5);
+#endif
 
   lcd_cmd(0xE2); lcd_cmd(0xAE);
   lcd_cmd(0x40); lcd_cmd(0xA1); lcd_cmd(0xC0);
@@ -145,5 +172,9 @@ void lcd_flush(void)
 
 void lcd_backlight(uint8_t on)
 {
+#ifdef LCD_SIM
+  lcd_sim_backlight(on);
+#else
   HAL_GPIO_WritePin(LCD_BL_GPIO, LCD_BL_PIN, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+#endif
 }

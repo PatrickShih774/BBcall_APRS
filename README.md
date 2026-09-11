@@ -16,6 +16,7 @@
 - [串口输出说明](#5-串口诊断字段说明)
 - [硬件改进方案](#9-硬件改进方案提升解码率)
 - [BB 机功能规划](PLAN.md)
+- [PC LCD 模拟器](#13-pc-端-lcd-模拟器sdl2)
 - [许可与合规](#11-许可与合规)
 
 用 **BK4802P（玩具对讲 FM 收发芯片）+ STM32F103C8T6 + ST7567 12864 LCD**
@@ -571,3 +572,15 @@ BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
 - [BG7QKU STM32_SIMPLE_CONTROL_BK4802N](https://github.com/BG7QKU)
 - [BG5ESN FMO BK4802 V2.00](https://github.com/BG5ESN/FMO-Radio-Module-BK4802-V2.00)
 - [VP-Digi](https://github.com/sq8vps/vp-digi)
+
+## 13. PC 端 LCD 模拟器（SDL2）
+
+用 SDL2 在 PC 上模拟 ST7567 128×64 单色点阵，直接编译固件里的 `lcd_st7567.c` 绘图代码，无需烧录即可看屏幕效果。
+
+- 代码目录：`simulator/`（CMake + `src/lcd_sim.c` + `src/ui_harness.c` + `src/main.c`）；
+- 复用固件代码：`lcd_st7567.c`、`font8x16.h`（`LCD_SIM` 条件分支），绘图逻辑与真机一致；
+- 按键：↑/↓ 上下、Enter 确定、Backspace 返回、T 测试图案、M 消息、S 待机、I 反显、B 背光、F12 截图、Esc 退出；
+- 构建说明见 `simulator/README.md`（MSYS2/vcpkg/便携 w64devkit+SDL2）；
+- 无窗口自检：`bbcall_sim --selftest`，生成 `sim_selftest.bmp`。
+
+当前 S1 代码已就绪，真机固件回归编译通过；本机尚无 SDL2/x86 编译器，需先安装 SDL2 工具链后构建模拟器。
