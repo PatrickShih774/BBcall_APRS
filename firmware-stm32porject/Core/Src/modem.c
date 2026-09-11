@@ -21,8 +21,9 @@ typedef struct {
 } modem_dec_t;
 
 static modem_dec_t s_dec[MODEM_NPHASE];
-static ax25_frame_t s_frame;
-static uint8_t s_frame_ready = 0;
+#define MODEM_QN 4u
+static ax25_frame_t s_q[MODEM_QN];
+static volatile uint8_t s_q_head = 0, s_q_tail = 0;
 
 static int16_t s_ring[8];              /* 最近 8 个去直流样本 */
 static uint32_t s_nsamp = 0;           /* 累计采样数 */
@@ -51,6 +52,14 @@ static const int8_t K_SIN1[8] = {  0, 45,  64,  45,   0, -45, -64, -45 };
 static const int8_t K_COS2[8] = { 64,  8, -62, -24,  55,  39, -45, -51 };
 static const int8_t K_SIN2[8] = {  0, 63,  17, -59, -32,  51,  45, -39 };
 
+static void modem_push_frame(const ax25_frame_t *f)
+{
+  uint8_t nh = (uint8_t)((s_q_head + 1u) & (MODEM_QN - 1u));
+  if (nh == s_q_tail) return;          /* 队列满：丢弃最新帧 */
+  s_q[s_q_head] = *f;
+  s_q_head = nh;
+}
+
 static void dec_reset(modem_dec_t *d)
 {
   d->have = 0;
@@ -74,7 +83,7 @@ void modem_reset_sync(void)
   s_adc_min = 0xFFFFu;
   s_adc_max = 0;
   s_last_tone = 0;
-  s_frame_ready = 0;
+  s_q_head = 0; s_q_tail = 0;
   s_mark_hits = 0;
   s_space_hits = 0;
   s_other_hits = 0;
@@ -97,8 +106,7 @@ static void feed_dec(uint8_t idx, uint8_t tone)
   ax25_frame_t f;
   if (ax25_hdlc_feed_bit(&d->hdlc, bit, &f)) {
     if (ax25_check_frame(f.frame, f.len)) {
-      memcpy(&s_frame, &f, sizeof(f));
-      s_frame_ready = 1;
+      modem_push_frame(&f);
     }
   }
 }
@@ -162,8 +170,7 @@ void modem_adc_sample(uint16_t adc)
       ax25_frame_t f;
       if (ax25_hdlc_feed_bit(&s_tr_hdlc, bit, &f)) {
         if (ax25_check_frame(f.frame, f.len)) {
-          memcpy(&s_frame, &f, sizeof(f));
-          s_frame_ready = 1;
+          modem_push_frame(&f);
         }
       }
     }
@@ -200,8 +207,8 @@ void modem_get_stats(uint16_t *mark, uint16_t *space, uint16_t *other)
 
 uint8_t modem_get_frame(ax25_frame_t *out)
 {
-  if (!s_frame_ready || !out) return 0;
-  memcpy(out, &s_frame, sizeof(s_frame));
-  s_frame_ready = 0;
+  if (!out || s_q_tail == s_q_head) return 0;
+  *out = s_q[s_q_tail];
+  s_q_tail = (uint8_t)((s_q_tail + 1u) & (MODEM_QN - 1u));
   return 1;
 }

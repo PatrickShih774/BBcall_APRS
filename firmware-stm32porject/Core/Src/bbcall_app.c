@@ -28,6 +28,7 @@ void bbcall_app_init(void)
   hw_board_pins_init();
   hw_console_init(CONSOLE_BAUD);
   hw_console_puts("\r\n[BBcall_APRS] boot\r\n");
+  hw_console_puts(hw_clock_is72() ? "[CLK] HSE 72MHz\r\n" : "[CLK] HSI (check 8MHz HSE)\r\n");
   bk4802_init();                /* CE(PA0) 拉高、DIO1(PA8) 拉低、SCL/SDA 就绪 */
   bk4802_enter_rx();
   bk4802_set_rx_freq_mhz(BBCALL_DEF_FREQ_MHZ);
@@ -122,6 +123,7 @@ void bbcall_app_loop(void)
   static uint32_t rx_count = 0, dup_count = 0;
   static char uniq[16][7];
   static uint8_t n_uniq = 0;
+  static uint32_t last_frame_tick = 0;
 
   if (modem_get_frame(&fr)) {
     /* 重复包抑制：同一帧 60s 内只打印一次，避免串口刷屏 */
@@ -143,6 +145,7 @@ void bbcall_app_loop(void)
       hw_console_puts("\r\n");
     } else {
       rx_count++;
+      last_frame_tick = now_ms;
       dup_hash[dup_pos] = fh;
       for (uint8_t i = 0; i < 6u; i++) dup_name[dup_pos][i] = fname[i];
       dup_name[dup_pos][6] = '\0';
@@ -155,11 +158,13 @@ void bbcall_app_loop(void)
         uniq[n_uniq][6] = '\0';
         n_uniq++;
       }
+#if BBCALL_RAW_LOG
     hw_console_puts("\r\n[RAW] len=");
     hw_console_u16(fr.len);
     hw_console_puts(" hex=");
     for (uint8_t i = 0; i < fr.len; i++) hw_console_hex8(fr.frame[i]);
     hw_console_puts("\r\n");
+#endif
     ax25_decoded_t d;
     if (ax25_decode(fr.frame, fr.len, &d)) {
       hw_console_puts("\r\n[FRAME] src=");
@@ -265,12 +270,18 @@ void bbcall_app_loop(void)
     /* 诊断：打印读回的寄存器原始值，判断 I2C 读与 S-meter 映射 */
     uint16_t r24 = bk4802_read_reg(24);
     uint8_t rssi_now = (uint8_t)(r24 & 0x00FFu);
-    /* 自适应中频增益（带迟滞）：弱信号提高增益、强信号降低，5km 弱台可多 3~6dB */
+    /* 自适应中频增益（带迟滞）：弱信号提高增益、强信号降低。
+     * 强信号下 I2C 读可能失效（0xFFFF / RSSI>127），此时不调整；
+     * 刚收到帧的 1 秒内也不切换增益，避免包中途改变增益影响解码。 */
+    uint8_t rssi_ok = (r24 != 0xFFFFu) && (rssi_now <= 127u);
+    uint8_t can_adjust = rssi_ok && ((HAL_GetTick() - last_frame_tick) > 1000u);
     static uint8_t if_code = BK4802_IF_GAIN_CODE;
     uint8_t new_code = if_code;
-    if (if_code >= 6u) { if (rssi_now >= 105u) new_code = 5u; }
-    else if (if_code == 5u) { if (rssi_now >= 115u) new_code = 4u; else if (rssi_now < 90u) new_code = 6u; }
-    else { if (rssi_now < 100u) new_code = 5u; }
+    if (can_adjust) {
+      if (if_code >= 6u) { if (rssi_now >= 105u) new_code = 5u; }
+      else if (if_code == 5u) { if (rssi_now >= 115u) new_code = 4u; else if (rssi_now < 90u) new_code = 6u; }
+      else { if (rssi_now < 100u) new_code = 5u; }
+    }
     if (new_code != if_code) { if_code = new_code; bk4802_set_if_gain_code(if_code); }
     hw_console_puts("R19=");
     hw_console_u16(bk4802_read_reg(19));

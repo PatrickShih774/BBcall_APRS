@@ -64,8 +64,10 @@
 #define BK4802_SQ_MULT        3u   /* 噪声倍率 x16 */
 #define BK4802_SQ_RSSI_THR    0u   /* RSSI 阈值为 0：不靠 RSSI 关门 */
 #define BK4802_SQ_NOISE_THR  0xFFu /* 噪声上限 255×16：始终满足开喇叭条件 */
-/* 软件静噪总开关：0=关闭（音频常开，方便解码调试）；1=启用 */
+/* 软件静噪总开关：0=关闭（音频常开，PA1 才能持续解码）；1=启用 */
 #define BBCALL_SW_SQUELCH     0u
+/* 串口 RAW 十六进制输出：0=不打印（减少串口占用，利于连续接收+解码） */
+#define BBCALL_RAW_LOG        1u
 /* ---------- 默认接收频率 ---------- */
 #ifndef BBCALL_DEF_FREQ_MHZ
 #define BBCALL_DEF_FREQ_MHZ 144.64
