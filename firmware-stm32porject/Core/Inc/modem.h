@@ -18,4 +18,6 @@ void modem_get_adc_range(uint16_t *min, uint16_t *max);
 void modem_get_stats(uint16_t *mark, uint16_t *space, uint16_t *other);
 /* 拿到解码后的整帧（0=无） */
 uint8_t modem_get_frame(ax25_frame_t *out);
+uint16_t modem_get_fix_count(void);
+uint8_t modem_frame_was_fixed(void);
 #endif

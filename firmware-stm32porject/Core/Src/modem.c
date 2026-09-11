@@ -24,6 +24,11 @@ static modem_dec_t s_dec[MODEM_NPHASE];
 #define MODEM_QN 4u
 static ax25_frame_t s_q[MODEM_QN];
 static volatile uint8_t s_q_head = 0, s_q_tail = 0;
+#define MODEM_BADN 3u
+static ax25_frame_t s_bad_q[MODEM_BADN];
+static volatile uint8_t s_bad_head = 0, s_bad_tail = 0;
+static uint16_t s_fix_count = 0;
+static uint8_t s_last_fixed = 0;
 
 static int16_t s_ring[8];              /* 最近 8 个去直流样本 */
 static uint32_t s_nsamp = 0;           /* 累计采样数 */
@@ -59,6 +64,13 @@ static void modem_push_frame(const ax25_frame_t *f)
   s_q[s_q_head] = *f;
   s_q_head = nh;
 }
+static void modem_push_bad(const ax25_frame_t *f)
+{
+  uint8_t nh = (uint8_t)((s_bad_head + 1u) & (MODEM_BADN - 1u));
+  if (nh == s_bad_tail) return;          /* 待纠错队列满：丢弃 */
+  s_bad_q[s_bad_head] = *f;
+  s_bad_head = nh;
+}
 
 static void dec_reset(modem_dec_t *d)
 {
@@ -83,7 +95,7 @@ void modem_reset_sync(void)
   s_adc_min = 0xFFFFu;
   s_adc_max = 0;
   s_last_tone = 0;
-  s_q_head = 0; s_q_tail = 0;
+  s_q_head = 0; s_q_tail = 0; s_bad_head = 0; s_bad_tail = 0; s_fix_count = 0;
   s_mark_hits = 0;
   s_space_hits = 0;
   s_other_hits = 0;
@@ -107,6 +119,8 @@ static void feed_dec(uint8_t idx, uint8_t tone)
   if (ax25_hdlc_feed_bit(&d->hdlc, bit, &f)) {
     if (ax25_check_frame(f.frame, f.len)) {
       modem_push_frame(&f);
+    } else if (ax25_plausible(f.frame, f.len)) {
+      modem_push_bad(&f);
     }
   }
 }
@@ -170,8 +184,10 @@ void modem_adc_sample(uint16_t adc)
       ax25_frame_t f;
       if (ax25_hdlc_feed_bit(&s_tr_hdlc, bit, &f)) {
         if (ax25_check_frame(f.frame, f.len)) {
-          modem_push_frame(&f);
-        }
+      modem_push_frame(&f);
+    } else if (ax25_plausible(f.frame, f.len)) {
+      modem_push_bad(&f);
+    }
       }
     }
     s_tr_prev_tone = tone;
@@ -205,10 +221,34 @@ void modem_get_stats(uint16_t *mark, uint16_t *space, uint16_t *other)
   if (other) *other = s_other_hits;
 }
 
+uint16_t modem_get_fix_count(void)
+{
+  return s_fix_count;
+}
+
+uint8_t modem_frame_was_fixed(void)
+{
+  return s_last_fixed;
+}
+
 uint8_t modem_get_frame(ax25_frame_t *out)
 {
-  if (!out || s_q_tail == s_q_head) return 0;
-  *out = s_q[s_q_tail];
-  s_q_tail = (uint8_t)((s_q_tail + 1u) & (MODEM_QN - 1u));
-  return 1;
+  if (!out) return 0;
+  if (s_q_tail != s_q_head) {
+    *out = s_q[s_q_tail];
+    s_q_tail = (uint8_t)((s_q_tail + 1u) & (MODEM_QN - 1u));
+    s_last_fixed = 0;
+    return 1;
+  }
+  while (s_bad_tail != s_bad_head) {
+    ax25_frame_t f = s_bad_q[s_bad_tail];
+    s_bad_tail = (uint8_t)((s_bad_tail + 1u) & (MODEM_BADN - 1u));
+    if (ax25_correct_single_bit(f.frame, f.len)) {
+      s_fix_count++;
+      s_last_fixed = 1;
+      *out = f;
+      return 1;
+    }
+  }
+  return 0;
 }

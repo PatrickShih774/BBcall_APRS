@@ -69,7 +69,43 @@ static void decode_call(const uint8_t *a7, char *call, uint8_t *ssid)
   *ssid = (uint8_t)((a7[6] >> 1) & 0x0Fu);
 }
 
-uint8_t ax25_decode(const uint8_t *body, uint16_t len, ax25_decoded_t *out)
+
+uint8_t ax25_plausible(const uint8_t *frame, uint16_t len)
+{
+  if (!frame || len < 18u || len > 150u) return 0;
+  uint8_t alnum = 0;
+  for (uint8_t a = 0; a < 2u; a++) {
+    for (uint8_t i = 0; i < 6u; i++) {
+      uint8_t c = (uint8_t)((frame[a * 7u + i] >> 1) & 0x7Fu);
+      if (c == 0x20u) continue;
+      if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z'))) return 0;
+      alnum = 1;
+    }
+  }
+  if (!alnum) return 0;
+  uint16_t idx = 14u;
+  while ((frame[idx - 1u] & 0x01u) == 0u) {
+    if ((idx + 7u) > len || idx > 70u) return 0;
+    idx += 7u;
+  }
+  if ((idx + 2u) > len) return 0;
+  if (frame[idx] != 0x03u) return 0;       /* AX.25 UI 帧 */
+  if (frame[idx + 1u] != 0xF0u) return 0;  /* APRS PID */
+  return 1;
+}
+
+uint8_t ax25_correct_single_bit(uint8_t *frame, uint16_t len)
+{
+  if (!frame || len < 15u || len > 160u) return 0;   /* 限制运算量，典型 APRS 帧 60~120 字节 */
+  for (uint16_t i = 0; i < len; i++) {
+    for (uint8_t b = 0; b < 8u; b++) {
+      frame[i] ^= (uint8_t)(1u << b);
+      if (ax25_check_frame(frame, len)) return 1;
+      frame[i] ^= (uint8_t)(1u << b);
+    }
+  }
+  return 0;
+}uint8_t ax25_decode(const uint8_t *body, uint16_t len, ax25_decoded_t *out)
 {
   if (!ax25_check_frame(body, len)) return 0;
   memset(out, 0, sizeof(*out));
