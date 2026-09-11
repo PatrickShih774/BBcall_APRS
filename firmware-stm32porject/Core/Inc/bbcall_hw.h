@@ -15,6 +15,7 @@ void hw_console_putc(char c);
 void hw_console_puts(const char *s);
 void hw_console_u8(uint8_t v);
 void hw_console_u16(uint16_t v);
+void hw_console_u32(uint32_t v);
 void hw_console_hex8(uint8_t v);
 void hw_console_hex16(uint16_t v);
 /* 寄存器级 TIM3 9600Hz ADC 采样（中断回调进 modem） */

@@ -129,6 +129,9 @@ void bbcall_app_loop(void)
   if (modem_get_frame(&fr)) {
     if (modem_frame_was_fixed()) hw_console_puts("[FIX] ");
     else if (modem_frame_was_repeat()) hw_console_puts("[REP] ");
+    hw_console_puts("[T=");
+    hw_console_u32(HAL_GetTick());
+    hw_console_puts("ms] ");
     /* 重复包抑制：同一帧 60s 内只打印一次，避免串口刷屏 */
     uint16_t fh = 0;
     for (uint16_t i = 0; i < fr.len; i++) fh = (uint16_t)((fh << 5) ^ (fh >> 2) ^ fr.frame[i]);

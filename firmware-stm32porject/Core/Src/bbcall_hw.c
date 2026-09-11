@@ -151,7 +151,19 @@ void hw_console_u16(uint16_t v)
   hw_console_puts(b);
 }
 
-void hw_console_hex16(uint16_t v)
+
+void hw_console_u32(uint32_t v)
+{
+  char b[11];
+  uint8_t n = 0;
+  if (v == 0u) { hw_console_putc('0'); return; }
+  char t[10];
+  uint8_t m = 0;
+  while (v > 0u && m < 10u) { t[m++] = (char)('0' + (v % 10u)); v /= 10u; }
+  while (m > 0u) b[n++] = t[--m];
+  b[n] = '\0';
+  hw_console_puts(b);
+}void hw_console_hex16(uint16_t v)
 {
   static const char hx[] = "0123456789ABCDEF";
   char b[5];
