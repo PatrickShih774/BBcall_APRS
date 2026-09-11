@@ -41,14 +41,21 @@ static uint8_t s_last_tone = 0;        /* 0=无 1=mark 2=space */
 static uint16_t s_mark_hits = 0;
 static uint16_t s_space_hits = 0;
 static uint16_t s_other_hits = 0;
-static ax25_hdlc_t s_tr_hdlc;
+#define TR_N 9u
+typedef struct {
+  ax25_hdlc_t hdlc;
+  int32_t next_q8;
+  int32_t period_q8;
+  uint8_t prev_tone;
+  uint8_t have_tone;
+} tr_dec_t;
+static tr_dec_t s_trd[TR_N];
+static const int32_t tr_period_q8[3] = { 2022, 2048, 2074 };  /* 7.90 / 8.00 / 8.10 采样/bit */
+static const int32_t tr_off_q8[3] = { -128, 0, 128 };          /* ±0.5 采样相位 */
 static int32_t s_tr_last_sign = 0;
 static int32_t s_tr_cand_sign = 0;
 static uint8_t s_tr_cand_cnt = 0;
 static uint32_t s_tr_ncross = 0;
-static int32_t s_tr_next_sample = -1;
-static uint8_t s_tr_prev_tone = 0;
-static uint8_t s_tr_have_tone = 0;
 static uint8_t s_tr_have_sign = 0;
 
 /* 8 点 × 1200/2200Hz 的 cos/sin 表，缩放 64 倍（9600Hz 采样） */
@@ -99,9 +106,14 @@ void modem_reset_sync(void)
   s_mark_hits = 0;
   s_space_hits = 0;
   s_other_hits = 0;
-  ax25_hdlc_init(&s_tr_hdlc);
-  s_tr_last_sign = 0; s_tr_cand_sign = 0; s_tr_cand_cnt = 0; s_tr_ncross = 0;
-  s_tr_next_sample = -1; s_tr_prev_tone = 0; s_tr_have_tone = 0; s_tr_have_sign = 0;
+  for (uint8_t i = 0; i < TR_N; i++) {
+    ax25_hdlc_init(&s_trd[i].hdlc);
+    s_trd[i].period_q8 = tr_period_q8[i % 3u];
+    s_trd[i].next_q8 = -1;
+    s_trd[i].prev_tone = 0;
+    s_trd[i].have_tone = 0;
+  }
+  s_tr_last_sign = 0; s_tr_cand_sign = 0; s_tr_cand_cnt = 0; s_tr_ncross = 0; s_tr_have_sign = 0;
 }
 
 static void feed_dec(uint8_t idx, uint8_t tone)
@@ -175,27 +187,37 @@ void modem_adc_sample(uint16_t adc)
       (!s_tr_have_sign || s_tr_cand_sign != s_tr_last_sign)) {
     s_tr_last_sign = s_tr_cand_sign;
     s_tr_have_sign = 1;
-    s_tr_next_sample = (int32_t)s_tr_ncross + 4;
-  }
-  if (s_tr_next_sample >= 0 && (int32_t)(s_nsamp - 1u) >= s_tr_next_sample) {
-    uint8_t tone = (v >= 0) ? 0u : 1u;
-    if (s_tr_have_tone) {
-      uint8_t bit = (tone == s_tr_prev_tone) ? 1u : 0u;
-      ax25_frame_t f;
-      if (ax25_hdlc_feed_bit(&s_tr_hdlc, bit, &f)) {
-        if (ax25_check_frame(f.frame, f.len)) {
-      modem_push_frame(&f);
-    } else if (ax25_plausible(f.frame, f.len)) {
-      modem_push_bad(&f);
+    int32_t base_q8 = (int32_t)s_tr_ncross * 256;
+    for (uint8_t i = 0; i < TR_N; i++) {
+      s_trd[i].next_q8 = base_q8 + s_trd[i].period_q8 / 2 + tr_off_q8[i / 3u];
     }
+  }
+  {
+    int32_t cur_q8 = (int32_t)(s_nsamp - 1u) * 256;
+    for (uint8_t i = 0; i < TR_N; i++) {
+      tr_dec_t *d = &s_trd[i];
+      if (d->next_q8 < 0 || cur_q8 < d->next_q8) continue;
+      if (cur_q8 - d->next_q8 > d->period_q8 * 8) {   /* 落后太多：重新对准 */
+        d->next_q8 = cur_q8 + d->period_q8 / 2;
+        continue;
       }
+      uint8_t tone = (v >= 0) ? 0u : 1u;
+      if (d->have_tone) {
+        uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;
+        ax25_frame_t f;
+        if (ax25_hdlc_feed_bit(&d->hdlc, bit, &f)) {
+          if (ax25_check_frame(f.frame, f.len)) {
+            modem_push_frame(&f);
+          } else if (ax25_plausible(f.frame, f.len)) {
+            modem_push_bad(&f);
+          }
+        }
+      }
+      d->prev_tone = tone;
+      d->have_tone = 1;
+      d->next_q8 += d->period_q8;
     }
-    s_tr_prev_tone = tone;
-    s_tr_have_tone = 1;
-    s_tr_next_sample += 8;
-  }
-
-  s_last_tone = (uint8_t)(tone_full + 1u);
+  }  s_last_tone = (uint8_t)(tone_full + 1u);
   if (tone_full == 0u) s_mark_hits++; else s_space_hits++;
 }
 
