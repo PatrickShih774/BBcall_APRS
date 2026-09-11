@@ -25,6 +25,14 @@ typedef struct {
     char symbol_table;
 } aprs_mice_t;
 
+typedef struct {
+    uint8_t valid;
+    char lat[10];        /* 例如 2954.05N */
+    char lon[11];        /* 例如 12132.86E */
+    char comment[APRS_BODY_MAX];
+} aprs_position_t;
+
 uint8_t aprs_parse_message(const uint8_t *info, uint16_t len, aprs_message_t *m);
+uint8_t aprs_parse_position(const uint8_t *info, uint16_t len, aprs_position_t *p);
 uint8_t aprs_parse_mice(const char *dest, const uint8_t *info, uint16_t len, aprs_mice_t *m);
 #endif

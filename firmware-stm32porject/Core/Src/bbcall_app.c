@@ -8,6 +8,7 @@
 #include "modem.h"
 #include "ax25.h"
 #include "aprs.h"
+#include <string.h>
 
 #ifndef BBCALL_LCD_ENABLED
 #define BBCALL_LCD_ENABLED 0u   /* LCD 未焊接前：纯串口调试 */
@@ -114,8 +115,46 @@ void bbcall_app_loop(void)
 #endif
   static uint8_t audio_muted = BBCALL_SW_SQUELCH ? 1u : 0u;
   ax25_frame_t fr;
+  static uint16_t dup_hash[8];
+  static char dup_name[8][7];
+  static uint32_t dup_time[8];
+  static uint8_t dup_pos = 0;
+  static uint32_t rx_count = 0, dup_count = 0;
+  static char uniq[16][7];
+  static uint8_t n_uniq = 0;
 
   if (modem_get_frame(&fr)) {
+    /* 重复包抑制：同一帧 60s 内只打印一次，避免串口刷屏 */
+    uint16_t fh = 0;
+    for (uint16_t i = 0; i < fr.len; i++) fh = (uint16_t)((fh << 5) ^ (fh >> 2) ^ fr.frame[i]);
+    char fname[7];
+    for (uint8_t i = 0; i < 6u; i++) fname[i] = (char)((fr.frame[7u + i] >> 1) & 0x7Fu);
+    fname[6] = '\0';
+    uint32_t now_ms = HAL_GetTick();
+    uint8_t is_dup = 0;
+    for (uint8_t i = 0; i < 8u; i++) {
+      if (dup_name[i][0] && dup_hash[i] == fh && strcmp(dup_name[i], fname) == 0 &&
+          (now_ms - dup_time[i]) < 60000u) { is_dup = 1; break; }
+    }
+    if (is_dup) {
+      dup_count++;
+      hw_console_puts("[DUP] src=");
+      hw_console_puts(fname);
+      hw_console_puts("\r\n");
+    } else {
+      rx_count++;
+      dup_hash[dup_pos] = fh;
+      for (uint8_t i = 0; i < 6u; i++) dup_name[dup_pos][i] = fname[i];
+      dup_name[dup_pos][6] = '\0';
+      dup_time[dup_pos] = now_ms;
+      dup_pos = (uint8_t)((dup_pos + 1u) & 7u);
+      uint8_t found = 0;
+      for (uint8_t i = 0; i < n_uniq; i++) if (strcmp(uniq[i], fname) == 0) { found = 1; break; }
+      if (!found && n_uniq < 16u) {
+        for (uint8_t i = 0; i < 6u; i++) uniq[n_uniq][i] = fname[i];
+        uniq[n_uniq][6] = '\0';
+        n_uniq++;
+      }
     hw_console_puts("\r\n[RAW] len=");
     hw_console_u16(fr.len);
     hw_console_puts(" hex=");
@@ -163,7 +202,17 @@ void bbcall_app_loop(void)
         hw_console_puts(" comment=");
         hw_console_puts(mi.comment);
         hw_console_puts("\r\n");
-      }      aprs_message_t m;
+      }
+      aprs_position_t pos;
+      if (aprs_parse_position(d.info, d.info_len, &pos)) {
+        hw_console_puts(" [POS] lat=");
+        hw_console_puts(pos.lat);
+        hw_console_puts(" lon=");
+        hw_console_puts(pos.lon);
+        if (pos.comment[0]) { hw_console_puts(" comment="); hw_console_puts(pos.comment); }
+        hw_console_puts("\r\n");
+      }
+      aprs_message_t m;
       if (aprs_parse_message(d.info, d.info_len, &m)) {
         hw_console_puts(" msg=");
         for (uint8_t i = 0; i < m.body_len; i++) hw_console_putc((char)m.body[i]);
@@ -178,6 +227,7 @@ void bbcall_app_loop(void)
         lcd_flush();
 #endif
       }
+    }
     }
   }
 
@@ -230,6 +280,9 @@ void bbcall_app_loop(void)
     hw_console_u16((r24 & 0x3F00u) >> 8);
     hw_console_puts(" G=");
     hw_console_u8(if_code);
+    hw_console_puts(" RX="); hw_console_u16((uint16_t)rx_count);
+    hw_console_puts(" U="); hw_console_u8(n_uniq);
+    hw_console_puts(" DUP="); hw_console_u16((uint16_t)dup_count);
     hw_console_puts(" AFC=");
     hw_console_u16(bk4802_read_reg(25) & 0x00FFu);
     hw_console_puts(" EXN=");

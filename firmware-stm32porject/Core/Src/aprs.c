@@ -29,7 +29,40 @@ uint8_t aprs_parse_message(const uint8_t *info, uint16_t len, aprs_message_t *m)
   return 1;
 }
 
-/* ---------------- Mic-E ---------------- */
+
+/* ---------------- 普通 APRS 位置（非压缩格式） ---------------- */
+
+uint8_t aprs_parse_position(const uint8_t *info, uint16_t len, aprs_position_t *p)
+{
+  if (!info || !p || len < 19u) return 0;
+  uint8_t t = info[0];
+  uint16_t s;
+  if (t == '!' || t == '=') s = 1u;          /* 无时间戳 */
+  else if (t == '/' || t == '@') s = 8u;     /* 7 字节时间戳 */
+  else return 0;
+  if (len < (uint16_t)(s + 19u)) return 0;
+  if (!(info[s] >= '0' && info[s] <= '9')) return 0;   /* 压缩格式暂不支持 */
+
+  memset(p, 0, sizeof(*p));
+  /* 纬度 ddmm.hhN/S */
+  for (uint8_t i = 0; i < 8u; i++) p->lat[i] = (char)info[s + i];
+  p->lat[8] = '\0';
+  /* 经度 dddmm.hhE/W（前面还有 1 字节符号表） */
+  for (uint8_t i = 0; i < 9u; i++) p->lon[i] = (char)info[s + 9u + i];
+  p->lon[9] = '\0';
+
+  uint16_t ci = (uint16_t)(s + 19u);
+  uint16_t cl = 0;
+  while (ci < len && cl < (uint16_t)(sizeof(p->comment) - 1u)) {
+    uint8_t ch = info[ci++];
+    if (ch == '\r' || ch == '\n') break;
+    p->comment[cl++] = (char)ch;
+  }
+  while (cl > 0 && p->comment[cl - 1] == ' ') cl--;
+  p->comment[cl] = '\0';
+  p->valid = 1;
+  return 1;
+}/* ---------------- Mic-E ---------------- */
 
 static uint8_t dig2(const char *p)
 {
