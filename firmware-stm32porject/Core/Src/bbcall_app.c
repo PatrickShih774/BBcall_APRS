@@ -296,6 +296,7 @@ void bbcall_app_loop(void)
     hw_console_puts(" U="); hw_console_u8(n_uniq);
     hw_console_puts(" DUP="); hw_console_u16((uint16_t)dup_count);
     hw_console_puts(" FIX="); hw_console_u16(modem_get_fix_count());
+    hw_console_puts(" FIX2="); hw_console_u16(modem_get_fix2_count());
     hw_console_puts(" AFC=");
     hw_console_u16(bk4802_read_reg(25) & 0x00FFu);
     hw_console_puts(" EXN=");

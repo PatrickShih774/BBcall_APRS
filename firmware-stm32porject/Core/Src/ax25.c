@@ -70,6 +70,39 @@ static void decode_call(const uint8_t *a7, char *call, uint8_t *ssid)
 }
 
 
+/* ---------- 2-bit 纠错（CRC 校正子表） ---------- */
+#define AX25_SYN_MAX_BITS (160u * 8u)
+static uint16_t s_syn[AX25_SYN_MAX_BITS];
+
+static uint16_t crc_step_zero(uint16_t c)
+{
+  return (uint16_t)((c & 1u) ? ((c >> 1) ^ 0x8408u) : (c >> 1));
+}
+
+uint8_t ax25_correct_two_bits(uint8_t *frame, uint16_t len)
+{
+  if (!frame || len < 15u || len > 160u) return 0;
+  uint16_t nbits = (uint16_t)(len * 8u);
+  uint16_t s = 0x8408u;
+  for (int k = (int)nbits - 1; k >= 0; k--) {
+    s_syn[k] = s;
+    s = crc_step_zero(s);
+  }
+  uint16_t target = (uint16_t)(crc_x25(frame, len) ^ 0xF0B8u);
+  for (uint16_t i = 0; i < nbits; i++) {
+    uint16_t si = s_syn[i];
+    for (uint16_t j = (uint16_t)(i + 1u); j < nbits; j++) {
+      if ((uint16_t)(si ^ s_syn[j]) == target) {
+        frame[i >> 3] ^= (uint8_t)(1u << (i & 7u));
+        frame[j >> 3] ^= (uint8_t)(1u << (j & 7u));
+        if (ax25_check_frame(frame, len)) return 1;
+        frame[i >> 3] ^= (uint8_t)(1u << (i & 7u));
+        frame[j >> 3] ^= (uint8_t)(1u << (j & 7u));
+      }
+    }
+  }
+  return 0;
+}
 uint8_t ax25_plausible(const uint8_t *frame, uint16_t len)
 {
   if (!frame || len < 18u || len > 150u) return 0;

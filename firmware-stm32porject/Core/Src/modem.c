@@ -28,6 +28,7 @@ static volatile uint8_t s_q_head = 0, s_q_tail = 0;
 static ax25_frame_t s_bad_q[MODEM_BADN];
 static volatile uint8_t s_bad_head = 0, s_bad_tail = 0;
 static uint16_t s_fix_count = 0;
+static uint16_t s_fix2_count = 0;
 static uint8_t s_last_fixed = 0;
 
 static int16_t s_ring[8];              /* 最近 8 个去直流样本 */
@@ -253,6 +254,11 @@ uint8_t modem_frame_was_fixed(void)
   return s_last_fixed;
 }
 
+uint16_t modem_get_fix2_count(void)
+{
+  return s_fix2_count;
+}
+
 uint8_t modem_get_frame(ax25_frame_t *out)
 {
   if (!out) return 0;
@@ -266,6 +272,13 @@ uint8_t modem_get_frame(ax25_frame_t *out)
     ax25_frame_t f = s_bad_q[s_bad_tail];
     s_bad_tail = (uint8_t)((s_bad_tail + 1u) & (MODEM_BADN - 1u));
     if (ax25_correct_single_bit(f.frame, f.len)) {
+      s_fix_count++;
+      s_last_fixed = 1;
+      *out = f;
+      return 1;
+    }
+    if (ax25_correct_two_bits(f.frame, f.len)) {
+      s_fix2_count++;
       s_fix_count++;
       s_last_fixed = 1;
       *out = f;

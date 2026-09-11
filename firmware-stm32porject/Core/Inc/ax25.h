@@ -31,6 +31,8 @@ typedef struct {
 uint8_t ax25_check_frame(const uint8_t *body, uint16_t len);
 /* 尝试纠正 1 bit 错误（仅用于 CRC 失败的候选帧，主循环调用） */
 uint8_t ax25_correct_single_bit(uint8_t *frame, uint16_t len);
+/* 尝试纠正 2 bit 错误（CRC 校正子表，主循环调用） */
+uint8_t ax25_correct_two_bits(uint8_t *frame, uint16_t len);
 /* 地址字段是否像合法 AX.25 帧（用于过滤错误相位的垃圾帧） */
 uint8_t ax25_plausible(const uint8_t *frame, uint16_t len);
 uint8_t ax25_decode(const uint8_t *body, uint16_t len, ax25_decoded_t *out);

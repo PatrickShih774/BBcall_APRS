@@ -20,4 +20,5 @@ void modem_get_stats(uint16_t *mark, uint16_t *space, uint16_t *other);
 uint8_t modem_get_frame(ax25_frame_t *out);
 uint16_t modem_get_fix_count(void);
 uint8_t modem_frame_was_fixed(void);
+uint16_t modem_get_fix2_count(void);
 #endif
