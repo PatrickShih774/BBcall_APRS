@@ -15,9 +15,11 @@ add_executable(bbcall_sim
   src/sim_hal.c
   src/lcd_sim.c
   src/ui_harness.c
+  src/sim_feed.c
   ${FW}/Core/Src/lcd_st7567.c
   ${FW}/Core/Src/ax25.c
   ${FW}/Core/Src/aprs.c
+  ${FW}/Core/Src/modem.c
 )
 
 target_include_directories(bbcall_sim PRIVATE

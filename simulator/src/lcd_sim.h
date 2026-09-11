@@ -9,6 +9,7 @@
 #define SIM_KEY_PATTERN  5
 #define SIM_KEY_MESSAGE  6
 #define SIM_KEY_STANDBY  7
+#define SIM_KEY_DEL      8
 
 int  lcd_sim_init(const char *title, int scale);
 void lcd_sim_shutdown(void);
@@ -18,6 +19,7 @@ void lcd_sim_render(void);
 void lcd_sim_save_bmp(const char *path);
 void lcd_sim_toggle_invert(void);
 void lcd_sim_toggle_backlight(void);
+void lcd_sim_toggle_panel(void);
 int  lcd_sim_get_key(void);
 
 /* 供 lcd_st7567.c 的 LCD_SIM 分支调用 */

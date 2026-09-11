@@ -93,7 +93,7 @@ void lcd_init(void)
     lcd_cmd(0xE2);          /* 软复位 */
     lcd_cmd(0xAE);          /* 显示关 */
     lcd_cmd(0x40);          /* 起始行 0 */
-    lcd_cmd(0xA1);          /* 段方向（左->右） */
+    lcd_cmd(0xA0);          /* 段方向：0xA0 正常 / 0xA1 左右镜像 */
     lcd_cmd(0xC0);          /* COM 方向 */
     lcd_cmd(0xA6);          /* 正常显示 */
     lcd_cmd(0xA2);          /* 偏压设置（1/9） */

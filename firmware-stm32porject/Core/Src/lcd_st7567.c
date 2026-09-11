@@ -96,7 +96,10 @@ void lcd_init(void)
 #endif
 
   lcd_cmd(0xE2); lcd_cmd(0xAE);
-  lcd_cmd(0x40); lcd_cmd(0xA1); lcd_cmd(0xC0);
+  /* 段方向(SEG/ADC select)：0xA0 正常、0xA1 反向。
+   * 原来写的 0xA1 会让文字左右镜像；实测改为 0xA0 后显示正常。
+   * COM 方向 0xC0 保持不变，因此只有左右镜像问题。 */
+  lcd_cmd(0x40); lcd_cmd(0xA0); lcd_cmd(0xC0);
   lcd_cmd(0xA6); lcd_cmd(0xA2);
   lcd_cmd(0x2C); lcd_cmd(0x25);
   lcd_cmd2(0x81, 0x1C);

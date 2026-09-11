@@ -25,6 +25,7 @@
 #define LCD_RST_PIN        GPIO_PIN_7
 #define LCD_BL_GPIO        GPIOB
 #define LCD_BL_PIN         GPIO_PIN_0
+
 /* ---------- 告警 / 按键 / 状态 ---------- */
 #define BUZZ_GPIO          GPIOA
 #define BUZZ_PIN           GPIO_PIN_6

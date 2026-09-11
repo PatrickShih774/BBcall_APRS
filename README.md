@@ -580,7 +580,77 @@ BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
 - 代码目录：`simulator/`（CMake + `src/lcd_sim.c` + `src/ui_harness.c` + `src/main.c`）；
 - 复用固件代码：`lcd_st7567.c`、`font8x16.h`（`LCD_SIM` 条件分支），绘图逻辑与真机一致；
 - 按键：↑/↓ 上下、Enter 确定、Backspace 返回、T 测试图案、M 消息、S 待机、I 反显、B 背光、F12 截图、Esc 退出；
-- 构建说明见 `simulator/README.md`（MSYS2/vcpkg/便携 w64devkit+SDL2）；
 - 无窗口自检：`bbcall_sim --selftest`，生成 `sim_selftest.bmp`。
 
-当前 S1 代码已就绪，真机固件回归编译通过；本机尚无 SDL2/x86 编译器，需先安装 SDL2 工具链后构建模拟器。
+### 13.1 免安装构建（Windows，已在本机跑通）
+
+本机没有任何 x86 编译器 / CMake / MSYS2，因此模拟器改用**仓库自带的 TinyCC + 内置 SDL2** 构建，不需要额外安装任何东西：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1            # 只编译
+powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Selftest  # 编译 + 无窗口自检
+powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # 编译 + 打开窗口
+```
+
+- TinyCC：`third_party/tcc/`（本地免安装工具链，`.gitignore` 已排除）；
+- SDL2 2.32.10（x86_64-w64-mingw32）：`third_party/sdl2/`，含 `include/SDL2`、`bin/SDL2.dll`、`lib/libSDL2.dll.a` 与 zlib 许可 `LICENSE.txt`；
+- 产物：`simulator/build-win/bbcall_sim.exe`（脚本会把 `SDL2.dll` 一并拷到该目录）。
+
+构建过程中踩到并已解决的两个坑（脚本里已处理）：
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `SDL_platform.h:265: error: ';' expected (got "SDL_GetPlatform")` | TCC(x86_64) 把 `__cdecl` 当普通标识符；SDL `begin_code.h` 在 `__WIN32__ && !__GNUC__` 时把 `SDLCALL` 展开成 `__cdecl` | 编译时加 `-D__cdecl=` |
+| `libSDL2.dll.a: error: invalid object file` | TCC 的链接器解析不了新版 MinGW 生成的 GNU 导入库 | 直接链接 `bin/SDL2.dll`（TCC 会读 DLL 导出表） |
+| `could not write 'bbcall_sim.exe': Permission denied` | Windows 会锁定正在运行的 exe | 先退出模拟器窗口（Esc）再重新构建 |
+
+### 13.2 其它构建方式
+
+`simulator/CMakeLists.txt` 与 `simulator/Makefile` 仍然保留，供已装 MSYS2 / vcpkg / w64devkit 的机器使用，命令见 `simulator/README.md`。
+
+### 13.3 渲染验收
+
+`--selftest` 写出 BMP（默认 512×256，即 4 倍放大）。实测图案页正确显示 4×4 棋盘、两条对角线，
+以及反白文字 `ST7567 SIM` / `128x64 LCD`；详情页与 `draw_detail()` 的期望绘制**逐像素差异为 0**。
+
+**已修复：屏幕水平翻转。** 固件 `lcd_init()` 原先发送 `0xA1`（SEG/ADC 段反向），配合 `0xC0`（COM 正常）
+会让整屏左右镜像，文字全部反着显示。现改为 `0xA0` + `0xC0`，画面正常。模拟器按状态机忠实复现，实测：
+
+```text
+y0   |BBCALL APRS RX  |      y0   |MSG BG5BLH      |
+y16  |144.640 MHz     |      y16  |Hello APRS      |
+y32  |RX=13 MSG=13    |      y32  |144.640         |
+y48  |BD4BE  POS      |      y48  |1/1             |
+```
+
+常见 ST7567 模板是 `0xA1`+`0xC8`（两者成对反向）或 `0xA0`+`0xC0`（都正常）；
+`0xA1`+`0xC0` 这种混搭正好只剩左右镜像。模拟器里按 `F3` 仍可切换对比两种朝向。
+
+### 13.4 三种数据源（S2 + S3）
+
+| 来源 | 命令 | 经过的固件代码 |
+|---|---|---|
+| 内置示例 | `--demo` | `ax25.c` + `aprs.c` |
+| 串口日志回放 | `--replay tools\sample_aprs_log.txt` | `[RAW] hex=` → `ax25.c` + `aprs.c` |
+| WAV 音频解调 | `--wav tools\test_aprs_144.wav` | `modem.c` → `ax25.c` → `aprs.c` |
+
+WAV 路径就是**完整的固件解码链路**：48kHz/16bit PCM 经 5 点滑动平均降到 9600Hz，映射成 12bit ADC 码值
+（中心 2048、幅度 ±800）后逐点喂给固件入口 `modem_adc_sample()`，再用 `modem_get_frame()` 取帧——
+相当于把 STM32 的 ADC 中断源换成音频文件。实测 `test_aprs_144.wav` 解出 1 帧（另有 15 次重复抑制，
+来自 16 路并行相位走廊各解一遍，与固件 `bbcall_app.c` 的去重行为一致）。
+
+收件箱数据模型：`M` 消息 / `P` 位置 / `C` Mic-E / `X` 其它，支持上下选择、Enter 打开、Delete 删除、
+详情分页，右下角标注 `FIX`/`REP`/`RELAY`。用真实 5km 接收日志回放，13 个帧全部入箱，
+呼号、类型与 `tools/ax25_reference.py` 独立解码结果完全一致：
+
+```text
+y0   |INBOX 13/13     |
+y16  | BH4FSK C#11    |
+y32  | BD4SDX P#12    |
+y48  |>BD4BE  C#13    |
+--- 详情（Mic-E）---
+y0   |POS BD4BE       |
+y16  |3111.28N        |
+y32  |12125.77E M0:   |
+y48  |1/2    RELAY    |
+```

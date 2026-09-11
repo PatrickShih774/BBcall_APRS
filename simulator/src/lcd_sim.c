@@ -18,6 +18,7 @@ static int s_display_on = 1, s_invert = 0, s_all_on = 0;
 static int s_seg_rev = 0, s_com_rev = 0, s_start = 0;
 static int s_contrast_next = 0;
 static int s_backlight = 1;
+static int s_panel_flip = 0;   /* 模拟另一种面板接线（SEG 方向反向） */
 static int s_scale = 4;
 static int s_running = 1;
 
@@ -88,6 +89,7 @@ void lcd_sim_data_bytes(const uint8_t *d, uint16_t n)
 void lcd_sim_backlight(uint8_t on) { s_backlight = on ? 1 : 0; }
 void lcd_sim_toggle_invert(void) { s_invert = !s_invert; }
 void lcd_sim_toggle_backlight(void) { s_backlight = !s_backlight; }
+void lcd_sim_toggle_panel(void) { s_panel_flip = !s_panel_flip; }
 int  lcd_sim_should_quit(void) { return !s_running; }
 
 int lcd_sim_init(const char *title, int scale)
@@ -133,7 +135,7 @@ static void build_pixels(void)
     int sy = (y + s_start) % LCD_H;
     if (s_com_rev) sy = LCD_H - 1 - sy;
     for (int x = 0; x < LCD_W; x++) {
-      int sx = s_seg_rev ? (LCD_W - 1 - x) : x;
+      int sx = (s_seg_rev ^ s_panel_flip) ? (LCD_W - 1 - x) : x;
       int on = (s_fb[(sy / 8) * LCD_W + sx] >> (sy % 8)) & 1;
       if (s_all_on) on = 1;
       if (!s_display_on) on = 0;
@@ -155,10 +157,17 @@ void lcd_sim_render(void)
 
 void lcd_sim_save_bmp(const char *path)
 {
+  int s = (s_scale < 1) ? 1 : s_scale;
+  int w = LCD_W * s, h = LCD_H * s;
+  int x, y;
+  SDL_Surface *surf;
   build_pixels();
-  SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormat(0, LCD_W, LCD_H, 32, SDL_PIXELFORMAT_ARGB8888);
+  surf = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
   if (!surf) return;
-  memcpy(surf->pixels, s_pix, sizeof(s_pix));
+  for (y = 0; y < h; y++) {
+    uint32_t *row = (uint32_t *)((uint8_t *)surf->pixels + (size_t)y * (size_t)surf->pitch);
+    for (x = 0; x < w; x++) row[x] = s_pix[(y / s) * LCD_W + (x / s)];
+  }
   SDL_SaveBMP(surf, path ? path : "lcd_sim.bmp");
   SDL_FreeSurface(surf);
 }
@@ -180,6 +189,8 @@ void lcd_sim_poll_events(void)
         case SDLK_s: push_key(SIM_KEY_STANDBY); break;
         case SDLK_i: lcd_sim_toggle_invert(); break;
         case SDLK_b: lcd_sim_toggle_backlight(); break;
+        case SDLK_F3: lcd_sim_toggle_panel(); break;
+        case SDLK_DELETE: push_key(SIM_KEY_DEL); break;
         case SDLK_F12: lcd_sim_save_bmp("lcd_sim.bmp"); break;
         default: break;
       }
