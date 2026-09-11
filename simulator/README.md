@@ -31,6 +31,15 @@ cmake --build build --config Release
 2. 下载 SDL2-devel-2.x.x-mingw.tar.gz：https://github.com/libsdl-org/SDL/releases
 3. 解压后把 SDL2 的 `include`、`lib`、`bin` 路径配好，使用 gcc 直接编译（见 Makefile 示例），或安装 CMake 后按上面的 vcpkg 方式。
 
+## 构建方式二：Makefile（需要 gcc + sdl2-config）
+
+```bash
+cd simulator
+make
+make run        # 或 ./bbcall_sim --scale 4
+make selftest   # 无窗口自检，生成 sim_selftest.bmp
+```
+
 ## 构建与运行
 
 ```bash
