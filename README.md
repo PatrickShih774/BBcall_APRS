@@ -680,6 +680,25 @@ python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.
 > 重新生成字库后**必须同步布局常量**。Dondji 文档记录过这个坑：只刷新字库 bin 而没改拼音表偏移，
 > 结果是"任意拼音候选错乱、大量音节失败"，不是个别字问题而是整表错位。
 
+### 13.4.2 ASCII 字模：等间距与生成方式
+
+两套 ASCII 字模都由 `tools/gen_font.py` 从系统等宽字体生成，**是等间距的**：
+
+- 字源 Consolas 本身等宽（9px 下 `I i M W 空格 0` 的步进都是 5.0px；16px 下都是 9.0px）；
+- 渲染器不管字形宽窄，一律按**固定步进**前进：`lcd_draw_string6x8()` 每字 +6px，
+  `lcd_draw_string8x16()` 每字 +8px。所以屏幕上必然是等间距网格。
+
+```powershell
+python tools\gen_font.py          firmware-stm32porject\Core\Inc\font8x16.h   # 大字号
+python tools\gen_font.py --small  firmware-stm32porject\Core\Inc\font6x8.h    # 小字号
+```
+
+**生成方式必须是「灰度渲染 + 自行阈值」，不能用 PIL 的 mode "1"。** 9px 的笔画常落在半个像素上，
+mode "1" 的阈值会把整条竖笔吃掉：实测 `M` 的两条竖线灰度只有 135/141 与 163/**121**，
+阈值 128 时右侧那条消失，同一批里 `H` 只剩一竖、`K` 几乎空白。
+改用灰度渲染后按阈值（小字号 96 / 大字号 128）二值化即可。生成器会打印**脆弱字符**清单，
+改尺寸或阈值后要重看并抽查 `M H N K W X`。
+
 ### 13.5 UI 重设计：复古寻呼机（BB 机）风格
 
 界面按 `ui-design` + `taste-skill` 的 overlay 契约重做。**完整规范、检查表与真机移植步骤见
