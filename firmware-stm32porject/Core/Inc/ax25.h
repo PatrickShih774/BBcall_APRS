@@ -1,7 +1,7 @@
 #ifndef AX25_H
 #define AX25_H
 #include <stdint.h>
-#define AX25_MAX_FRAME 330
+#define AX25_MAX_FRAME 256
 typedef struct { uint8_t frame[AX25_MAX_FRAME]; uint16_t len; } ax25_frame_t;
 typedef struct {
     uint16_t shift;
