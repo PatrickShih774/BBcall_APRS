@@ -1,107 +1,158 @@
 #!/usr/bin/env python3
 """
-生成 ST7567 单色点阵 ASCII 字体（0x20..0x7F）。
+从点阵 BDF 生成 ST7567 用的 ASCII 字模头文件（0x20..0x7F）。
 
 用法：
-  python tools/gen_font.py <out.h>               # 8x16 大字号（标题）
-  python tools/gen_font.py --small <out.h>       # 6x8 小字号（列表/正文/菜单）
+  python tools/gen_font.py --bdf tools/bdf/7x13.bdf --w 8 --h 16 --out <font8x16.h>
+  python tools/gen_font.py --bdf tools/bdf/6x9.bdf  --w 6 --h 8 --baseline 6 ... --out <font6x8.h>
 
-为什么用「灰度渲染 + 阈值」而不是 PIL 的 mode "1"：
-  9px 的 TrueType 字形笔画常常落在半个像素上，mode "1" 的内部阈值会把其中一条竖笔
-  整条吃掉。实测 Consolas 9px 的 'M' 两条竖线灰度只有 135/141 与 163/121，
-  阈值 128 时右侧那条消失、H 只剩一竖、K 几乎空白。改成灰度渲染后自己按阈值二值化，
-  并跑一遍「脆弱性检查」（阈值上下浮动后字形是否剧变），就能在生成阶段发现这类问题。
+为什么不用 TrueType 栅格化：
+  之前用 PIL 把小号 TrueType 渲染成点阵，9px 时笔画常落在半个像素上，阈值一卡就整条竖笔消失
+  （实测 Consolas 9px 的 'M' 两条竖线灰度只有 135/141 与 163/121，阈值 128 时右侧那条没了，
+  同一批里 H 只剩一竖、K 几乎空白）。小尺寸下栅格化无法稳定，改用**本来就为像素设计的点阵字体**。
 
-字源许可：脚本读取本机字体，只输出点阵数据；仓库里分发字模前请确认字源许可。
-本项目 ASCII 字模由本脚本从系统等宽字体生成。
+字源：X11 misc-fixed 家族，BDF 内声明 `COPYRIGHT "Public domain font. Share and enjoy."`，
+属公有领域，可自由分发。仓库内副本在 tools/bdf/，来源与说明见 tools/bdf/README.md。
+（参考做法来自 joaquimorg/UV-KX：BDF + bdfconv 转紧凑数组；我们直接自己解析 BDF，不引入 u8g2 依赖。）
+
+BDF 定位规则：
+  字形位图左上角所在行 = baseline - BBX.yoff - r（r 为位图第 r 行，0 起）
+  列 = BBX.xoff + c
+  baseline 取该字体的 FONT_ASCENT，这样 5x7 的大写正好落在行 1..6、降部落在行 7，
+  与现有 6x8 单元格的行位完全一致。
 """
 
 import argparse
 import sys
-from PIL import Image, ImageDraw, ImageFont
 
-CANDIDATES = [
-    r"C:\Windows\Fonts\consola.ttf",   # Consolas (等宽)
-    r"C:\Windows\Fonts\cour.ttf",      # Courier New
-    r"C:\Windows\Fonts\lucon.ttf",     # Lucida Console
-    r"C:\Windows\Fonts\arial.ttf",
-]
+BDF_MISSING = []
 
 
-def load_font(size):
-    for p in CANDIDATES:
-        try:
-            return p, ImageFont.truetype(p, size=size)
-        except Exception:
+def parse_bdf(path):
+    ascent = descent = None
+    copyright_note = ""
+    glyphs = {}
+    cur = None
+    in_bitmap = False
+    for raw in open(path, encoding="latin-1"):
+        line = raw.rstrip("\n")
+        s = line.strip()
+        if s.startswith("FONT_ASCENT"):
+            ascent = int(s.split()[1])
+        elif s.startswith("FONT_DESCENT"):
+            descent = int(s.split()[1])
+        elif s.startswith("COPYRIGHT"):
+            copyright_note = s.split(None, 1)[1].strip('"')
+        elif s.startswith("STARTCHAR"):
+            cur = {"enc": None, "w": 0, "h": 0, "xo": 0, "yo": 0, "dw": 0, "rows": []}
+            in_bitmap = False
+        elif cur is not None and s.startswith("ENCODING"):
+            cur["enc"] = int(s.split()[1])
+        elif cur is not None and s.startswith("DWIDTH"):
+            cur["dw"] = int(s.split()[1])
+        elif cur is not None and s.startswith("BBX"):
+            _, w, h, xo, yo = s.split()
+            cur.update(w=int(w), h=int(h), xo=int(xo), yo=int(yo))
+        elif cur is not None and s.startswith("BITMAP"):
+            in_bitmap = True
+        elif cur is not None and s.startswith("ENDCHAR"):
+            if in_bitmap and cur["enc"] is not None:
+                glyphs[cur["enc"]] = cur
+            cur = None
+            in_bitmap = False
+        elif cur is not None and in_bitmap:
+            cur["rows"].append(s)
+    return ascent, descent, copyright_note, glyphs
+
+
+def place(g, cw, ch, baseline, force_bottom=False):
+    """把 BDF 字形放进 cw x ch 单元格，返回每行的字节（MSB=最左）"""
+    grid = [0] * ch
+    nbytes = (g["w"] + 7) // 8
+    # BDF 的 BBX 给出位图**左下角**相对基准线的偏移：
+    #   位图顶行 = baseline - (yoff + height - 1)
+    # （早先写成 baseline - yoff - r，等于把字形上下翻转了，L 的底横会跑到顶上）
+    top = baseline - (g["yo"] + g["h"] - 1)
+    if force_bottom:
+        top = ch - g["h"]
+    for r, hexrow in enumerate(g["rows"]):
+        if not hexrow:
             continue
-    return None, ImageFont.load_default()
-
-
-def render_glyph(font, ch, cw, ch_h, baseline, anchor, thr):
-    img = Image.new("L", (cw, ch_h), 0)
-    d = ImageDraw.Draw(img)
-    if anchor:
-        d.text((0, baseline), ch, font=font, fill=255, anchor=anchor)
-    else:
-        d.text((0, 0), ch, font=font, fill=255)
-    return [sum((0x80 >> x) for x in range(cw) if img.getpixel((x, y)) >= thr)
-            for y in range(ch_h)]
-
-
-def fragility(font, cw, ch_h, baseline, anchor, thr, span=24, limit=6):
-    """阈值 ±span 后字形变化超过 limit 位的字符（越少越好）"""
-    bad = []
-    for c in range(0x20, 0x80):
-        a = render_glyph(font, chr(c), cw, ch_h, baseline, anchor, thr - span)
-        b = render_glyph(font, chr(c), cw, ch_h, baseline, anchor, thr + span)
-        d = sum(bin(a[y] ^ b[y]).count("1") for y in range(ch_h))
-        if d > limit:
-            bad.append((chr(c), d))
-    return bad
-
-
-def emit(out_path, cw, ch_h, font_size, baseline, anchor, name, rows_name, comment, thr):
-    path, font = load_font(font_size)
-    rows = [render_glyph(font, chr(c), cw, ch_h, baseline, anchor, thr)
-            for c in range(0x20, 0x80)]
-
-    lines = [
-        "#ifndef %s" % name.upper().replace(".", "_"),
-        "#define %s" % name.upper().replace(".", "_"),
-        "",
-        "#include <stdint.h>",
-        "/* 由 tools/gen_font.py 生成：ASCII 0x20..0x7F, 每字符 %d 行, 每行 %dbit(MSB=左) */" % (ch_h, cw),
-        "/* 字源：%s size=%d，灰度渲染后阈值 %d 二值化 */" % (path or "PIL default", font_size, thr),
-        "const uint8_t %s[96][%d] = {" % (rows_name, ch_h),
-    ]
-    for bits in rows:
-        lines.append("    { " + ", ".join("0x%02X" % b for b in bits) + " },")
-    lines += ["};", "", "#endif"]
-
-    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(lines) + "\n")
-
-    bad = fragility(font, cw, ch_h, baseline, anchor, thr)
-    print("wrote %s (%d glyphs, %dx%d, %s, thr=%d)" % (out_path, len(rows), cw, ch_h, comment, thr))
-    print("  字源: %s size=%d" % (path or "PIL default", font_size))
-    if bad:
-        print("  脆弱字符（阈值 ±24 变化 >6 位，说明笔画压在半像素上）: %s"
-              % " ".join("%s%d" % (c, d) for c, d in bad))
-    else:
-        print("  脆弱字符: 无")
-    return len(bad)
+        val = int(hexrow, 16)
+        y = top + r
+        if y < 0 or y >= ch:
+            continue
+        for b in range(g["w"]):
+            if val & (1 << (nbytes * 8 - 1 - b)):
+                x = g["xo"] + b
+                if 0 <= x < cw:
+                    grid[y] |= (0x80 >> x)
+    return grid
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("out", nargs="?", default="font8x16.h")
-    ap.add_argument("--small", action="store_true")
-    args = ap.parse_args()
-    if args.small:
-        emit(args.out, 6, 8, 9, 7, "ls", "font6x8.h", "font6x8", "小字号", 96)
-    else:
-        emit(args.out, 8, 16, 16, 0, None, "font8x16.h", "font8x16", "大字号", 128)
+    ap.add_argument("--bdf", required=True)
+    ap.add_argument("--w", type=int, required=True)
+    ap.add_argument("--h", type=int, required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--name", required=True, help='C 数组名，如 font6x8')
+    ap.add_argument("--macro", required=True, help='头文件宏名，如 FONT6X8_H')
+    ap.add_argument("--baseline", type=int, default=None, help="默认取 FONT_ASCENT")
+    ap.add_argument("--comment", default="")
+    a = ap.parse_args()
+
+    ascent, descent, note, glyphs = parse_bdf(a.bdf)
+    if ascent is None:
+        print("BDF 缺少 FONT_ASCENT", file=sys.stderr)
+        return 2
+    baseline = a.baseline if a.baseline is not None else ascent
+
+    rows = []
+    missing = []
+    blank = []
+    for code in range(0x20, 0x80):
+        g = glyphs.get(code)
+        if g is None or g["w"] == 0:
+            rows.append([0] * a.h)
+            if code != 0x20:
+                missing.append(chr(code))
+            continue
+        grid = place(g, a.w, a.h, baseline)
+        if code != 0x20 and not any(grid):
+            # 兜底：整字落在单元格之外（例：下划线的墨迹正好在降部被裁掉）时改为贴底放置，
+            # 保证有字形而不是画成空白。
+            grid = place(g, a.w, a.h, baseline, force_bottom=True)
+        rows.append(grid)
+        if code != 0x20 and not any(grid):
+            blank.append(chr(code))
+
+    out = [
+        "#ifndef %s" % a.macro,
+        "#define %s" % a.macro,
+        "",
+        "#include <stdint.h>",
+        "/* 由 tools/gen_font.py 从 BDF 生成：ASCII 0x20..0x7F, 每字符 %d 行, 每行 %dbit(MSB=左) */" % (a.h, a.w),
+        "/* 字源：%s（%s） */" % (a.bdf.replace("\\", "/"), note or "见 BDF"),
+        "const uint8_t %s[96][%d] = {" % (a.name, a.h),
+    ]
+    for bits in rows:
+        out.append("    { " + ", ".join("0x%02X" % b for b in bits) + " },")
+    out += ["};", "", "#endif"]
+    open(a.out, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
+
+    print("wrote %s" % a.out)
+    print("  字源 %s  单元格 %dx%d  baseline=%d (ASCENT=%d DESCENT=%s)  %s"
+          % (a.bdf, a.w, a.h, baseline, ascent, descent, a.comment))
+    print("  版权: %s" % (note or "(BDF 内无声明)"))
+    if missing:
+        print("  缺失字形: %s" % " ".join(missing))
+    if blank:
+        print("  空白字形（非空格却无点）: %s" % " ".join(blank))
+    if not missing and not blank:
+        print("  覆盖检查: 0x20..0x7F 全部有字形且非空")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(0 if main() is None else 0)
+    sys.exit(main())

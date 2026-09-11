@@ -44,6 +44,26 @@
   按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `UISkill.md` 第 11 节。
 - 合规说明：Apache-2.0 与 GPL-3.0 兼容；本项目未纳入其源码，仅作设计参考并在文档中标注出处。
   如后续需要直接复用其代码，应保留 Apache-2.0 许可与 NOTICE 要求。
+## X11 misc-fixed 点阵字体（ASCII 字模字源）
+
+- 位置：`tools/bdf/6x9.bdf`、`tools/bdf/7x13.bdf`
+- 许可：**公有领域**。BDF 内自带声明 `COPYRIGHT "Public domain font.  Share and enjoy."`
+- 用途：`firmware-stm32porject/Core/Inc/font6x8.h` 与 `font8x16.h` 由它们生成
+  （工具 `tools/gen_font.py`，只取 ASCII 0x20..0x7F 并重排进我们的单元格）
+- 副本取自 [olikraus/u8g2](https://github.com/olikraus/u8g2) 的 `tools/font/bdf/`
+  （u8g2 库本身是 BSD-2；字体许可以各 BDF 内声明为准，这两个是公有领域）
+- 合规说明：公有领域，无附加条件，与 GPL-3.0 无冲突
+
+## joaquimorg/UV-KX（字模做法参考）
+
+- 仓库：https://github.com/joaquimorg/UV-KX
+- 许可：**仓库未声明 LICENSE**（默认保留所有权利）
+- 用途：**仅借鉴做法**。它用 BDF 点阵字 + u8g2 的 `bdfconv` 转成紧凑数组，
+  并用 `-m "32-95"` 只取需要的字符（5x7 成品仅 492 字节）。本项目采用同样的"点阵 BDF 而非
+  TrueType 栅格化"思路，但**自己实现 BDF 解析**，不引入 u8g2 依赖。
+- **未使用其代码，也未使用其字源**：它的 `fonts_icons/` 里是 Pixies（Randy Humphries）、
+  Uni0553/Uni0563（miniml.com, Craig Kroeger）等个人字体，版权归各自作者，且仓库无许可声明，
+  因此本项目改用公有领域的 X11 misc-fixed。
 ## GNU Unifont（中文字模字源）
 
 - 项目：https://unifoundry.com/unifont/ ，本仓库使用 `unifont-16.0.01.hex`

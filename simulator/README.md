@@ -110,7 +110,9 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 
 - 界面状态机：`simulator/src/ui_harness.c`（模型 + 全部屏幕 + 按键）；
 - 绘图原语与两套字模：固件 `firmware-stm32porject/Core/Src/lcd_st7567.c`（真机与模拟器同一份）；
-- 字体生成：`tools/gen_font.py`（8x16）与 `tools/gen_font.py --small`（6x8，21 字符/行）。
+- 字体生成：`tools/gen_font.py` 从 **公有领域的点阵 BDF**（`tools/bdf/`，X11 misc-fixed）生成
+  两套 ASCII 字模；不再使用 TrueType 栅格化（小尺寸下笔画会被阈值吃掉，导致 `M` 少一竖）。
+  重新生成命令见 `tools/bdf/README.md`。
 
 ### 屏幕
 

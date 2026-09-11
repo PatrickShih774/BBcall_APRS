@@ -686,25 +686,38 @@ python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.
 > 重新生成字库后**必须同步布局常量**。Dondji 文档记录过这个坑：只刷新字库 bin 而没改拼音表偏移，
 > 结果是"任意拼音候选错乱、大量音节失败"，不是个别字问题而是整表错位。
 
-### 13.4.2 ASCII 字模：等间距与生成方式
+### 13.4.2 ASCII 字模：等间距、点阵源与生成方式
 
-两套 ASCII 字模都由 `tools/gen_font.py` 从系统等宽字体生成，**是等间距的**：
+两套 ASCII 字模都由 `tools/gen_font.py` 生成，**是等间距的**：
 
-- 字源 Consolas 本身等宽（9px 下 `I i M W 空格 0` 的步进都是 5.0px；16px 下都是 9.0px）；
-- 渲染器不管字形宽窄，一律按**固定步进**前进：`lcd_draw_string6x8()` 每字 +6px，
-  `lcd_draw_string8x16()` 每字 +8px。所以屏幕上必然是等间距网格。
+- 渲染器不管字形宽窄，一律固定步进：`lcd_draw_string8x16()` 每字 +8px、`lcd_draw_string6x8()` 每字 +6px，
+  所以屏幕上必然是等间距网格；
+- 字模本身来自**等宽的像素点阵字体**（见下表）。
+
+| 用途 | 源 | 单元格 | 说明 |
+|---|---|---|---|
+| 小字号 | `tools/bdf/6x9.bdf` | 6x8 | 字形用满 6 列；基线取 6，大写落在行 1..6 |
+| 大字号 | `tools/bdf/7x13.bdf` | 8x16 | 7 列字形 + 8px 步进，留 1px 字距 |
+
+两者都是 **X11 misc-fixed** 家族，BDF 内自带 `COPYRIGHT "Public domain font. Share and enjoy."`，
+**公有领域**，可自由分发（见 `THIRD_PARTY_NOTICES.md` 与 `tools/bdf/README.md`）。
 
 ```powershell
-python tools\gen_font.py          firmware-stm32porject\Core\Inc\font8x16.h   # 大字号
-python tools\gen_font.py --small  firmware-stm32porject\Core\Inc\font6x8.h    # 小字号
+python tools\gen_font.py --bdf tools\bdf\6x9.bdf  --w 6 --h 8  --baseline 6 `
+    --name font6x8  --macro FONT6X8_H  --out firmware-stm32porject\Core\Inc\font6x8.h
+python tools\gen_font.py --bdf tools\bdf\7x13.bdf --w 8 --h 16 `
+    --name font8x16 --macro FONT8X16_H --out firmware-stm32porject\Core\Inc\font8x16.h
 ```
 
-**生成方式必须是「灰度渲染 + 自行阈值」，不能用 PIL 的 mode "1"。** 9px 的笔画常落在半个像素上，
-mode "1" 的阈值会把整条竖笔吃掉：实测 `M` 的两条竖线灰度只有 135/141 与 163/**121**，
-阈值 128 时右侧那条消失，同一批里 `H` 只剩一竖、`K` 几乎空白。
-改用灰度渲染后按阈值（小字号 96 / 大字号 128）二值化即可。生成器会打印**脆弱字符**清单，
-改尺寸或阈值后要重看并抽查 `M H N K W X`。
+**为什么不再用 TrueType 栅格化**：小尺寸笔画常落在半个像素上，阈值一卡就整条竖笔消失。
+实测 Consolas 9px 的 `M` 两条竖线灰度只有 135/141 与 163/**121**，阈值 128 时右侧那条被吃掉，
+同一批里 `H` 只剩一竖、`K` 几乎空白。改用公有领域点阵 BDF 后，`M W H K N L` 都是标准形状。
 
+参考做法来自 [joaquimorg/UV-KX](https://github.com/joaquimorg/UV-KX)（BDF + u8g2 的 bdfconv 转紧凑数组）。
+注意该仓库**未声明许可**，所以只借鉴做法，未使用其代码或其字源（Pixies / Uni0553 版权归个人）。
+
+> 生成器会报告缺字与空白字形，并在整字落到单元格外时退化为贴底放置（下划线 `_` 即属此类）。
+> 改字体或尺寸后必须重跑并抽查 `M W H K N L` 与降部 `g j p q y`。
 ### 13.5 UI 重设计：复古寻呼机（BB 机）风格
 
 界面按 `ui-design` + `taste-skill` 的 overlay 契约重做。**完整规范、检查表与真机移植步骤见
