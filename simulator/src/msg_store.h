@@ -3,7 +3,12 @@
 #include <stdint.h>
 
 /* 参数与 GOGUFW（Gogu-Qs/GOGUFW-UV-K1-Messenger, Apache-2.0）对齐，
- * 便于两端行为可比；正文上限 36 字符是那套 UI 的实测上限。 */
+ * 便于两端行为可比；正文上限 36 字符是那套 UI 的实测上限。
+ *
+ * 说明：UI 目前只暴露「收件箱 + 阅读」（本项目仅接收，组包/已发是死路）。
+ * Sent 与 ACK 数据结构保留着，是因为收到 ackNNN 时需要把它从收件箱里分流掉；
+ * 打开发射能力后可直接复用，不需要重新设计。 */
+
 #define MSG_TEXT_MAX     36
 #define MSG_CALL_MAX     8
 #define MSG_INBOX_MAX    16
@@ -50,7 +55,6 @@ uint8_t  msg_store_ack(uint16_t id, const char *from);   /* 收到 ackNNN */
 
 uint8_t  msg_store_count_inbox(void);
 uint8_t  msg_store_count_outbox(void);
-uint8_t  msg_store_count_drafts(void);
 uint8_t  msg_store_unread(void);
 uint8_t  msg_store_has_unread(void);
 uint16_t msg_store_total_rx(void);
@@ -62,9 +66,6 @@ void       msg_store_mark_read(uint8_t i);
 void       msg_store_delete_inbox(uint8_t i);
 void       msg_store_delete_outbox(uint8_t i);
 
-/* 草稿（定长槽位，空槽 text[0]==0） */
-const char *msg_store_draft(uint8_t i);
-void        msg_store_set_draft(uint8_t i, const char *text);
 
 /* "NOW" / "12m" / "3h" */
 void     msg_store_fmt_age(uint16_t age_s, char *buf, uint8_t cap);

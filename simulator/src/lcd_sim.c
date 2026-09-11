@@ -25,26 +25,6 @@ static int s_running = 1;
 static int s_keys[32];
 static int s_key_head = 0, s_key_tail = 0;
 
-/* COMPOSE 用：PC 键盘字符输入 */
-static char s_chars[64];
-static int  s_ch_head = 0, s_ch_tail = 0;
-
-static void push_char(char c)
-{
-  int nh = (s_ch_head + 1) % 64;
-  if (nh == s_ch_tail) return;
-  s_chars[s_ch_head] = c;
-  s_ch_head = nh;
-}
-
-int lcd_sim_get_char(void)
-{
-  if (s_ch_tail == s_ch_head) return 0;
-  char c = s_chars[s_ch_tail];
-  s_ch_tail = (s_ch_tail + 1) % 64;
-  return (int)(unsigned char)c;
-}
-
 static void push_key(int k)
 {
   int nh = (s_key_head + 1) % 32;
@@ -132,7 +112,6 @@ int lcd_sim_init(const char *title, int scale)
                             SDL_TEXTUREACCESS_STREAMING, LCD_W, LCD_H);
   if (!s_tex) { fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError()); return -1; }
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-  SDL_StartTextInput();
   lcd_sim_reset();
   s_running = 1;
   return 0;
@@ -198,10 +177,7 @@ void lcd_sim_poll_events(void)
   SDL_Event ev;
   while (SDL_PollEvent(&ev)) {
     if (ev.type == SDL_QUIT) { s_running = 0; continue; }
-    if (ev.type == SDL_TEXTINPUT) {
-      push_char(ev.text.text[0]);
-      continue;
-    }
+
     if (ev.type == SDL_KEYDOWN) {
       switch (ev.key.keysym.sym) {
         case SDLK_ESCAPE: s_running = 0; break;

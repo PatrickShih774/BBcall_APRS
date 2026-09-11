@@ -1,8 +1,8 @@
 /*
- * Messenger 数据模型（Inbox / Sent / Drafts + ACK 跟踪）
+ * Messenger 数据模型（收件箱 + Sent/ACK 数据结构；草稿已随组包屏一起移除）
  *
  * 字段与容量参考 GOGUFW（Gogu-Qs/GOGUFW-UV-K1-Messenger，Apache-2.0）：
- * 正文 36 字符、Inbox 16 / Sent 8 / Drafts 8、按 (from, id) 去重、多源 ACK。
+ * 正文 36 字符、Inbox 16 / Sent 8、按 (from, id) 去重、多源 ACK。
  * 列表顺序按本项目约定：最新在上。
  */
 #include "msg_store.h"
@@ -11,7 +11,6 @@
 
 static msg_in_t  s_in[MSG_INBOX_MAX];
 static msg_out_t s_out[MSG_OUTBOX_MAX];
-static char      s_draft[MSG_DRAFT_MAX][MSG_TEXT_MAX + 1];
 static uint16_t  s_next_id = 1u;
 static uint16_t  s_total_rx;
 static uint16_t  s_total_ack;
@@ -40,7 +39,6 @@ void msg_store_init(void)
 {
   memset(s_in, 0, sizeof(s_in));
   memset(s_out, 0, sizeof(s_out));
-  memset(s_draft, 0, sizeof(s_draft));
   s_next_id = 1u;
   s_total_rx = 0u;
   s_total_ack = 0u;
@@ -160,7 +158,6 @@ void msg_store_add_outbox(const char *to, const char *text, uint16_t id)
 
 uint8_t  msg_store_count_inbox(void)  { uint8_t i, n = 0; for (i = 0; i < MSG_INBOX_MAX; i++)  if (s_in[i].used)  n++; return n; }
 uint8_t  msg_store_count_outbox(void) { uint8_t i, n = 0; for (i = 0; i < MSG_OUTBOX_MAX; i++) if (s_out[i].used) n++; return n; }
-uint8_t  msg_store_count_drafts(void) { uint8_t i, n = 0; for (i = 0; i < MSG_DRAFT_MAX; i++) if (s_draft[i][0]) n++; return n; }
 uint16_t msg_store_total_rx(void)     { return s_total_rx; }
 uint16_t msg_store_total_ack(void)    { return s_total_ack; }
 
@@ -196,18 +193,7 @@ void msg_store_delete_outbox(uint8_t i)
   memset(&s_out[MSG_OUTBOX_MAX - 1u], 0, sizeof(msg_out_t));
 }
 
-const char *msg_store_draft(uint8_t i)
-{
-  return (i < MSG_DRAFT_MAX) ? s_draft[i] : "";
-}
-
-void msg_store_set_draft(uint8_t i, const char *text)
-{
-  if (i >= MSG_DRAFT_MAX) return;
-  clip(s_draft[i], MSG_TEXT_MAX + 1u, text);
-}
-
-/* 演示数据：项目为纯接收，Sent 侧平时是空的；用真实呼号造几条以便验证 UI */
+/* 演示数据：只造收件箱（Sent/草稿已从 UI 移除，本项目不发射） */
 void msg_store_add_demo(void)
 {
   msg_store_add_inbox_id("BG5BLH", "net at 19:30 145.050", 11u);
@@ -216,10 +202,4 @@ void msg_store_add_demo(void)
   s_in[0].age_s = 320u;
   msg_store_add_inbox_id("BY4SZ", "iGate 13.2V", 13u);
   s_in[0].age_s = 7500u;
-  msg_store_add_outbox("BG5BLH", "copy that, 73", 41u);
-  s_out[0].age_s = 240u;
-  msg_store_ack(41u, "BG5BLH");
-  msg_store_add_outbox("BH4EAW", "range check?", 42u);
-  s_out[0].age_s = 40u;
-  msg_store_set_draft(0u, "meeting at 19:30");
 }

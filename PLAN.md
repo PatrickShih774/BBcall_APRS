@@ -235,12 +235,13 @@ UI harness: simulator/src/ui_harness.c（待机/收件箱/详情/删除 + 收件
   `about`、`confirm`；`inbox` 改为最新在上；新增 6x8 字体与细线 / 矩形 / 放大绘制图元。
   诚实留白：电池位未启用（无采样电路）、大时钟为开机计时（无 RTC）、Contrast 项模拟器空操作。
 - **Messenger 界面族**（版面参考 [GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)，
-  Apache-2.0，同样是 128x64 单色 LCD）：新增 `messenger`（启动器 + 24x24 大图标）、
-  `msginbox`（`*` 未读 + 正文预览 + `NOW`/`12m`/`3h` 年龄）、`msgsent`（送达 `+`/`x`/`-`）、
-  `msgread`（`FROM:`/`TO:` + 正文 + `REPLY`/`DEL`）、`compose`（`n/36` 计数 + `TX OFF`）；
-  数据模型 `simulator/src/msg_store.c` 支持 `ackNNN` 送达确认与按 `(from,id)` 去重。
-  取舍与偏离见 [UISkill.md](UISkill.md) 第 11 节。
-
+  Apache-2.0，同样是 128x64 单色 LCD）。最初照搬它的 4 项启动器，实测**过于复杂**，已砍成两屏：
+  - `messages` 收件箱：6 行，最新在上，`*` 未读 + 正文预览 + `NOW`/`12m`/`3h` 年龄；
+  - `msgread` 阅读：`FROM:` + 年龄 + 正文 4 行 + `BACK`/`DEL`；
+  - **砍掉** `COMPOSE`/`DRAFTS`（仅接收，只能存草稿＝假功能）、`SENT`（永远为空）、
+    以及 Messenger 启动器本身（它的 HEARD 与主菜单 Heard 重复，去掉后少一层导航）。
+  - 数据模型 `simulator/src/msg_store.c` 保留 Sent 与 `ackNNN` 分流（后者让 ACK 不污染收件箱），
+    打开发射能力后可直接复用。取舍与偏离见 [UISkill.md](UISkill.md) 第 11 节。
 ### 8.4 后续（S4 候选）
 
 已完成（原 S4 清单的一部分，已并入第 8.3 节）：删除二次确认、未读标记、详情分页、中继路径显示。

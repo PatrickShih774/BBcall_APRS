@@ -126,11 +126,8 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 | `confirm` | 删除确认：填充块 + 内嵌 1px 框 + 反显文字 |
 | `pattern` | 棋盘格 + 两套字体全字符样张 |
 | `cnfont` | 中文字库样张：16x16 汉字，8 列 x 3 行 = 24 字/页，上下翻页 |
-| `messenger` | Messenger 启动器：INBOX / HEARD / COMPOSE / SENT，选中项右侧 24x24 大图标 |
-| `msginbox` | 收件箱 6 行，最新在上：`*` 未读 + 正文预览 + 年龄（`NOW`/`12m`/`3h`） |
-| `msgsent` | 已发 6 行，行首 `+` 已确认 / `x` 失败 / `-` 待确认 |
-| `msgread` | 阅读页：`FROM:`/`TO:` + 年龄 + 正文 4 行 + 页脚 `REPLY`/`DEL` |
-| `compose` | 组包页：`NEW MESSAGE` + `n/36` 计数 + 光标，页脚 `SAVE DRAFT` / `TX OFF` |
+| `messages` | 收件箱 6 行，最新在上：`*` 未读 + 正文预览 + 年龄（`NOW`/`12m`/`3h`） |
+| `msgread` | 阅读页：`FROM:` + 年龄 + 正文 4 行 + 页脚 `BACK` / `DEL` |
 
 ### 按键
 
@@ -141,7 +138,6 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 | Backspace | 返回上一级（详情 -> 列表 -> 菜单 -> 主页） |
 | Delete | 删除选中消息（反显弹窗二次确认） |
 | M | 菜单（菜单第 1 项进入 Messenger） |
-| 字符键 | 组包页输入文字（SDL 文本输入；Backspace 删字符，空时退出） |
 | S | 主页 |
 | T | 字体样张 |
 | I / B | 反显 / 背光开关 |
@@ -186,7 +182,9 @@ python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.
 - 数据模型：`simulator/src/msg_store.c`（Inbox 16 / Sent 8 / Drafts 8，正文 36 字符，
   按 `(from,id)` 去重，`ackNNN` 更新送达状态并记录 ACK 来源）；
 - 收到的 APRS 消息会自动进 Messenger 收件箱，同时仍进 HEARD 条目列表；
-- **本项目仅接收**：`COMPOSE` 只存草稿，页脚明确 `TX OFF`；`SENT` 用 `--demo` 注入演示数据。
+- **本项目仅接收**：界面不提供任何发射入口（没有 SEND / REPLY / Resend）。
+  最初照搬 GOGUFW 做过 4 项启动器 + COMPOSE + SENT，实测过于复杂且是死路，已砍成
+  `messages` + `msgread` 两屏；Sent 数据结构与 `ackNNN` 分流保留在数据层，打开发射能力后可直接复用。
 
 状态栏信号格与 `radio` 页的数值取自日志里真实的 `S=` 与 `R19=` 行。
 `tools/sample_aprs_log.txt` 是压缩版真实日志：每个 `[RAW]` 帧前补上它在原日志中最近一次的

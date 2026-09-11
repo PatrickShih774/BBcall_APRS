@@ -55,9 +55,7 @@ static uint8_t   s_menu_sel;
 static uint8_t   s_msg_hub_sel;       /* Messenger 首页光标 */
 static uint8_t   s_msg_sel;           /* Inbox/Sent 光标 */
 static uint8_t   s_msg_top;
-static uint8_t   s_msg_sent;          /* READ 页来源：0=Inbox 1=Sent */
-static char      s_comp[MSG_TEXT_MAX + 1];   /* COMPOSE 缓冲 */
-static uint8_t   s_comp_len;
+
 static uint8_t   s_cn_page;           /* 中文字库样张分页 */
 static uint8_t   s_smeter;            /* 0..9 */
 static uint8_t   s_muted;
@@ -498,6 +496,7 @@ static void draw_radio(void)
 
 static void draw_about(void)
 {
+  char buf[24];
   lcd_clear(0);
   status_rail("ABOUT");
   hair(SEP_Y);
@@ -542,125 +541,35 @@ static void draw_confirm(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Messenger（版面参考 GOGUFW-UV-K1-Messenger，见 UISkill.md 第 11 节）  */
 /* ------------------------------------------------------------------ */
-
-/* 点状分隔线：1 实 3 空，比实线轻，不压正文（GOGUFW 的做法） */
+/* Messenger：只保留「收件箱 + 阅读」                                    */
+/* 本项目仅接收，COMPOSE/SENT 是死路（前者只能存草稿，后者永远为空），   */
+/* 且 HEARD 已在主菜单里，所以不再单独做一层 Messenger 首页。            */
+/* 版面规范见 UISkill.md 第 11 节；点状分隔线借自 GOGUFW。               */
+/* ------------------------------------------------------------------ */
 static void dotted_sep(uint8_t y)
 {
   uint8_t x;
   for (x = 0; x < 128u; x = (uint8_t)(x + 4u)) lcd_hline(x, (uint8_t)(x + 1u), y, 1);
 }
 
-/* hub 大图标 24x24：本项目唯一超出 8x8 图标网格的地方（UISkill 4.5 例外） */
-static void big_icon_mail(uint8_t x, uint8_t y)
-{
-  uint8_t i;
-  lcd_hline(x, (uint8_t)(x + 23u), y, 1);
-  lcd_hline(x, (uint8_t)(x + 23u), (uint8_t)(y + 15u), 1);
-  lcd_vline(x, y, (uint8_t)(y + 15u), 1);
-  lcd_vline((uint8_t)(x + 23u), y, (uint8_t)(y + 15u), 1);
-  for (i = 0; i < 10u; i++) {          /* 封盖：两侧斜线在中心收拢成 V */
-    lcd_pixel((uint8_t)(x + 2u + i), (uint8_t)(y + 1u + i), 1);
-    lcd_pixel((uint8_t)(x + 21u - i), (uint8_t)(y + 1u + i), 1);
-  }
-}
-
-static void big_icon_heard(uint8_t x, uint8_t y)
-{
-  static const uint8_t hs[5] = { 6u, 10u, 14u, 18u, 24u };
-  uint8_t i, k;
-  for (i = 0; i < 5u; i++)
-    for (k = 0; k < hs[i]; k++)
-      lcd_fill_rect((uint8_t)(x + i * 5u), (uint8_t)(y + 23u - k),
-                    (uint8_t)(x + i * 5u + 3u), (uint8_t)(y + 23u - k), 1);
-}
-
-static void big_icon_compose(uint8_t x, uint8_t y)
-{
-  uint8_t i;
-  for (i = 0; i < 17u; i++)
-    lcd_fill_rect((uint8_t)(x + 3u + i), (uint8_t)(y + 20u - i),
-                  (uint8_t)(x + 5u + i), (uint8_t)(y + 20u - i), 1);
-  lcd_pixel((uint8_t)(x + 2u), (uint8_t)(y + 21u), 1);
-  lcd_pixel((uint8_t)(x + 1u), (uint8_t)(y + 22u), 1);
-  lcd_hline((uint8_t)(x + 9u), (uint8_t)(x + 23u), (uint8_t)(y + 23u), 1);
-}
-
-static void big_icon_sent(uint8_t x, uint8_t y)
-{
-  uint8_t r;
-  const uint8_t cx = (uint8_t)(x + 11u);
-  for (r = 0; r < 8u; r++)
-    lcd_hline((uint8_t)(cx - r), (uint8_t)(cx + r), (uint8_t)(y + r), 1);
-  lcd_fill_rect((uint8_t)(x + 8u), (uint8_t)(y + 8u), (uint8_t)(x + 14u), (uint8_t)(y + 19u), 1);
-  lcd_hline(x, (uint8_t)(x + 23u), (uint8_t)(y + 23u), 1);
-}
-
-#define MSG_HUB_N 4
-static const char *const s_hub_label[MSG_HUB_N] = { "INBOX", "HEARD", "COMPOSE", "SENT" };
-
-static void draw_msg_hub(void)
-{
-  char buf[24];
-  uint8_t i;
-  uint8_t cnt[MSG_HUB_N];
-
-  cnt[0] = msg_store_count_inbox();
-  cnt[1] = s_count;                       /* HEARD = 听到过的全部条目 */
-  cnt[2] = msg_store_count_drafts();
-  cnt[3] = msg_store_count_outbox();
-
-  lcd_clear(0);
-  status_rail("MESSENGER");
-  hair(SEP_Y);
-
-  for (i = 0; i < MSG_HUB_N; i++) {
-    uint8_t y = (uint8_t)(10u + i * 9u);
-    uint8_t sel = (i == s_msg_hub_sel) ? 1u : 0u;
-    uint8_t ink = sel ? 0u : 1u;
-    /* 反显只包标签，不覆盖右侧大图标（GOGUFW 的胶囊式选中） */
-    if (sel) lcd_fill_rect(2, (uint8_t)(y - 1u),
-                           (uint8_t)(6u + (uint8_t)strlen(s_hub_label[i]) * 6u + 4u),
-                           (uint8_t)(y + 8u), 1);
-    t6(6, y, s_hub_label[i], ink);
-    if (i == 0u && msg_store_unread() > 0u) snprintf(buf, sizeof(buf), "*%u", (unsigned)msg_store_unread());
-    else if (cnt[i] == 0u) continue;
-    else snprintf(buf, sizeof(buf), "%u", (unsigned)cnt[i]);
-    /* 计数在胶囊之外，必须用 ink=1，否则选中行会被挖成底色而看不见 */
-    t6((uint8_t)(((90 - (int)strlen(buf) * 6) / 6) * 6), y, buf, 1);
-  }
-
-  switch (s_msg_hub_sel) {
-    case 0: big_icon_mail(96, 12);    break;
-    case 1: big_icon_heard(96, 12);   break;
-    case 2: big_icon_compose(96, 12); break;
-    default: big_icon_sent(96, 12);   break;
-  }
-
-  dotted_sep(48);
-  t6(0, 52, "OK=OPEN", 1);
-  t6_right(52, "BACK=MENU", 1);
-  lcd_flush();
-}
-
-static void draw_msg_list(uint8_t sent)
+static void draw_msg_list(void)
 {
   char line[26];
   char hdr[24];
   char age[6];
-  uint8_t n = sent ? msg_store_count_outbox() : msg_store_count_inbox();
+  uint8_t n = msg_store_count_inbox();
   uint8_t i, vis = 6u;
 
   lcd_clear(0);
-  snprintf(hdr, sizeof(hdr), "%s %u/%u", sent ? "SENT" : "INBOX",
+  snprintf(hdr, sizeof(hdr), "INBOX %u/%u",
            (unsigned)(n ? s_msg_sel + 1u : 0u), (unsigned)n);
   status_rail(hdr);
   hair(SEP_Y);
 
   if (n == 0u) {
-    t6(0, ROW(2), sent ? "no sent message" : "no message yet", 1);
-    t6(0, ROW(4), "BACK=MESSENGER", 1);
+    t6(0, ROW(2), "no message yet", 1);
+    t6(0, ROW(4), "BACK=MENU", 1);
     lcd_flush();
     return;
   }
@@ -671,23 +580,11 @@ static void draw_msg_list(uint8_t sent)
 
   for (i = 0; i < vis; i++) {
     uint8_t idx = (uint8_t)(s_msg_top + i);
-    char mark;
-    const char *text;
-    uint16_t age_s;
+    msg_in_t *m;
     if (idx >= n) break;
-    if (sent) {
-      msg_out_t *o = msg_store_outbox(idx);
-      text = o->text;
-      age_s = o->age_s;
-      mark = (o->status == MSG_ST_ACKED) ? '+' : ((o->status == MSG_ST_FAILED) ? 'x' : '-');
-    } else {
-      msg_in_t *m = msg_store_inbox(idx);
-      text = m->text;
-      age_s = m->age_s;
-      mark = m->unread ? '*' : ' ';
-    }
-    msg_store_fmt_age(age_s, age, sizeof(age));
-    snprintf(line, sizeof(line), "%c%-14.14s%5s", mark, text, age);
+    m = msg_store_inbox(idx);
+    msg_store_fmt_age(m->age_s, age, sizeof(age));
+    snprintf(line, sizeof(line), "%c%-14.14s%5s", m->unread ? '*' : ' ', m->text, age);
     if (idx == s_msg_sel) {
       lcd_fill_rect(0, ROW(i), 123, (uint8_t)(ROW(i) + 7u), 1);
       t6(0, ROW(i), line, 0);
@@ -704,32 +601,23 @@ static void draw_msg_read(void)
   char lines[8][22];
   char buf[32];
   char age[6];
-  const char *text, *peer;
+  const msg_in_t *m;
   uint8_t n, i;
 
-  if (s_msg_sent) {
-    msg_out_t *o = msg_store_outbox(s_msg_sel);
-    if (!o || !o->used) { draw_msg_list(1u); return; }
-    text = o->text; peer = o->to;
-    msg_store_fmt_age(o->age_s, age, sizeof(age));
-  } else {
-    msg_in_t *m = msg_store_inbox(s_msg_sel);
-    if (!m || !m->used) { draw_msg_list(0u); return; }
-    text = m->text; peer = m->from;
-    msg_store_fmt_age(m->age_s, age, sizeof(age));
-  }
+  m = msg_store_inbox(s_msg_sel);
+  if (!m || !m->used) { draw_msg_list(); return; }
+  msg_store_fmt_age(m->age_s, age, sizeof(age));
 
-  n = wrap_text(text, lines, 4u, 20u);
+  n = wrap_text(m->text, lines, 4u, 20u);
   if (n == 0u) { lines[0][0] = 0; n = 1u; }
 
   lcd_clear(0);
-  snprintf(buf, sizeof(buf), "%s %u/%u", s_msg_sent ? "SENT" : "READ",
-           (unsigned)(s_msg_sel + 1u),
-           (unsigned)(s_msg_sent ? msg_store_count_outbox() : msg_store_count_inbox()));
+  snprintf(buf, sizeof(buf), "READ %u/%u",
+           (unsigned)(s_msg_sel + 1u), (unsigned)msg_store_count_inbox());
   status_rail(buf);
   hair(SEP_Y);
 
-  snprintf(buf, sizeof(buf), "%s:%s", s_msg_sent ? "TO" : "FROM", peer);
+  snprintf(buf, sizeof(buf), "FROM:%s", m->from);
   t6(0, ROW(0), buf, 1);
   t6_right(ROW(0), age, 1);
 
@@ -739,47 +627,8 @@ static void draw_msg_read(void)
   }
   dotted_sep(52);
 
-  if (s_msg_sent) {
-    msg_out_t *o = msg_store_outbox(s_msg_sel);
-    t6(0, 54, "RESEND", 1);
-    t6_right(54, (o->ack_count > 0u) ? o->ack_from[0]
-                                      : ((o->status == MSG_ST_ACKED) ? "ACKED" : "PENDING"), 1);
-  } else {
-    t6(0, 54, "REPLY", 1);
-    t6_right(54, "DEL", 1);
-  }
-  lcd_flush();
-}
-
-static void draw_msg_compose(void)
-{
-  char lines[8][22];
-  char buf[26];
-  char text[MSG_TEXT_MAX + 2];
-  uint8_t n, i;
-
-  memcpy(text, s_comp, (size_t)s_comp_len);
-  text[s_comp_len] = '_';                    /* 光标 */
-  text[s_comp_len + 1u] = 0;
-  n = wrap_text(text, lines, 4u, 20u);
-  if (n == 0u) { lines[0][0] = 0; n = 1u; }
-
-  lcd_clear(0);
-  status_rail("COMPOSE");
-  hair(SEP_Y);
-
-  t6(0, ROW(0), "NEW MESSAGE", 1);
-  snprintf(buf, sizeof(buf), "%u/%u", (unsigned)s_comp_len, (unsigned)MSG_TEXT_MAX);
-  t6_right(ROW(0), buf, 1);
-
-  dotted_sep(ROW(1));
-  for (i = 0; i < 4u; i++) {
-    if (i < n) t6(0, (uint8_t)(ROW(1) + 2u + i * 8u), lines[i], 1);
-  }
-  dotted_sep(52);
-
-  t6(0, 54, "SAVE DRAFT", 1);
-  t6_right(54, "TX OFF", 1);                 /* 本项目仅接收，不假装能发 */
+  t6(0, 54, "BACK", 1);
+  t6_right(54, "DEL", 1);
   lcd_flush();
 }
 /* ------------------------------------------------------------------ */
@@ -828,11 +677,8 @@ static void redraw(void)
     case UI_SCREEN_RADIO:  draw_radio();  break;
     case UI_SCREEN_ABOUT:  draw_about();  break;
     case UI_SCREEN_BOOT:   draw_boot();   break;
-    case UI_SCREEN_MSG_HUB:     draw_msg_hub();     break;
-    case UI_SCREEN_MSG_INBOX:   draw_msg_list(0u);  break;
-    case UI_SCREEN_MSG_SENT:    draw_msg_list(1u);  break;
+    case UI_SCREEN_MSG_INBOX:   draw_msg_list();    break;
     case UI_SCREEN_MSG_READ:    draw_msg_read();    break;
-    case UI_SCREEN_MSG_COMPOSE: draw_msg_compose(); break;
     case UI_SCREEN_CNFONT:      draw_cnfont();      break;
     default:               draw_pattern();break;
   }
@@ -983,8 +829,8 @@ void ui_init(void)
 {
   lcd_init();
   s_count = 0u; s_sel = 0u; s_top = 0u; s_page = 0u; s_confirm = 0u;
-  s_menu_sel = 0u; s_msg_hub_sel = 0u; s_msg_sel = 0u;
-  s_msg_top = 0u; s_msg_sent = 0u; s_comp_len = 0u; s_comp[0] = 0; s_cn_page = 0u;
+  s_menu_sel = 0u; s_msg_sel = 0u;
+  s_msg_top = 0u; s_cn_page = 0u;
   msg_store_init();
   s_rx_total = 0u; s_unread = 0u; s_dup_total = 0u; s_dup_pos = 0u;
   s_smeter = 0u; s_muted = 1u;
@@ -1040,7 +886,7 @@ void ui_handle_key(int key)
       else if (key == 2) { if (s_menu_sel + 1u < MENU_N) s_menu_sel++; draw_menu(); }
       else if (key == 3) {
         switch (s_menu_sel) {
-          case 0: ui_show(UI_SCREEN_MSG_HUB); break;
+          case 0: s_msg_sel = 0u; s_msg_top = 0u; ui_show(UI_SCREEN_MSG_INBOX); break;
           case 1: s_sel = 0u; s_top = 0u; ui_show(UI_SCREEN_INBOX); break;
           case 2: ui_show(UI_SCREEN_RADIO); break;
           case 3: break;                       /* Contrast：真机改 0x81 值 */
@@ -1079,72 +925,29 @@ void ui_handle_key(int key)
       if (key == 4 || key == 3) ui_show(UI_SCREEN_MENU);
       break;
 
-    case UI_SCREEN_MSG_HUB:
-      if (key == 1) { if (s_msg_hub_sel > 0u) s_msg_hub_sel--; draw_msg_hub(); }
-      else if (key == 2) { if (s_msg_hub_sel + 1u < MSG_HUB_N) s_msg_hub_sel++; draw_msg_hub(); }
+    case UI_SCREEN_MSG_INBOX:
+      if (key == 1) { if (s_msg_sel > 0u) s_msg_sel--; draw_msg_list(); }
+      else if (key == 2) {
+        if (s_msg_sel + 1u < msg_store_count_inbox()) s_msg_sel++;
+        draw_msg_list();
+      }
       else if (key == 3) {
-        switch (s_msg_hub_sel) {
-          case 0: s_msg_sent = 0u; s_msg_sel = 0u; s_msg_top = 0u; ui_show(UI_SCREEN_MSG_INBOX); break;
-          case 1: s_sel = 0u; s_top = 0u; ui_show(UI_SCREEN_INBOX); break;
-          case 2:
-            s_comp_len = 0u; s_comp[0] = 0;
-            if (msg_store_count_drafts() > 0u) {
-              clip(s_comp, sizeof(s_comp), msg_store_draft(0u));
-              s_comp_len = (uint8_t)strlen(s_comp);
-            }
-            ui_show(UI_SCREEN_MSG_COMPOSE);
-            break;
-          default: s_msg_sent = 1u; s_msg_sel = 0u; s_msg_top = 0u; ui_show(UI_SCREEN_MSG_SENT); break;
+        if (msg_store_count_inbox() > 0u) {
+          msg_store_mark_read(s_msg_sel);
+          ui_show(UI_SCREEN_MSG_READ);
         }
       }
       else if (key == 4) ui_show(UI_SCREEN_MENU);
       break;
 
-    case UI_SCREEN_MSG_INBOX:
-    case UI_SCREEN_MSG_SENT: {
-      uint8_t sent = (s_scr == UI_SCREEN_MSG_SENT) ? 1u : 0u;
-      uint8_t n = sent ? msg_store_count_outbox() : msg_store_count_inbox();
-      if (key == 1) { if (s_msg_sel > 0u) s_msg_sel--; draw_msg_list(sent); }
-      else if (key == 2) { if (s_msg_sel + 1u < n) s_msg_sel++; draw_msg_list(sent); }
-      else if (key == 3) {
-        if (n > 0u) {
-          s_msg_sent = sent;
-          if (!sent) msg_store_mark_read(s_msg_sel);
-          ui_show(UI_SCREEN_MSG_READ);
-        }
-      }
-      else if (key == 4) ui_show(UI_SCREEN_MSG_HUB);
-      break;
-    }
-
     case UI_SCREEN_MSG_READ:
       if (key == 1) { if (s_msg_sel > 0u) s_msg_sel--; draw_msg_read(); }
       else if (key == 2) {
-        uint8_t n = s_msg_sent ? msg_store_count_outbox() : msg_store_count_inbox();
-        if (s_msg_sel + 1u < n) s_msg_sel++;
+        if (s_msg_sel + 1u < msg_store_count_inbox()) s_msg_sel++;
         draw_msg_read();
       }
-      else if (key == 3) {                       /* REPLY/RESEND 都落到草稿，本项目不发射 */
-        msg_in_t *m = s_msg_sent ? 0 : msg_store_inbox(s_msg_sel);
-        s_comp_len = 0u; s_comp[0] = 0;
-        if (m) {
-          snprintf(s_comp, sizeof(s_comp), "re:%.20s", m->text);
-          s_comp_len = (uint8_t)strlen(s_comp);
-        }
-        ui_show(UI_SCREEN_MSG_COMPOSE);
-      }
-      else if (key == 4) ui_show(s_msg_sent ? UI_SCREEN_MSG_SENT : UI_SCREEN_MSG_INBOX);
+      else if (key == 3 || key == 4) ui_show(UI_SCREEN_MSG_INBOX);
       break;
-
-    case UI_SCREEN_MSG_COMPOSE:
-      if (key == 3) { msg_store_set_draft(0u, s_comp); ui_show(UI_SCREEN_MSG_HUB); }
-      else if (key == 8) { if (s_comp_len > 0u) { s_comp[--s_comp_len] = 0; draw_msg_compose(); } }
-      else if (key == 4) {
-        if (s_comp_len > 0u) { s_comp[--s_comp_len] = 0; draw_msg_compose(); }
-        else ui_show(UI_SCREEN_MSG_HUB);
-      }
-      break;
-
     case UI_SCREEN_CNFONT:
       if (key == 1) { if (s_cn_page > 0u) s_cn_page--; draw_cnfont(); }
       else if (key == 2) { s_cn_page++; draw_cnfont(); }
@@ -1182,23 +985,8 @@ void ui_tick(uint32_t ms)
     if (c != colon) { colon = c; draw_home(); }
     return;
   }
-  if (s_scr == UI_SCREEN_MSG_INBOX || s_scr == UI_SCREEN_MSG_SENT) {
+  if (s_scr == UI_SCREEN_MSG_INBOX) {
     uint16_t s = (uint16_t)(s_now_ms / 1000u);       /* 年龄列按秒变 */
-    if (s != last_s) { last_s = s; draw_msg_list(s_scr == UI_SCREEN_MSG_SENT); }
+    if (s != last_s) { last_s = s; draw_msg_list(); }
   }
-}
-
-/* 组包字符输入（模拟器用 PC 键盘；真机侧需接 T9 多击或软键盘） */
-void ui_handle_text(int ch)
-{
-  if (s_scr != UI_SCREEN_MSG_COMPOSE) return;
-  if (ch == 8 || ch == 127) {
-    if (s_comp_len > 0u) { s_comp[--s_comp_len] = 0; draw_msg_compose(); }
-    return;
-  }
-  if (ch < 0x20 || ch > 0x7E) return;
-  if (s_comp_len + 1u >= MSG_TEXT_MAX) return;
-  s_comp[s_comp_len++] = (char)ch;
-  s_comp[s_comp_len] = 0;
-  draw_msg_compose();
 }
