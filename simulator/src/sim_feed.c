@@ -132,6 +132,7 @@ int sim_feed_wav(const char *path)
   }
 
   free(buf);
+  ui_set_clock_ms(0u);
 
   {
     uint16_t mk = 0, sp = 0, ot = 0;
@@ -151,6 +152,23 @@ static int hexval(int c)
   if (c >= 'a' && c <= 'f') return c - 'a' + 10;
   if (c >= 'A' && c <= 'F') return c - 'A' + 10;
   return -1;
+}
+
+static const char *find_sub(const char *hay, const char *needle);
+
+/* 在行内找 key 后的十进制数（key 可带 '='，如 "RSSI="） */
+static int find_uint(const char *hay, const char *key, uint32_t *out)
+{
+  const char *p = find_sub(hay, key);
+  uint32_t v = 0;
+  int n = 0;
+  if (!p) return 0;
+  p += strlen(key);
+  if (*p == '=') p++;
+  while (*p >= '0' && *p <= '9') { v = v * 10u + (uint32_t)(*p - '0'); p++; n++; }
+  if (!n) return 0;
+  *out = v;
+  return 1;
 }
 
 static const char *find_sub(const char *hay, const char *needle)
@@ -187,6 +205,18 @@ int sim_feed_log(const char *path)
     char *eol = line;
     while (*eol && *eol != '\n' && *eol != '\r') eol++;
     if (*eol) { *eol = 0; eol++; }
+    {
+      /* 顺带解析状态行：S 表 / 静音 / R19 电台参数（供状态栏与 RADIO 页显示真实值） */
+      uint32_t v = 0;
+      if (find_uint(line, "S=", &v) && v <= 9u) ui_set_smeter((uint8_t)v);
+      if (find_uint(line, "M=", &v)) ui_set_muted((uint8_t)(v & 1u));
+      {
+        uint32_t a, b, c, d;
+        if (find_uint(line, "RSSI=", &a) && find_uint(line, "SNR=", &b) &&
+            find_uint(line, "AFC=", &c) && find_uint(line, "EXN=", &d))
+          ui_set_radio_stats((uint16_t)a, (uint16_t)b, (uint16_t)c, (uint16_t)d);
+      }
+    }
     {
       const char *hx = find_sub(line, "hex=");
       if (hx) {

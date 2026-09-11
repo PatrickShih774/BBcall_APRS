@@ -1,15 +1,15 @@
 /*
- * 模拟器 UI harness
+ * BBcall_APRS UI（复古寻呼机风格）
  *
- * 复刻 BB 机的待机 / 收件箱 / 详情 / 删除交互；数据来自真实 AX.25 帧
- * （串口日志回放或 WAV 解调），解析复用固件 ax25.c / aprs.c，绘图复用 lcd_st7567.c。
+ * 数据来自真实 AX.25 帧（串口日志回放或 WAV 解调），解析复用固件 ax25.c / aprs.c，
+ * 绘图复用固件 lcd_st7567.c（8x16 标题 / 6x8 正文 / 细线 / 反显 / 放大字形）。
  *
- * 版面：8x16 大字号用于标题（16 字符/行），6x8 小字号用于列表与正文（21 字符/行）。
- *       实测 6x8 每屏可用 6 行（y=16/24/32/40/48/56），配合 16px 标题 + 分隔线。
- *
- * 屏幕：开机 / 待机 / 收件箱 / 详情 / 测试图案
- * 按键：↑↓ 选择、Enter 打开、Backspace 返回、Delete 删除（二次确认）、
- *       T 图案、M 收件箱、S 待机
+ * 统一的 chrome 系统（全屏只用这一套，不在别处套方框）：
+ *   y0..7   顶部状态栏：反显，左侧屏幕名，右侧 信号格 + 信封(未读) + 静音
+ *   y8      细线
+ *   y10..56 内容区，6x8 行网格 y=10/18/26/34/42/50
+ *   x124..  列表滚动轨（仅溢出时出现）
+ * 选择态一律用「反显条」，这是寻呼机的原生语言。
  */
 #include "ui_harness.h"
 #include "lcd_st7567.h"
@@ -22,45 +22,47 @@
 #define UI_FW_VER "v0.3"
 #endif
 
-#define ROW6(i) ((uint8_t)(16u + (i) * 8u))
+/* 行网格 */
+#define ROW(i)   ((uint8_t)(10u + (i) * 8u))
+#define RAIL_Y   0u
+#define RAIL_H   7u
+#define SEP_Y    8u
+#define FULL_W   124u   /* 有滚动轨时内容宽度上限 */
 
 typedef struct {
   uint8_t  used;
-  uint8_t  read;        /* 0=未读，1=已读 */
-  uint8_t  kind;        /* UI_KIND_* */
-  uint8_t  fixed;       /* [FIX]/[FIX2] 纠错恢复 */
-  uint8_t  repeat;      /* [REP] 参考帧恢复 */
-  uint8_t  relay;       /* 含中继路径 */
-  uint8_t  has_time;    /* 日志/回放提供了时间戳 */
-  uint16_t seq;         /* 本次会话内的接收序号 */
+  uint8_t  read;
+  uint8_t  kind;
+  uint8_t  fixed;
+  uint8_t  repeat;
+  uint8_t  relay;
+  uint8_t  has_time;
+  uint16_t seq;
   char     src[10];
   char     dst[10];
   char     path[30];
-  char     title[34];   /* 单行摘要：消息正文或"纬度 经度" */
+  char     title[34];
   char     body[UI_BODY_MAX];
   uint32_t rx_ms;
 } ui_item_t;
 
 static ui_item_t s_box[UI_INBOX_MAX];
-static uint8_t   s_count;
-static uint8_t   s_sel;
-static uint8_t   s_top;
-static uint8_t   s_scr = UI_SCREEN_PATTERN;
-static uint8_t   s_page;
-static uint8_t   s_confirm;      /* 删除二次确认 */
-static uint16_t  s_rx_total;
-static uint16_t  s_unread;
+static uint8_t   s_count, s_sel, s_top, s_page, s_confirm;
+static uint8_t   s_scr = UI_SCREEN_BOOT;
+static uint8_t   s_menu_sel;
+static uint8_t   s_filter_pos;        /* 1 = 只看位置/Mic-E */
+static uint8_t   s_smeter;            /* 0..9 */
+static uint8_t   s_muted;
+static uint16_t  s_rx_total, s_unread, s_dup_total;
 static uint32_t  s_freq_khz = 144640u;
 static uint32_t  s_now_ms;
+static uint16_t  s_rssi, s_snr, s_afc, s_exn;
 
-/* 重复包抑制（与固件 bbcall_app.c 一致）：同一帧 60s 内只入箱一次。
- * 16 路并行相位走廊会用同一帧各解一遍，必须抑制。 */
 #define UI_DUP_N 8
 static uint16_t s_dup_hash[UI_DUP_N];
 static char     s_dup_src[UI_DUP_N][7];
 static uint32_t s_dup_ms[UI_DUP_N];
 static uint8_t  s_dup_pos;
-static uint16_t s_dup_total;
 
 /* ------------------------------------------------------------------ */
 /* 文本工具                                                            */
@@ -73,7 +75,6 @@ static void clip(char *dst, uint8_t cap, const char *src)
   dst[i] = 0;
 }
 
-/* 折行：优先在空格断开，单词过长则硬折 */
 static uint8_t wrap_text(const char *s, char lines[][22], uint8_t maxlines, uint8_t width)
 {
   uint8_t n = 0;
@@ -113,44 +114,411 @@ static const char *kind_tag(uint8_t kind)
 }
 
 /* ------------------------------------------------------------------ */
-/* 绘制小工具                                                          */
+/* 文字绘制                                                            */
 /* ------------------------------------------------------------------ */
-static void text8(uint8_t y, const char *s) { lcd_draw_string8x16(0, y, s, 1); }
+static void t6(uint8_t x, uint8_t y, const char *s, uint8_t ink)
+{ lcd_draw_string6x8(x, y, s, ink); }
 
-/* 居中/右对齐都吸附到字符栅格（8 或 6 的整数倍），否则字会落在半个字符上 */
-static void text8_center(uint8_t y, const char *s)
-{
-  int x = ((128 - (int)strlen(s) * 8) / 2) & ~7;
-  if (x < 0) x = 0;
-  lcd_draw_string8x16((uint8_t)x, y, s, 1);
-}
-
-static void text6(uint8_t y, const char *s) { lcd_draw_string6x8(0, y, s, 1); }
-
-static void text6_right(uint8_t y, const char *s)
+static void t6_right(uint8_t y, const char *s, uint8_t ink)
 {
   int x = (128 - (int)strlen(s) * 6) / 6 * 6;
   if (x < 0) x = 0;
   if (x > 122) x = 122;
-  lcd_draw_string6x8((uint8_t)x, y, s, 1);
+  lcd_draw_string6x8((uint8_t)x, y, s, ink);
 }
 
-/* sel=1 时反显（填充 + 挖字），用于列表选中行 */
-static void row6(uint8_t y, const char *s, uint8_t sel)
+static void t6_center(uint8_t y, const char *s, uint8_t ink)
 {
-  if (sel) {
-    lcd_fill_rect(0, y, 127, (uint8_t)(y + 7u), 1);
-    lcd_draw_string6x8(0, y, s, 0);
-  } else {
-    lcd_draw_string6x8(0, y, s, 1);
+  int x = ((128 - (int)strlen(s) * 6) / 2) / 6 * 6;
+  if (x < 0) x = 0;
+  lcd_draw_string6x8((uint8_t)x, y, s, ink);
+}
+
+static void hair(uint8_t y) { lcd_hline(0, 127, y, 1); }
+
+/* ------------------------------------------------------------------ */
+/* 图标（统一 8x8 网格、1px 线宽、单一家族）                            */
+/* ------------------------------------------------------------------ */
+static void icon_signal(uint8_t x, uint8_t y, uint8_t bars, uint8_t ink)
+{
+  static const uint8_t hs[4] = { 3u, 5u, 7u, 8u };
+  uint8_t i, k;
+  if (bars > 4u) bars = 4u;
+  for (i = 0; i < bars; i++) {
+    for (k = 0; k < hs[i]; k++)
+      lcd_fill_rect((uint8_t)(x + i * 2u), (uint8_t)(y + 7u - k),
+                    (uint8_t)(x + i * 2u + 1u), (uint8_t)(y + 7u - k), ink);
   }
 }
 
-static void sep(uint8_t y) { lcd_line(0, y, 127, y, 1); }
+static void icon_mail(uint8_t x, uint8_t y, uint8_t ink)
+{
+  lcd_rect(x, (uint8_t)(y + 1u), (uint8_t)(x + 7u), (uint8_t)(y + 6u), ink);
+  lcd_pixel((uint8_t)(x + 1u), (uint8_t)(y + 2u), ink);
+  lcd_pixel((uint8_t)(x + 6u), (uint8_t)(y + 2u), ink);
+  lcd_pixel((uint8_t)(x + 2u), (uint8_t)(y + 3u), ink);
+  lcd_pixel((uint8_t)(x + 5u), (uint8_t)(y + 3u), ink);
+  lcd_pixel((uint8_t)(x + 3u), (uint8_t)(y + 4u), ink);
+  lcd_pixel((uint8_t)(x + 4u), (uint8_t)(y + 4u), ink);
+}
+
+static void icon_mute(uint8_t x, uint8_t y, uint8_t ink)
+{
+  uint8_t i;
+  lcd_fill_rect((uint8_t)(x + 0u), (uint8_t)(y + 3u), (uint8_t)(x + 1u), (uint8_t)(y + 4u), ink);
+  lcd_fill_rect((uint8_t)(x + 2u), (uint8_t)(y + 2u), (uint8_t)(x + 3u), (uint8_t)(y + 5u), ink);
+  for (i = 0; i < 8u; i++) lcd_pixel((uint8_t)(x + i), (uint8_t)(y + 7u - i), ink);
+}
+
+static void icon_pin(uint8_t x, uint8_t y, uint8_t ink)
+{
+  lcd_rect((uint8_t)(x + 2u), y, (uint8_t)(x + 5u), (uint8_t)(y + 3u), ink);
+  lcd_pixel((uint8_t)(x + 3u), (uint8_t)(y + 4u), ink);
+  lcd_pixel((uint8_t)(x + 4u), (uint8_t)(y + 4u), ink);
+  lcd_pixel((uint8_t)(x + 3u), (uint8_t)(y + 5u), ink);
+  lcd_pixel((uint8_t)(x + 4u), (uint8_t)(y + 5u), ink);
+  lcd_pixel((uint8_t)(x + 3u), (uint8_t)(y + 6u), ink);
+  lcd_pixel((uint8_t)(x + 4u), (uint8_t)(y + 6u), ink);
+  lcd_pixel((uint8_t)(x + 3u), (uint8_t)(y + 7u), ink);
+}
+
+static void icon_ant(uint8_t x, uint8_t y, uint8_t ink)
+{
+  lcd_vline((uint8_t)(x + 3u), (uint8_t)(y + 2u), (uint8_t)(y + 7u), ink);
+  lcd_fill_rect((uint8_t)(x + 1u), (uint8_t)(y + 7u), (uint8_t)(x + 5u), (uint8_t)(y + 7u), ink);
+  lcd_pixel((uint8_t)(x + 5u), (uint8_t)(y + 1u), ink);
+  lcd_pixel((uint8_t)(x + 6u), (uint8_t)(y + 2u), ink);
+  lcd_pixel((uint8_t)(x + 6u), (uint8_t)(y + 4u), ink);
+  lcd_pixel((uint8_t)(x + 1u), (uint8_t)(y + 1u), ink);
+  lcd_pixel((uint8_t)(x + 0u), (uint8_t)(y + 2u), ink);
+  lcd_pixel((uint8_t)(x + 0u), (uint8_t)(y + 4u), ink);
+}
+
+static void icon_contrast(uint8_t x, uint8_t y, uint8_t ink)
+{
+  uint8_t r;
+  lcd_rect(x, y, (uint8_t)(x + 7u), (uint8_t)(y + 7u), ink);   /* 外框近似圆 */
+  for (r = 1; r < 7u; r++) {
+    if (r >= 2u && r <= 5u) lcd_vline((uint8_t)(x + 4u), (uint8_t)(y + r), (uint8_t)(y + r), ink);
+  }
+  lcd_fill_rect((uint8_t)(x + 4u), (uint8_t)(y + 2u), (uint8_t)(x + 5u), (uint8_t)(y + 5u), ink);
+}
+
+static void icon_info(uint8_t x, uint8_t y, uint8_t ink)
+{
+  lcd_fill_rect((uint8_t)(x + 3u), (uint8_t)(y + 1u), (uint8_t)(x + 4u), (uint8_t)(y + 1u), ink);
+  lcd_fill_rect((uint8_t)(x + 3u), (uint8_t)(y + 3u), (uint8_t)(x + 4u), (uint8_t)(y + 7u), ink);
+  lcd_fill_rect((uint8_t)(x + 2u), (uint8_t)(y + 3u), (uint8_t)(x + 2u), (uint8_t)(y + 3u), ink);
+}
+
+static void icon_power(uint8_t x, uint8_t y, uint8_t ink)
+{
+  lcd_vline((uint8_t)(x + 3u), y, (uint8_t)(y + 3u), ink);
+  lcd_pixel((uint8_t)(x + 2u), (uint8_t)(y + 1u), ink);
+  lcd_pixel((uint8_t)(x + 4u), (uint8_t)(y + 1u), ink);
+  lcd_pixel((uint8_t)(x + 1u), (uint8_t)(y + 3u), ink);
+  lcd_pixel((uint8_t)(x + 5u), (uint8_t)(y + 3u), ink);
+  lcd_pixel((uint8_t)(x + 1u), (uint8_t)(y + 5u), ink);
+  lcd_pixel((uint8_t)(x + 2u), (uint8_t)(y + 7u), ink);
+  lcd_pixel((uint8_t)(x + 3u), (uint8_t)(y + 7u), ink);
+  lcd_pixel((uint8_t)(x + 4u), (uint8_t)(y + 7u), ink);
+  lcd_pixel((uint8_t)(x + 5u), (uint8_t)(y + 5u), ink);
+}
 
 /* ------------------------------------------------------------------ */
-/* 画面                                                                */
+/* Chrome：状态栏 + 滚动轨                                             */
 /* ------------------------------------------------------------------ */
+static void status_rail(const char *title)
+{
+  char buf[12];
+  lcd_fill_rect(0, RAIL_Y, 127, RAIL_H, 1);      /* 反显底 */
+  t6(6, RAIL_Y, title, 0);                       /* 挖字标题（x 对齐 6 像素栅格） */
+
+  /* 右侧：从右往左右对齐排 [信号格] 3px [静音] 3px [未读数] 3px [信封] */
+  {
+    uint8_t x = 128u;
+    uint8_t bars = (uint8_t)((s_smeter + 2u) / 3u);     /* 0..3 档 */
+    uint8_t lit = (uint8_t)((bars > 3u) ? 4u : (bars + 1u));
+    x = (uint8_t)(x - 8u);
+    icon_signal(x, RAIL_Y, lit, 0);
+    x = (uint8_t)(x - 3u);
+    if (s_muted) {
+      x = (uint8_t)(x - 8u);
+      icon_mute(x, RAIL_Y, 0);
+      x = (uint8_t)(x - 3u);
+    }
+    if (s_unread > 0u) {
+      snprintf(buf, sizeof(buf), "%u", (unsigned)(s_unread > 99u ? 99u : s_unread));
+      x = (uint8_t)(x - (uint8_t)(strlen(buf) * 6u));
+      t6(x, RAIL_Y, buf, 0);
+      x = (uint8_t)(x - 3u);
+    }
+    x = (uint8_t)(x - 8u);
+    icon_mail(x, RAIL_Y, 0);
+  }
+}
+
+static void scroll_rail(uint8_t top, uint8_t count, uint8_t vis)
+{
+  uint8_t ty = ROW(0), th, hh, hy;
+  if (count <= vis) return;
+  th = (uint8_t)(vis * 8u - 2u);
+  hh = (uint8_t)((uint16_t)th * vis / count);
+  if (hh < 3u) hh = 3u;
+  hy = (uint8_t)(ty + (uint16_t)(th - hh) * top / (count - vis));
+  lcd_fill_rect(126, hy, 127, (uint8_t)(hy + hh - 1u), 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* 主屏                                                                */
+/* ------------------------------------------------------------------ */
+static void draw_boot(void)
+{
+  char buf[24];
+  lcd_clear(0);
+  lcd_draw_string8x16_scaled(16, 6, "BBCALL", 1, 2);
+  t6_center(44, "APRS RX PAGER", 1);
+  snprintf(buf, sizeof(buf), "FW " UI_FW_VER);
+  t6_center(54, buf, 1);
+  lcd_flush();
+}
+
+static void clock_hhmm(char *out, uint8_t cap)
+{
+  uint32_t sec = s_now_ms / 1000u;
+  uint32_t hh = (sec / 3600u) % 24u;
+  uint32_t mm = (sec / 60u) % 60u;
+  snprintf(out, cap, "%02lu:%02lu", (unsigned long)hh, (unsigned long)mm);
+  (void)sec;
+}
+
+static void draw_home(void)
+{
+  char buf[40];
+  char clk[8];
+  lcd_clear(0);
+  status_rail("HOME");
+  hair(SEP_Y);
+
+  clock_hhmm(clk, sizeof(clk));
+  /* 大时钟 16x32；冒号按 0.5s 闪烁（唯一的动效：设备存活反馈） */
+  if (!((s_now_ms / 500u) & 1u)) clk[2] = ' ';
+  lcd_draw_string8x16_scaled(24, 11, clk, 1, 2);
+  t6(6, 23, "UP", 1);                 /* 明示这是开机计时，不是墙上时钟 */
+
+  hair(44);
+
+  snprintf(buf, sizeof(buf), "%lu.%03lu MHz",
+           (unsigned long)(s_freq_khz / 1000u), (unsigned long)(s_freq_khz % 1000u));
+  t6(0, 46, buf, 1);
+  snprintf(buf, sizeof(buf), "RX %u", (unsigned)s_rx_total);
+  t6_right(46, buf, 1);
+
+  if (s_count > 0u) {
+    const ui_item_t *it = &s_box[0];   /* 队首 = 最新 */
+    snprintf(buf, sizeof(buf), "%-6.6s %s", it->src, kind_tag(it->kind));
+    t6(0, 54, buf, 1);
+    snprintf(buf, sizeof(buf), "%.7s", it->title);   /* 只放得下 7 字符，与左侧留 6px 间隙 */
+    t6_right(54, buf, 1);
+  } else {
+    t6(0, 54, "no message", 1);
+    t6_right(54, "waiting...", 1);
+  }
+  lcd_flush();
+}
+
+/* ------------------------------------------------------------------ */
+/* 菜单                                                                */
+/* ------------------------------------------------------------------ */
+#define MENU_N 6
+static const char *const s_menu_label[MENU_N] = {
+  "Inbox", "Positions", "Radio", "Contrast", "Backlight", "About"
+};
+
+static void menu_icon(uint8_t i, uint8_t x, uint8_t y, uint8_t ink)
+{
+  switch (i) {
+    case 0: icon_mail(x, y, ink);     break;
+    case 1: icon_pin(x, y, ink);      break;
+    case 2: icon_ant(x, y, ink);      break;
+    case 3: icon_contrast(x, y, ink); break;
+    case 4: icon_power(x, y, ink);    break;
+    default: icon_info(x, y, ink);    break;
+  }
+}
+
+static void draw_menu(void)
+{
+  char buf[24];
+  uint8_t i;
+  lcd_clear(0);
+  status_rail("MENU");
+  hair(SEP_Y);
+
+  for (i = 0; i < MENU_N; i++) {
+    uint8_t y = ROW(i);
+    uint8_t sel = (i == s_menu_sel) ? 1u : 0u;
+    uint8_t ink = sel ? 0u : 1u;
+    if (sel) lcd_fill_rect(0, y, 123, (uint8_t)(y + 7u), 1);
+    menu_icon(i, 2, y, ink);
+    t6(12, y, s_menu_label[i], ink);
+    if (i == 0 && s_unread > 0u) {
+      snprintf(buf, sizeof(buf), "%u", (unsigned)s_unread);
+      t6((uint8_t)(((120 - (int)strlen(buf) * 6) / 6) * 6), y, buf, ink);
+    }
+  }
+  scroll_rail(0, MENU_N, MENU_N);
+  lcd_flush();
+}
+
+/* ------------------------------------------------------------------ */
+/* 收件箱 / 详情                                                       */
+/* ------------------------------------------------------------------ */
+static uint8_t item_visible(const ui_item_t *it)
+{
+  if (!s_filter_pos) return 1u;
+  return (it->kind == UI_KIND_POS || it->kind == UI_KIND_MICE) ? 1u : 0u;
+}
+
+static uint8_t visible_count(void)
+{
+  uint8_t i, n = 0u;
+  for (i = 0; i < s_count; i++) if (item_visible(&s_box[i])) n++;
+  return n;
+}
+
+static uint8_t nth_visible(uint8_t nth)
+{
+  uint8_t i, n = 0u;
+  for (i = 0; i < s_count; i++) {
+    if (!item_visible(&s_box[i])) continue;
+    if (n == nth) return i;
+    n++;
+  }
+  return 0u;
+}
+
+static void draw_inbox(void)
+{
+  char line[26];
+  char hdr[24];
+  uint8_t n = visible_count(), i, vis = 6u;
+  lcd_clear(0);
+  snprintf(hdr, sizeof(hdr), "%s %u/%u", s_filter_pos ? "POS" : "INBOX",
+           (unsigned)(n ? s_sel + 1u : 0u), (unsigned)n);
+  status_rail(hdr);
+  hair(SEP_Y);
+
+  if (n == 0u) {
+    t6(0, ROW(1), s_filter_pos ? "no position yet" : "no message yet", 1);
+    t6(0, ROW(4), "M=menu  S=home", 1);
+    lcd_flush();
+    return;
+  }
+  if (s_sel >= n) s_sel = (uint8_t)(n - 1u);
+  if (s_sel < s_top) s_top = s_sel;
+  if ((uint16_t)(s_top + vis - 1u) < s_sel) s_top = (uint8_t)(s_sel - (vis - 1u));
+  if ((uint16_t)s_top + vis > n) s_top = (n > vis) ? (uint8_t)(n - vis) : 0u;
+
+  for (i = 0; i < vis; i++) {
+    uint8_t nth = (uint8_t)(s_top + i);
+    const ui_item_t *it;
+    uint8_t sel;
+    if (nth >= n) break;
+    it = &s_box[nth_visible(nth)];
+    sel = (nth == s_sel) ? 1u : 0u;
+    snprintf(line, sizeof(line), "%-6.6s %c %-10.10s%c",
+             it->src, kind_char(it->kind), it->title, it->read ? ' ' : '*');
+    if (sel) {
+      lcd_fill_rect(0, ROW(i), 123, (uint8_t)(ROW(i) + 7u), 1);
+      t6(0, ROW(i), line, 0);
+    } else {
+      t6(0, ROW(i), line, 1);
+    }
+  }
+  scroll_rail(s_top, n, vis);
+  lcd_flush();
+}
+
+static void draw_detail(void)
+{
+  char lines[14][22];
+  char hdr[24], foot[64];
+  const ui_item_t *it;
+  uint8_t n, i, pages;
+
+  if (s_count == 0u || visible_count() == 0u) { draw_inbox(); return; }
+  if (s_sel >= visible_count()) s_sel = (uint8_t)(visible_count() - 1u);
+  it = &s_box[nth_visible(s_sel)];
+
+  n = wrap_text(it->body, lines, 14u, 20u);
+  if (n == 0u) { lines[0][0] = 0; n = 1u; }
+  pages = (uint8_t)((n + 4u) / 5u);
+  if (pages == 0u) pages = 1u;
+  if (s_page >= pages) s_page = (uint8_t)(pages - 1u);
+
+  lcd_clear(0);
+  snprintf(hdr, sizeof(hdr), "%s %s", kind_tag(it->kind), it->src);
+  status_rail(hdr);
+  hair(SEP_Y);
+
+  for (i = 0; i < 5u; i++) {
+    uint8_t idx = (uint8_t)(s_page * 5u + i);
+    if (idx < n) t6(0, ROW(i), lines[idx], 1);
+  }
+
+  snprintf(foot, sizeof(foot), "%u/%u", (unsigned)(s_page + 1u), (unsigned)pages);
+  if (it->relay)       { strncat(foot, " RELAY ", sizeof(foot) - strlen(foot) - 1u);
+                         strncat(foot, it->path, sizeof(foot) - strlen(foot) - 1u); }
+  else if (it->fixed)  strncat(foot, " FIX", sizeof(foot) - strlen(foot) - 1u);
+  else if (it->repeat) strncat(foot, " REP", sizeof(foot) - strlen(foot) - 1u);
+  t6(0, ROW(5), foot, 1);
+  lcd_flush();
+}
+
+/* ------------------------------------------------------------------ */
+/* 电台状态 / 关于                                                     */
+/* ------------------------------------------------------------------ */
+static void draw_radio(void)
+{
+  char buf[28];
+  lcd_clear(0);
+  status_rail("RADIO");
+  hair(SEP_Y);
+
+  snprintf(buf, sizeof(buf), "%lu.%03lu MHz  S%u",
+           (unsigned long)(s_freq_khz / 1000u), (unsigned long)(s_freq_khz % 1000u),
+           (unsigned)s_smeter);
+  t6(0, ROW(0), buf, 1);
+
+  snprintf(buf, sizeof(buf), "RSSI %-5u SNR %-5u", (unsigned)s_rssi, (unsigned)s_snr);
+  t6(0, ROW(1), buf, 1);
+
+  snprintf(buf, sizeof(buf), "AFC  %-5u EXN %-5u", (unsigned)s_afc, (unsigned)s_exn);
+  t6(0, ROW(2), buf, 1);
+
+  snprintf(buf, sizeof(buf), "RX %u  DUP %u", (unsigned)s_rx_total, (unsigned)s_dup_total);
+  t6(0, ROW(3), buf, 1);
+
+  t6(0, ROW(4), s_muted ? "audio: muted" : "audio: on", 1);
+  t6(0, ROW(5), "BACK=MENU", 1);
+  lcd_flush();
+}
+
+static void draw_about(void)
+{
+  lcd_clear(0);
+  status_rail("ABOUT");
+  hair(SEP_Y);
+  t6(0, ROW(0), "BBCALL_APRS", 1);
+  t6(0, ROW(1), "FW " UI_FW_VER "  GPL-3.0", 1);
+  t6(0, ROW(2), "STM32F103C8T6", 1);
+  t6(0, ROW(3), "ST7567 128x64 LCD", 1);
+  t6(0, ROW(4), "BK4802P 21.25MHz IF", 1);
+  t6(0, ROW(5), "144.640 MHz APRS", 1);
+  lcd_flush();
+}
+
 static void draw_pattern(void)
 {
   int x, y;
@@ -167,150 +535,27 @@ static void draw_pattern(void)
   lcd_flush();
 }
 
-static void draw_boot(void)
-{
-  lcd_clear(0);
-  text8_center(0, "BBCALL APRS");
-  sep(15);
-  text6(16, " APRS RX PAGER");
-  text6(24, " STM32F103C8T6");
-  text6(32, " ST7567 128x64 LCD");
-  text6(40, " BK4802P 21.25MHz");
-  text6(48, " FW " UI_FW_VER);
-  text6(56, " booting...");
-  lcd_flush();
-}
-
-static void draw_standby(void)
-{
-  char buf[36];
-  lcd_clear(0);
-  text8_center(0, "BBCALL APRS");
-  sep(15);
-
-  snprintf(buf, sizeof(buf), "%lu.%03lu MHz",
-           (unsigned long)(s_freq_khz / 1000u), (unsigned long)(s_freq_khz % 1000u));
-  text6(16, buf);
-
-  snprintf(buf, sizeof(buf), "RX %u", (unsigned)s_rx_total);
-  text6(24, buf);
-  snprintf(buf, sizeof(buf), "MSG %u", (unsigned)s_count);
-  text6_right(24, buf);
-
-  if (s_unread > 0u) snprintf(buf, sizeof(buf), "NEW %u", (unsigned)s_unread);
-  else               snprintf(buf, sizeof(buf), "NO NEW MSG");
-  text6(32, buf);
-
-  text6(40, "---------------------");
-
-  if (s_count > 0u) {
-    const ui_item_t *it = &s_box[s_count - 1u];
-    snprintf(buf, sizeof(buf), "%-6.6s %s", it->src, kind_tag(it->kind));
-    text6(48, buf);
-    text6(56, it->title);
-  } else {
-    text6(48, "LAST:");
-    text6(56, "waiting for APRS...");
-  }
-  lcd_flush();
-}
-
-static void draw_inbox(void)
-{
-  char line[26];
-  char hdr[24];
-  uint8_t i;
-  lcd_clear(0);
-  if (s_count == 0u) {
-    text8(0, "INBOX");
-    sep(15);
-    text6(24, "no message yet");
-    text6(56, "waiting for APRS...");
-    lcd_flush();
-    return;
-  }
-  if (s_sel >= s_count) s_sel = (uint8_t)(s_count - 1u);
-  if (s_sel < s_top) s_top = s_sel;
-  if ((uint16_t)(s_top + 5u) < s_sel) s_top = (uint8_t)(s_sel - 5u);
-  if ((uint16_t)s_top + 6u > s_count) {
-    s_top = (s_count > 6u) ? (uint8_t)(s_count - 6u) : 0u;
-  }
-
-  snprintf(hdr, sizeof(hdr), "INBOX %u/%u", (unsigned)(s_sel + 1u), (unsigned)s_count);
-  text8(0, hdr);
-  if (s_unread > 0u) {
-    snprintf(hdr, sizeof(hdr), "%u NEW", (unsigned)s_unread);
-    text6_right(4, hdr);
-  }
-  sep(15);
-
-  for (i = 0; i < 6u; i++) {
-    uint8_t idx = (uint8_t)(s_top + i);
-    if (idx >= s_count) break;
-    snprintf(line, sizeof(line), "%-6.6s %c %-11.11s%c",
-             s_box[idx].src,
-             kind_char(s_box[idx].kind),
-             s_box[idx].title,
-             s_box[idx].read ? ' ' : '*');
-    row6(ROW6(i), line, (idx == s_sel) ? 1u : 0u);
-  }
-  lcd_flush();
-}
-
-static void draw_detail(void)
-{
-  char lines[14][22];
-  char hdr[24];
-  char foot[64];
-  const ui_item_t *it;
-  uint8_t n, i, pages;
-
-  if (s_count == 0u) { draw_inbox(); return; }
-  if (s_sel >= s_count) s_sel = (uint8_t)(s_count - 1u);
-  it = &s_box[s_sel];
-
-  n = wrap_text(it->body, lines, 14u, 21u);
-  if (n == 0u) { lines[0][0] = 0; n = 1u; }
-  pages = (uint8_t)((n + 4u) / 5u);      /* 每页 5 行 */
-  if (pages == 0u) pages = 1u;
-  if (s_page >= pages) s_page = (uint8_t)(pages - 1u);
-
-  lcd_clear(0);
-  snprintf(hdr, sizeof(hdr), "%s %s", kind_tag(it->kind), it->src);
-  text8(0, hdr);
-  sep(15);
-
-  for (i = 0; i < 5u; i++) {
-    uint8_t idx = (uint8_t)(s_page * 5u + i);
-    if (idx < n) text6(ROW6(i), lines[idx]);
-  }
-
-  snprintf(foot, sizeof(foot), "%u/%u", (unsigned)(s_page + 1u), (unsigned)pages);
-  if (it->relay)       { strncat(foot, " RELAY ", sizeof(foot) - strlen(foot) - 1u);
-                         strncat(foot, it->path, sizeof(foot) - strlen(foot) - 1u); }
-  else if (it->fixed)  strncat(foot, " FIX", sizeof(foot) - strlen(foot) - 1u);
-  else if (it->repeat) strncat(foot, " REP", sizeof(foot) - strlen(foot) - 1u);
-  text6(ROW6(5), foot);
-  lcd_flush();
-}
-
-/* 删除确认弹窗：盖在列表/详情中部的反显框 */
+/* 删除确认：内嵌双线框的模态（寻呼机原生做法） */
 static void draw_confirm(void)
 {
-  lcd_fill_rect(0, 20, 127, 43, 1);
-  lcd_draw_string6x8(6, 24, "DELETE THIS MESSAGE?", 0);
-  lcd_draw_string6x8(6, 32, "OK=YES   BACK=CANCEL", 0);
-  lcd_flush();          /* 弹窗写在底层画面之后，必须再刷一次 */
+  lcd_fill_rect(6, 18, 121, 45, 1);
+  lcd_rect(8, 20, 119, 43, 0);
+  t6_center(26, "DELETE MESSAGE?", 0);
+  t6_center(34, "OK=YES  BACK=NO", 0);
+  lcd_flush();
 }
 
 static void redraw(void)
 {
   switch (s_scr) {
-    case UI_SCREEN_STANDBY: draw_standby(); break;
-    case UI_SCREEN_INBOX:   draw_inbox();   break;
-    case UI_SCREEN_DETAIL:  draw_detail();  break;
-    case UI_SCREEN_BOOT:    draw_boot();    break;
-    default:                draw_pattern(); break;
+    case UI_SCREEN_HOME:   draw_home();   break;
+    case UI_SCREEN_MENU:   draw_menu();   break;
+    case UI_SCREEN_INBOX:  draw_inbox();  break;
+    case UI_SCREEN_DETAIL: draw_detail(); break;
+    case UI_SCREEN_RADIO:  draw_radio();  break;
+    case UI_SCREEN_ABOUT:  draw_about();  break;
+    case UI_SCREEN_BOOT:   draw_boot();   break;
+    default:               draw_pattern();break;
   }
   if (s_confirm) draw_confirm();
 }
@@ -320,20 +565,18 @@ static void redraw(void)
 /* ------------------------------------------------------------------ */
 static void delete_sel(void)
 {
-  if (s_count == 0u) return;
-  if (!s_box[s_sel].read) {
-    s_box[s_sel].read = 1u;
+  uint8_t idx;
+  if (visible_count() == 0u) return;
+  idx = nth_visible(s_sel);
+  if (!s_box[idx].read) {
+    s_box[idx].read = 1u;
     if (s_unread > 0u) s_unread--;
   }
-  if ((uint16_t)(s_sel + 1u) < s_count) {
-    memmove(&s_box[s_sel], &s_box[s_sel + 1u],
-            sizeof(ui_item_t) * (size_t)(s_count - s_sel - 1u));
-  }
+  if ((uint16_t)(idx + 1u) < s_count)
+    memmove(&s_box[idx], &s_box[idx + 1u], sizeof(ui_item_t) * (size_t)(s_count - idx - 1u));
   s_count--;
-  if (s_sel >= s_count) s_sel = (s_count > 0u) ? (uint8_t)(s_count - 1u) : 0u;
-  if (s_top > s_sel) s_top = s_sel;
-  if (s_count <= 6u) s_top = 0u;
-  else if ((uint16_t)(s_top + 6u) > s_count) s_top = (uint8_t)(s_count - 6u);
+  if (s_sel >= visible_count()) s_sel = visible_count() ? (uint8_t)(visible_count() - 1u) : 0u;
+  s_top = 0u;
 }
 
 uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
@@ -368,22 +611,20 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
   }
   s_rx_total++;
 
-  /* Mic-E 的目标呼号含位置模糊度空格，必须用原始地址字节 */
   for (i = 0; i < 6u; i++) {
     uint8_t c = (uint8_t)((frame[i] >> 1) & 0x7Fu);
     mice_dest[i] = (char)((c == 0u) ? ' ' : (char)c);
   }
   mice_dest[6] = 0;
 
-  if (s_count >= UI_INBOX_MAX) {
-    if (!s_box[0].read) { if (s_unread > 0u) s_unread--; }
-    memmove(&s_box[0], &s_box[1], sizeof(ui_item_t) * (size_t)(UI_INBOX_MAX - 1u));
+  if (s_count >= UI_INBOX_MAX) {           /* 满：丢掉最旧（队尾） */
+    if (!s_box[s_count - 1u].read && s_unread > 0u) s_unread--;
     s_count = (uint8_t)(UI_INBOX_MAX - 1u);
   }
-  it = &s_box[s_count];
+  memmove(&s_box[1], &s_box[0], sizeof(ui_item_t) * (size_t)s_count);
+  it = &s_box[0];                          /* 新帧插到队首：列表最新在上 */
   memset(it, 0, sizeof(*it));
   it->used = 1u;
-  it->read = 0u;
   it->fixed = fixed;
   it->repeat = repeat;
   it->rx_ms = t_ms;
@@ -441,7 +682,8 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
 
   s_count++;
   s_unread++;
-  s_sel = (uint8_t)(s_count - 1u);
+  s_sel = 0u;
+  s_top = 0u;
   return 1u;
 }
 
@@ -451,29 +693,26 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
 void ui_init(void)
 {
   lcd_init();
-  s_count = 0u;
-  s_sel = 0u;
-  s_top = 0u;
-  s_page = 0u;
-  s_confirm = 0u;
-  s_rx_total = 0u;
-  s_unread = 0u;
-  s_dup_total = 0u;
-  s_dup_pos = 0u;
-  s_scr = UI_SCREEN_BOOT;
+  s_count = 0u; s_sel = 0u; s_top = 0u; s_page = 0u; s_confirm = 0u;
+  s_menu_sel = 0u; s_filter_pos = 0u;
+  s_rx_total = 0u; s_unread = 0u; s_dup_total = 0u; s_dup_pos = 0u;
+  s_smeter = 0u; s_muted = 1u;
+  s_rssi = 0u; s_snr = 0u; s_afc = 0u; s_exn = 0u;
   memset(s_box, 0, sizeof(s_box));
   memset(s_dup_src, 0, sizeof(s_dup_src));
+  s_scr = UI_SCREEN_BOOT;
   draw_boot();
 }
 
 void ui_show(int screen)
 {
-  if (screen == UI_SCREEN_CONFIRM) {          /* 自检用：直接弹删除确认 */
+  if (screen == UI_SCREEN_CONFIRM) {
     s_scr = UI_SCREEN_INBOX;
     s_confirm = 1u;
     redraw();
     return;
   }
+  if (screen == UI_SCREEN_INBOX || screen == UI_SCREEN_DETAIL) s_filter_pos = 0u;
   s_scr = (uint8_t)screen;
   s_page = 0u;
   s_confirm = 0u;
@@ -483,12 +722,12 @@ void ui_show(int screen)
 void ui_handle_key(int key)
 {
   if (s_confirm) {
-    if (key == 3) {          /* 确定 -> 真删除 */
+    if (key == 3) {
       s_confirm = 0u;
       delete_sel();
       s_scr = UI_SCREEN_INBOX;
       redraw();
-    } else if (key == 4 || key == 8 || key == 7) {   /* 返回/再按删除/待机 -> 取消 */
+    } else if (key == 4 || key == 8 || key == 7) {
       s_confirm = 0u;
       redraw();
     }
@@ -496,67 +735,73 @@ void ui_handle_key(int key)
   }
 
   switch (key) {
-    case UI_SCREEN_PATTERN: ui_show(UI_SCREEN_PATTERN); break;
-    case UI_SCREEN_INBOX:   ui_show(UI_SCREEN_INBOX);   break;
-    case UI_SCREEN_STANDBY: ui_show(UI_SCREEN_STANDBY); break;
-    case UI_SCREEN_BOOT:    ui_show(UI_SCREEN_BOOT);    break;
+    case 5:  ui_show(UI_SCREEN_PATTERN); return;   /* T 图案 */
+    case 9:  ui_show(UI_SCREEN_MENU);    return;   /* M 菜单 */
+    case 7:  ui_show(UI_SCREEN_HOME);    return;   /* S 主页 */
+  }
 
-    case 1:   /* 上 */
-      if (s_scr == UI_SCREEN_INBOX) {
-        if (s_sel > 0u) s_sel--;
-        draw_inbox();
-      } else if (s_scr == UI_SCREEN_DETAIL) {
-        if (s_page > 0u) s_page--;
-        else if (s_sel > 0u) s_sel--;
-        draw_detail();
-      } else {
-        ui_show(UI_SCREEN_INBOX);
-      }
+  switch (s_scr) {
+    case UI_SCREEN_HOME:
+      if (key == 1 || key == 2 || key == 3) ui_show(UI_SCREEN_MENU);
       break;
 
-    case 2:   /* 下 */
-      if (s_scr == UI_SCREEN_INBOX) {
-        if ((uint16_t)(s_sel + 1u) < s_count) s_sel++;
-        draw_inbox();
-      } else if (s_scr == UI_SCREEN_DETAIL) {
-        s_page++;
-        draw_detail();
-      } else {
-        ui_show(UI_SCREEN_INBOX);
-      }
-      break;
-
-    case 3:   /* 确定：打开并把该条标记为已读 */
-      if (s_scr == UI_SCREEN_STANDBY) {
-        ui_show(UI_SCREEN_INBOX);
-      } else if (s_scr == UI_SCREEN_INBOX) {
-        if (s_count > 0u && !s_box[s_sel].read) {
-          s_box[s_sel].read = 1u;
-          if (s_unread > 0u) s_unread--;
+    case UI_SCREEN_MENU:
+      if (key == 1) { if (s_menu_sel > 0u) s_menu_sel--; draw_menu(); }
+      else if (key == 2) { if (s_menu_sel + 1u < MENU_N) s_menu_sel++; draw_menu(); }
+      else if (key == 3) {
+        switch (s_menu_sel) {
+          case 0: s_filter_pos = 0u; s_sel = 0u; s_top = 0u; ui_show(UI_SCREEN_INBOX); break;
+          case 1: s_filter_pos = 1u; s_sel = 0u; s_top = 0u; ui_show(UI_SCREEN_INBOX); break;
+          case 2: ui_show(UI_SCREEN_RADIO); break;
+          case 3: break;                       /* Contrast：真机改 0x81 值 */
+          case 4: lcd_backlight(0); break;     /* Backlight：真机 PB0 */
+          case 5: ui_show(UI_SCREEN_ABOUT); break;
+          default: break;
         }
-        s_page = 0u;
-        ui_show(UI_SCREEN_DETAIL);
       }
+      else if (key == 4) ui_show(UI_SCREEN_HOME);
       break;
 
-    case 4:   /* 返回 */
-      if (s_scr == UI_SCREEN_DETAIL) ui_show(UI_SCREEN_INBOX);
-      else                           ui_show(UI_SCREEN_STANDBY);
+    case UI_SCREEN_INBOX:
+      if (key == 1) { if (s_sel > 0u) s_sel--; draw_inbox(); }
+      else if (key == 2) { if (s_sel + 1u < visible_count()) s_sel++; draw_inbox(); }
+      else if (key == 3) {
+        if (visible_count() > 0u) {
+          uint8_t idx = nth_visible(s_sel);
+          if (!s_box[idx].read) { s_box[idx].read = 1u; if (s_unread > 0u) s_unread--; }
+          s_page = 0u;
+          ui_show(UI_SCREEN_DETAIL);
+        }
+      }
+      else if (key == 4) ui_show(UI_SCREEN_MENU);
+      else if (key == 8 && visible_count() > 0u) { s_confirm = 1u; redraw(); }
       break;
 
-    case 8:   /* 删除 -> 先弹确认 */
-      if ((s_scr == UI_SCREEN_INBOX || s_scr == UI_SCREEN_DETAIL) && s_count > 0u) {
-        s_confirm = 1u;
-        redraw();
-      }
+    case UI_SCREEN_DETAIL:
+      if (key == 1) { if (s_page > 0u) s_page--; else if (s_sel > 0u) s_sel--; draw_detail(); }
+      else if (key == 2) { s_page++; draw_detail(); }
+      else if (key == 4) ui_show(UI_SCREEN_INBOX);
+      else if (key == 8) { s_confirm = 1u; redraw(); }
+      break;
+
+    case UI_SCREEN_RADIO:
+    case UI_SCREEN_ABOUT:
+      if (key == 4 || key == 3) ui_show(UI_SCREEN_MENU);
       break;
 
     default:
+      if (key == 4) ui_show(UI_SCREEN_HOME);
       break;
   }
 }
 
 void ui_set_rx_freq_khz(uint32_t khz) { s_freq_khz = khz; }
+void ui_set_smeter(uint8_t s) { s_smeter = (s > 9u) ? 9u : s; }
+void ui_set_muted(uint8_t muted) { s_muted = muted ? 1u : 0u; }
+void ui_set_clock_ms(uint32_t ms) { s_now_ms = ms; }
+void ui_set_radio_stats(uint16_t rssi, uint16_t snr, uint16_t afc, uint16_t exn)
+{ s_rssi = rssi; s_snr = snr; s_afc = afc; s_exn = exn; }
+
 uint16_t ui_inbox_count(void) { return s_count; }
 uint16_t ui_unread_count(void) { return s_unread; }
 uint16_t ui_rx_total(void) { return s_rx_total; }
@@ -565,5 +810,5 @@ uint16_t ui_dup_total(void) { return s_dup_total; }
 void ui_tick(uint32_t ms)
 {
   s_now_ms += ms;
-  (void)s_now_ms;
+  if (s_scr == UI_SCREEN_HOME) draw_home();   /* 大时钟需要重绘 */
 }

@@ -187,7 +187,7 @@ UI harness: simulator/src/ui_harness.c（待机/收件箱/详情/删除 + 收件
 
 - `lcd_st7567.c` 加 `#ifdef LCD_SIM`：命令/数据走 `lcd_sim_*`，绘图/fb/字体完全复用；真机仍走 HAL GPIO。
 - `sim_hal.c`：最小 HAL/GPIO/延时桩，让 `lcd_st7567.c` 可在 PC 编译。
-- `lcd_sim.c`：实现 ST7567 命令子集（页/列地址、显示开关、反显、全亮、起始行、SEG/COM 方向），SDL2 渲染 128×64，支持放大、反显、背光、截图。
+- `lcd_sim.c`：实现 ST7567 命令子集（页/列地址、显示开关、反显、全亮、起始行、SEG/COM 方向），SDL2 渲染 128×64，支持放大、反显、背光、截图；按 `F3` 可对比两种面板 SEG 方向。
 - `ui_harness.c`：收件箱数据模型（消息/位置/Mic-E/其它）+ 待机/列表/详情/删除界面，支持滚动与分页；解析复用 `ax25.c`、`aprs.c`。
 - `sim_feed.c`：三种数据源 —— `--wav`（音频→`modem.c`→UI）、`--replay`（串口日志 `[RAW] hex=`）、`--demo`（内置示例）。
 - 构建：`simulator/build_win.ps1`（Windows 免安装，TinyCC + 内置 SDL2，推荐）；`simulator/CMakeLists.txt` 与 `simulator/Makefile` 保留给装好 MSYS2 / vcpkg / w64devkit 的机器。
@@ -226,10 +226,17 @@ UI harness: simulator/src/ui_harness.c（待机/收件箱/详情/删除 + 收件
   这个混搭会让整屏左右镜像；现改为 `0xA0` + `0xC0`。模拟器按状态机忠实复现，
   改后各界面文字立即正常（待机/收件箱/详情均已读屏验证）。
 
-- **UI 优化（双字体）**：新增 6×8 小字体 `font6x8.h`（`tools/gen_font.py --small`），
-  驱动新增 `lcd_draw_string6x8()` / `lcd_fill_rect()`；版面统一为「8×16 标题 + 分隔线 + 6 行 6×8」。
-  收件箱 6 行列表带正文摘要与未读 `*`、选中行反显；详情正文 2 行 → 5 行并显示中继路径；
-  新增开机画面与删除二次确认弹窗；居中/右对齐吸附字符栅格。
+- **UI 重设计：复古寻呼机（BB 机）风格**（按 `ui-design` + `taste-skill` overlay 契约）。
+  适用范围已在 README 13.5 说明：两个 skill 的 Web 工程半边不适用于 1-bit LCD，只执行
+  Brief Inference / Design Dials / Anti-slop 三块，并把 Web 护栏换成嵌入式等价物。
+  - Design Read：90 年代末点阵寻呼机语言；Dials = `6 / 2 / 7`（密度 7 → 1px 细线分隔、不用卡片盒）
+  - 单一 chrome 系统：反显状态栏（信号格 + 静音 + 未读 + 信封）+ 细线 + 6 行网格 + 右侧滚动轨；
+    选择态一律反显条，不在内容里再套框
+  - 新增 6×8 字体 `font6x8.h`；驱动新增 `lcd_hline/vline/rect` 与 2 倍放大绘制（16×32 大时钟）
+  - 新屏幕：`home`（大时钟 + 状态栏）、`menu`（6 项图标菜单）、`radio`（真实 RSSI/SNR/AFC/EXN）、
+    `about`、`confirm`（内嵌双线框）；`inbox` 改为最新在上
+  - 图标家族统一 8×8、1px 线宽；状态栏与 radio 页的数据来自日志里真实的 `S=` / `R19=` 行
+  - 诚实留白：电池位保留未启用（无采样电路）、大时钟为开机计时（无 RTC）、Contrast 项模拟器空操作
 ### 8.4 后续（S4 候选）
 
 - 详情页接入删除确认、未读标记与时间戳老化（`已读/未读`、`AGE`）；

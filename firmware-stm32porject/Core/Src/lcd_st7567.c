@@ -164,6 +164,61 @@ void lcd_draw_string8x16(uint8_t x, uint8_t y, const char *s, uint8_t on)
   }
 }
 
+void lcd_hline(uint8_t x0, uint8_t x1, uint8_t y, uint8_t on)
+{
+  uint8_t x, t;
+  if (y >= LCD_H) return;
+  if (x0 > x1) { t = x0; x0 = x1; x1 = t; }
+  if (x1 >= LCD_W) x1 = LCD_W - 1u;
+  for (x = x0; x <= x1; x++) lcd_pixel(x, y, on);
+}
+
+void lcd_vline(uint8_t x, uint8_t y0, uint8_t y1, uint8_t on)
+{
+  uint8_t y, t;
+  if (x >= LCD_W) return;
+  if (y0 > y1) { t = y0; y0 = y1; y1 = t; }
+  if (y1 >= LCD_H) y1 = LCD_H - 1u;
+  for (y = y0; y <= y1; y++) lcd_pixel(x, y, on);
+}
+
+void lcd_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on)
+{
+  lcd_hline(x0, x1, y0, on);
+  lcd_hline(x0, x1, y1, on);
+  lcd_vline(x0, y0, y1, on);
+  lcd_vline(x1, y0, y1, on);
+}
+
+void lcd_draw_char8x16_scaled(uint8_t x, uint8_t y, uint8_t ch, uint8_t on, uint8_t scale)
+{
+  const uint8_t *g;
+  int r, c, sy, sx;
+  if (scale < 1u) scale = 1u;
+  if (ch < 0x20u) ch = 0x20u;
+  if (ch > 0x7Fu) ch = 0x20u;
+  g = font8x16[ch - 0x20u];
+  for (r = 0; r < 16; r++) {
+    for (c = 0; c < 8; c++) {
+      if (!(g[r] & (0x80u >> c))) continue;
+      for (sy = 0; sy < scale; sy++)
+        for (sx = 0; sx < scale; sx++)
+          lcd_pixel((uint8_t)(x + c * scale + sx), (uint8_t)(y + r * scale + sy), on);
+    }
+  }
+}
+
+void lcd_draw_string8x16_scaled(uint8_t x, uint8_t y, const char *s, uint8_t on, uint8_t scale)
+{
+  uint8_t cx = x;
+  if (scale < 1u) scale = 1u;
+  while (*s && (uint16_t)cx + 8u * scale <= LCD_W) {
+    lcd_draw_char8x16_scaled(cx, y, (uint8_t)*s, on, scale);
+    cx = (uint8_t)(cx + 8u * scale);
+    s++;
+  }
+}
+
 void lcd_fill_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on)
 {
   uint8_t x, y, t;

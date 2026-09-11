@@ -19,6 +19,10 @@ static int parse_screen(const char *s)
   if (!strcmp(s, "standby") || !strcmp(s, "s")) return UI_SCREEN_STANDBY;
   if (!strcmp(s, "inbox")   || !strcmp(s, "i")) return UI_SCREEN_INBOX;
   if (!strcmp(s, "detail")  || !strcmp(s, "d")) return UI_SCREEN_DETAIL;
+  if (!strcmp(s, "home")    || !strcmp(s, "h")) return UI_SCREEN_HOME;
+  if (!strcmp(s, "menu")    || !strcmp(s, "m")) return UI_SCREEN_MENU;
+  if (!strcmp(s, "radio")   || !strcmp(s, "r")) return UI_SCREEN_RADIO;
+  if (!strcmp(s, "about")) return UI_SCREEN_ABOUT;
   if (!strcmp(s, "boot")    || !strcmp(s, "b")) return UI_SCREEN_BOOT;
   if (!strcmp(s, "confirm") || !strcmp(s, "c")) return UI_SCREEN_CONFIRM;
   return -1;
@@ -33,6 +37,7 @@ static void usage(void)
          "  --screen NAME    boot|standby|inbox|detail|pattern\n"
          "  --wav FILE       WAV -> modem.c 解调 -> 收件箱\n"
          "  --replay FILE    串口日志 [RAW] hex= 回放到收件箱\n"
+         "  --clock SEC      主页大时钟的固定值（自检截图用）\n"
          "  --demo           注入内置示例帧\n"
          "\n按键: 上下=选择  Enter=打开  Backspace=返回  Delete=删除(二次确认)\n"
          "      T=图案  M=收件箱  S=待机  I=反显  B=背光  F3=面板方向  F12=截图  Esc=退出\n");
@@ -44,6 +49,7 @@ int main(int argc, char **argv)
   int selftest = 0;
   int screen = UI_SCREEN_STANDBY;
   int demo = 0;
+  int clock_sec = -1;
   int i;
   const char *wav = NULL, *log = NULL, *out = "sim_selftest.bmp";
 
@@ -57,6 +63,7 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav = argv[++i];
     else if (!strcmp(argv[i], "--replay") && i + 1 < argc) log = argv[++i];
+    else if (!strcmp(argv[i], "--clock") && i + 1 < argc) clock_sec = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--demo")) demo = 1;
     else if (!strcmp(argv[i], "--standby")) screen = UI_SCREEN_STANDBY;
     else if (!strcmp(argv[i], "--message") || !strcmp(argv[i], "--inbox")) screen = UI_SCREEN_INBOX;
@@ -68,6 +75,7 @@ int main(int argc, char **argv)
 
   ui_init();
   ui_set_rx_freq_khz(144640u);
+  if (clock_sec >= 0) ui_set_clock_ms((uint32_t)clock_sec * 1000u);
 
   if (wav) sim_feed_wav(wav);
   if (log) sim_feed_log(log);
