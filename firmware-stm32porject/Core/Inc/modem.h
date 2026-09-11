@@ -6,8 +6,6 @@ typedef enum { AFSK_NONE=0, AFSK_MARK=1, AFSK_SPACE=2 } afsk_tone_t;
 void modem_init(void);
 /* ADC 版解调：由 TIM3 以 9600Hz 采样后调用 */
 void modem_adc_sample(uint16_t adc);
-void modem_on_capture_period(uint16_t period_us);
-void modem_sample(void);
 void modem_reset_sync(void);
 /* 诊断：最近 ADC 原始值(modem_last_period)与判出的音调（1=MARK, 2=SPACE, 0=无） */
 uint16_t modem_last_period(void);

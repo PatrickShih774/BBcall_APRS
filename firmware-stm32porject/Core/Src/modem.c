@@ -300,10 +300,6 @@ void modem_adc_sample(uint16_t adc)
   if (tone_full == 0u) s_mark_hits++; else s_space_hits++;
 }
 
-/* ---------- 旧 TIM2 捕获接口（保留以兼容调用，不再产生数据） ---------- */
-void modem_on_capture_period(uint16_t period_us) { (void)period_us; }
-void modem_sample(void) { }
-
 uint16_t modem_last_period(void) { return s_last_adc; }  /* 诊断：最近 ADC 原始值 */
 uint8_t modem_tone_now(void) { return s_last_tone; }
 

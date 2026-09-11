@@ -17,14 +17,10 @@ void hw_console_u8(uint8_t v);
 void hw_console_u16(uint16_t v);
 void hw_console_hex8(uint8_t v);
 void hw_console_hex16(uint16_t v);
-/* 寄存器级 TIM2_CH2 输入捕获 + TIM3 采样定时器（中断回调进 modem） */
+/* 寄存器级 TIM3 9600Hz ADC 采样（中断回调进 modem） */
 void hw_timers_init(void);
 /* 独立看门狗（IWDG，LSI~40kHz）：ms 超时；调试暂停时冻结 */
 void hw_watchdog_init(uint32_t ms);
 void hw_watchdog_feed(void);
-/* 诊断：TIM2_CH2 捕获中断累计次数 / PA1 当前输入电平 */
-uint32_t hw_capture_count(void);
-uint8_t hw_capture_pin_level(void);
-void TIM2_IRQHandler(void);
 void TIM3_IRQHandler(void);
 #endif

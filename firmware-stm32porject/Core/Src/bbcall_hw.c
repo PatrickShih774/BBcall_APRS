@@ -8,7 +8,6 @@
 #include "modem.h"
 
 static uint8_t s_clock72 = 0;
-static volatile uint32_t s_capture_count = 0;
 
 /* ---------------- 时钟 ---------------- */
 void hw_clock_try_72mhz(void)
@@ -236,33 +235,11 @@ void hw_watchdog_init(uint32_t ms)
 void hw_watchdog_feed(void)
 {
   IWDG->KR = 0xAAAAu;
-}void TIM2_IRQHandler(void)
-{
-  static uint16_t last = 0;
-  static uint8_t have_last = 0;
-  if (TIM2->SR & 0x0004u) {   /* CC2IF */
-    TIM2->SR = (uint16_t)~0x0004u;
-    s_capture_count++;
-    uint16_t now = (uint16_t)TIM2->CCR2;
-    if (!have_last) { last = now; have_last = 1; return; }
-    uint16_t period = (uint16_t)(now - last);   /* 16 位回绕减法 */
-    /* 去抖：真实 AFSK 半周期最短约 455µs（2200Hz），
-     * <250µs 的沿是波形过零毛刺/D 类残留，不更新基准。 */
-    if (period < 250u) return;
-    last = now;
-    if (period > 0u && period < 5000u) modem_on_capture_period((uint16_t)period);
-  }
 }
 
-uint32_t hw_capture_count(void)
-{
-  return s_capture_count;
-}
 
-uint8_t hw_capture_pin_level(void)
-{
-  return HAL_GPIO_ReadPin(AF_CAPTURE_GPIO, AF_CAPTURE_PIN) ? 1u : 0u;
-}
+
+
 
 void TIM3_IRQHandler(void)
 {
