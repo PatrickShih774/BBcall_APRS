@@ -186,7 +186,7 @@ void lcd_sim_poll_events(void)
         case SDLK_RETURN: case SDLK_KP_ENTER: push_key(SIM_KEY_OK); break;
         case SDLK_BACKSPACE: push_key(SIM_KEY_BACK); break;
         case SDLK_t: push_key(SIM_KEY_PATTERN); break;
-        case SDLK_m: push_key(SIM_KEY_MENU); break;
+        case SDLK_m: push_key(SIM_KEY_MESSAGES); break;
         case SDLK_s: push_key(SIM_KEY_STANDBY); break;
         case SDLK_i: lcd_sim_toggle_invert(); break;
         case SDLK_b: lcd_sim_toggle_backlight(); break;

@@ -57,6 +57,7 @@ static uint8_t   s_msg_sel;           /* Inbox/Sent 光标 */
 static uint8_t   s_msg_top;
 
 static uint8_t   s_cn_page;           /* 中文字库样张分页 */
+static uint8_t   s_root = UI_SCREEN_MSG_INBOX;  /* 一级屏：待机页与收件箱并列，记住从哪个进二级菜单 */
 static uint8_t   s_smeter;            /* 0..9 */
 static uint8_t   s_muted;
 static uint16_t  s_rx_total, s_unread, s_dup_total;
@@ -310,7 +311,7 @@ static void draw_home(void)
   char buf[40];
   char clk[8];
   lcd_clear(0);
-  status_rail("STATUS");
+  status_rail("STANDBY");
   hair(SEP_Y);
 
   clock_hhmm(clk, sizeof(clk));
@@ -343,27 +344,25 @@ static void draw_home(void)
 /* ------------------------------------------------------------------ */
 /* 菜单                                                                */
 /* ------------------------------------------------------------------ */
-#define MENU_N 6
-/* 二级菜单：只放设置与诊断。主功能（消息）是根屏，不在这里。 */
+/* 二级菜单：只放设置与诊断。待机页与收件箱是一级屏，不在这里。 */
+#define MENU_N 5
 static const char *const s_menu_label[MENU_N] = {
-  "Status", "Heard", "Radio", "Contrast", "Backlight", "About"
+  "Heard", "Radio", "Contrast", "Backlight", "About"
 };
 
 static void menu_icon(uint8_t i, uint8_t x, uint8_t y, uint8_t ink)
 {
   switch (i) {
-    case 0: icon_mail(x, y, ink);     break;
-    case 1: icon_ant(x, y, ink);      break;
-    case 2: icon_wave(x, y, ink);     break;
-    case 3: icon_contrast(x, y, ink); break;
-    case 4: icon_power(x, y, ink);    break;
+    case 0: icon_ant(x, y, ink);      break;
+    case 1: icon_wave(x, y, ink);     break;
+    case 2: icon_contrast(x, y, ink); break;
+    case 3: icon_power(x, y, ink);    break;
     default: icon_info(x, y, ink);    break;
   }
 }
 
 static void draw_menu(void)
 {
-  char buf[24];
   uint8_t i;
   lcd_clear(0);
   status_rail("MENU");
@@ -376,10 +375,6 @@ static void draw_menu(void)
     if (sel) lcd_fill_rect(0, y, 123, (uint8_t)(y + 7u), 1);
     menu_icon(i, 2, y, ink);
     t6(12, y, s_menu_label[i], ink);
-    if (i == 0 && s_unread > 0u) {
-      snprintf(buf, sizeof(buf), "%u", (unsigned)s_unread);
-      t6((uint8_t)(((120 - (int)strlen(buf) * 6) / 6) * 6), y, buf, ink);
-    }
   }
   scroll_rail(0, MENU_N, MENU_N);
   lcd_flush();
@@ -830,7 +825,7 @@ void ui_init(void)
 {
   lcd_init();
   s_count = 0u; s_sel = 0u; s_top = 0u; s_page = 0u; s_confirm = 0u;
-  s_menu_sel = 0u; s_msg_sel = 0u;
+  s_menu_sel = 0u; s_msg_sel = 0u; s_root = UI_SCREEN_MSG_INBOX;
   s_msg_top = 0u; s_cn_page = 0u;
   msg_store_init();
   s_rx_total = 0u; s_unread = 0u; s_dup_total = 0u; s_dup_pos = 0u;
@@ -853,6 +848,8 @@ void ui_show(int screen)
   s_scr = (uint8_t)screen;
   s_page = 0u;
   s_confirm = 0u;
+  /* 待机页与收件箱是一级屏：记住是从哪一个进的二级菜单 */
+  if (s_scr == UI_SCREEN_HOME || s_scr == UI_SCREEN_MSG_INBOX) s_root = s_scr;
   redraw();
 }
 
@@ -873,8 +870,8 @@ void ui_handle_key(int key)
 
   switch (key) {
     case 5:  ui_show(UI_SCREEN_PATTERN); return;   /* T 图案 */
-    case 9:  ui_show(UI_SCREEN_MENU);    return;   /* M 菜单 */
-    case 7:  ui_show(UI_SCREEN_HOME);    return;   /* S 主页 */
+    case 9:  s_root = UI_SCREEN_MSG_INBOX; ui_show(UI_SCREEN_MSG_INBOX); return;  /* M 收件箱（一级） */
+    case 7:  s_root = UI_SCREEN_HOME;      ui_show(UI_SCREEN_HOME);      return;  /* S 待机页（一级） */
   }
 
   switch (s_scr) {
@@ -887,16 +884,14 @@ void ui_handle_key(int key)
       else if (key == 2) { if (s_menu_sel + 1u < MENU_N) s_menu_sel++; draw_menu(); }
       else if (key == 3) {
         switch (s_menu_sel) {
-          case 0: ui_show(UI_SCREEN_HOME); break;
-          case 1: s_sel = 0u; s_top = 0u; ui_show(UI_SCREEN_INBOX); break;
-          case 2: ui_show(UI_SCREEN_RADIO); break;
-          case 3: break;                       /* Contrast：真机改 0x81 值 */
-          case 4: lcd_backlight(0); break;     /* Backlight：真机 PB0 */
-          case 5: ui_show(UI_SCREEN_ABOUT); break;
-          default: break;
+          case 0: s_sel = 0u; s_top = 0u; ui_show(UI_SCREEN_INBOX); break;  /* Heard */
+          case 1: ui_show(UI_SCREEN_RADIO); break;
+          case 2: break;                       /* Contrast：真机改 0x81 值 */
+          case 3: lcd_backlight(0); break;     /* Backlight：真机 PB0 */
+          default: ui_show(UI_SCREEN_ABOUT); break;
         }
       }
-      else if (key == 4) ui_show(UI_SCREEN_MSG_INBOX);   /* 根屏是消息列表 */
+      else if (key == 4) ui_show(s_root);   /* 回进入菜单前的一级屏 */
       break;
 
     case UI_SCREEN_INBOX:

@@ -720,16 +720,17 @@ python tools\gen_font.py --bdf tools\bdf\7x13.bdf --w 8 --h 16 `
 > 改字体或尺寸后必须重跑并抽查 `M W H K N L` 与降部 `g j p q y`。
 ### 13.5 UI 重设计：复古寻呼机（BB 机）风格
 
-**导航结构**：本机只有一个主功能（收消息），所以**收件箱就是根屏，开机直接进**；
-设置与诊断全部退到二级菜单。路径从原来的四级缩短为一级：
+**导航结构**：一级屏只有两个且并列，**待机页与收件箱**；设置与诊断全部进二级菜单。
 
 ```text
-开机 → messages（收件箱，根屏）
-         ├ Enter → READ
-         ├ DEL   → 删除确认
-         └ BACK  → MENU（Status / Heard / Radio / Contrast / Backlight / About）
+开机 → boot 闪屏 → 一级屏（并列，可随时互切）
+                     ├ STANDBY   待机页：大时钟 + 频率 + 计数 + 最近一条   （S 键）
+                     └ MESSAGES  收件箱：主功能，开机默认停在这里          （M 键）
+                            │ BACK
+                            ▼
+                     二级菜单 MENU：Heard / Radio / Contrast / Backlight / About
+                            │ BACK → 回到进入菜单前的那块一级屏
 ```
-
 界面按 `ui-design` + `taste-skill` 的 overlay 契约重做。**完整规范、检查表与真机移植步骤见
 [UISkill.md](UISkill.md)**（含适用范围声明、Design Dials、屏幕版面模板、硬规则、Pre-flight 检查表）。
 这里只留摘要与验收记录。

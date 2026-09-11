@@ -10,7 +10,7 @@
 #define SIM_KEY_MESSAGE  6
 #define SIM_KEY_STANDBY  7
 #define SIM_KEY_DEL      8
-#define SIM_KEY_MENU     9
+#define SIM_KEY_MESSAGES 9
 
 int  lcd_sim_init(const char *title, int scale);
 void lcd_sim_shutdown(void);

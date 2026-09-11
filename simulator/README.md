@@ -137,10 +137,10 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 |---|---|
 | ↑ / ↓ | 菜单或列表上下移动；详情页翻页 |
 | Enter | 打开（主页/菜单进入下一级；列表进入详情并标记已读） |
-| Backspace | 返回上一级（详情 -> 列表 -> 菜单 -> 主页） |
+| Backspace | 返回上一级；在任一一级屏（待机 / 收件箱）上进入二级菜单 |
 | Delete | 删除选中消息（反显弹窗二次确认） |
-| M | 二级菜单（设置 / 诊断；从收件箱按 BACK 也能进） |
-| S | 主页 |
+| M | 收件箱（一级屏，主功能） |
+| S | 待机页（一级屏：大时钟 + 频率 + 计数 + 最近一条） |
 | T | 字体样张 |
 | I / B | 反显 / 背光开关 |
 | F3 | 切换面板 SEG 方向（对比两种接线） |
@@ -150,20 +150,26 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 ### 导航
 
 ```text
-开机 → boot 闪屏 → messages（收件箱，根屏）
-                     ├ Enter → READ
-                     ├ DEL   → 删除确认
-                     └ BACK  → MENU（Status / Heard / Radio / Contrast / Backlight / About）
+开机 → boot 闪屏
+        ↓
+   一级屏（并列，可随时互切）
+     ├ STANDBY   待机页（S 键）   大时钟 + 频率 + RX/MSG + 最近一条
+     └ MESSAGES  收件箱（M 键）   主功能，开机默认停在这里
+            │ BACK
+            ▼
+     二级菜单 MENU：Heard / Radio / Contrast / Backlight / About
+            │ BACK → 回到进入菜单前的那块一级屏（不是固定回某一个）
 ```
 
-自检可以直接验证这条路径（`--keys` 是按键序列，1=上 2=下 3=OK 4=BACK 5=图案 7=主页 8=删除 9=菜单）：
+自检可以直接验证整条路径（`--keys` 是按键序列：1=上 2=下 3=OK 4=BACK 5=图案 7=待机 8=删除 9=收件箱）：
 
 ```powershell
-.\bbcall_sim.exe --selftest --demo --scale 2 --out root.bmp             # 开机即收件箱
-.\bbcall_sim.exe --selftest --demo --scale 2 --keys 4 --out menu.bmp    # BACK -> 二级菜单
-.\bbcall_sim.exe --selftest --demo --scale 2 --keys 4,3 --out status.bmp # 再 OK -> STATUS
+.\bbcall_sim.exe --selftest --demo --scale 2 --out a.bmp                  # 开机即收件箱
+.\bbcall_sim.exe --selftest --demo --scale 2 --keys 7 --out b.bmp         # S -> 待机页
+.\bbcall_sim.exe --selftest --demo --scale 2 --keys 7,4 --out c.bmp       # 待机 BACK -> 二级菜单
+.\bbcall_sim.exe --selftest --demo --scale 2 --keys 7,4,4 --out d.bmp     # 菜单 BACK -> 回待机页
+.\bbcall_sim.exe --selftest --demo --scale 2 --keys 4,3 --out e.bmp       # 菜单第 1 项 -> HEARD
 ```
-
 ### 自检与数据
 
 ```powershell
