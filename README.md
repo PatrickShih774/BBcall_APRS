@@ -372,6 +372,9 @@ python tools/bk4802_freq.py
 
 # 生成标准 1200 baud APRS 测试音频（LSB-first）
 python tools/gen_afsk_wav.py tools/test_aprs_144.wav
+
+# 生成带 VOX 触发的版本（前 100ms 触发音 + 100ms 保持音 + 数据）
+python tools/gen_afsk_wav.py --vox tools/test_aprs_144_vox.wav
 ```
 
 `tools/test_aprs_144.wav` 的内容是 `APRS → BG5BLH` 的 APRS 消息：
