@@ -20,8 +20,8 @@ RATE = 48000
 MARK_HZ = 1200.0
 SPACE_HZ = 2200.0
 BAUD = 1200
-VOX_TRIGGER_MS = 100
-VOX_DELAY_MS = 100
+VOX_TRIGGER_MS = 150
+VOX_DELAY_MS = 150
 
 
 def tx_bits(frame: bytes):
@@ -60,10 +60,10 @@ def main(out_path: str, vox: bool = False):
     pcm = bytearray()
 
     if vox:
-        # 100ms 触发音：让 VOX 打开
+        # 触发音：让 VOX 打开
         phase = append_tone(pcm, phase, MARK_HZ, VOX_TRIGGER_MS, 0.35)
-        # 100ms 低电平保持：等 PTT 完全稳定，同时不让 VOX 掉
-        phase = append_tone(pcm, phase, MARK_HZ, VOX_DELAY_MS, 0.05)
+        # 保持音：等 PTT 完全稳定，同时确保 VOX 不掉（0.15 幅度足够稳）
+        phase = append_tone(pcm, phase, MARK_HZ, VOX_DELAY_MS, 0.15)
 
     for byte in tones:
         for i in range(8):
