@@ -17,6 +17,7 @@
 - [硬件改进方案](#9-硬件改进方案提升解码率)
 - [BB 机功能规划](PLAN.md)
 - [PC LCD 模拟器](#13-pc-端-lcd-模拟器sdl2)
+- [UI 设计规范 UISkill.md](UISkill.md)
 - [许可与合规](#11-许可与合规)
 
 用 **BK4802P（玩具对讲 FM 收发芯片）+ STM32F103C8T6 + ST7567 12864 LCD**
@@ -657,59 +658,26 @@ y48  |1/2    RELAY    |
 
 ### 13.5 UI 重设计：复古寻呼机（BB 机）风格
 
-原来只有 8x16 一套字体，每屏 4 行 x 16 字符，列表只有呼号、详情只有 2 行正文，视觉上更像通用调试界面。
-现在按 `ui-design` + `taste-skill` 的 overlay 契约重做。
+界面按 `ui-design` + `taste-skill` 的 overlay 契约重做。**完整规范、检查表与真机移植步骤见
+[UISkill.md](UISkill.md)**（含适用范围声明、Design Dials、屏幕版面模板、硬规则、Pre-flight 检查表）。
+这里只留摘要与验收记录。
 
-**先说适用范围（诚实优先）**：这两个 skill 的目标产物是 HTML/CSS/JS。按 taste 第 13 节「OUT OF SCOPE」
-与 ui-design 第 1 节（Track A/B 均为 Web），**工程半边不适用于 128x64 1-bit LCD**：没有组件库、
-没有 WCAG、没有 Core Web Vitals、没有 GSAP。这里只执行 taste 的三块内容，并把 Web 工程护栏换成嵌入式等价物：
+- **Design Read**：90 年代末点阵寻呼机（Motorola Advisor 一类）视觉语言；
+  `DESIGN_VARIANCE 6 / MOTION_INTENSITY 2 / VISUAL_DENSITY 7`
+  （密度 7 -> 用 1px 细线分隔数据、不用卡片盒；运动 2 -> 只保留大时钟冒号闪烁）。
+- **唯一 chrome 系统**：反显状态栏（信号格 + 静音 + 未读数 + 信封）+ 1px 细线 +
+  6 行 6x8 网格（y = 10/18/26/34/42/50）+ 右侧滚动轨；选择态一律整行反显。
+- **两套字体**：`font8x16.h`（16 字符/行，标题；2 倍放大成 16x32 用作大时钟）、
+  `font6x8.h`（21 字符/行，状态栏 / 列表 / 正文 / 菜单）。
+- 界面状态机在 `simulator/src/ui_harness.c`；绘图原语（`lcd_fill_rect` / `lcd_hline` / `lcd_vline` /
+  `lcd_rect` / 放大绘制 / 两套字模）在固件 `lcd_st7567.c`，**真机与模拟器同一份代码**。
+- 数据全部来自真实来源：状态栏信号格与 `radio` 页的 RSSI/SNR/AFC/EXN 取自日志里真实的
+  `S=` 与 `R19=` 行；本板没有电池采样电路，所以电池位保留但留空，不画假电量。
 
-| Web 原规则 | 128x64 1-bit LCD 的等价物 |
-|---|---|
-| 颜色对比 / 单一强调色 | 只有开与关两态，层级靠**面积、墨量、反显**；「强调色」只能是反显 |
-| `prefers-reduced-motion` | **刷新成本与闪烁**：只重绘必要区域，不做全屏闪 |
-| Dark mode | 屏的两种极性：**背光正显 / 反显负片**，两者都设计 |
-| Breakpoints / 移动端折叠 | 固定 128x64 网格；密度档 = 6x8 与 8x16 |
-| 禁止手搓 SVG 图标 | 必须自绘 1-bit 图标，等价纪律：**统一 8x8 网格、统一 1px 线宽、单一图标家族** |
+屏幕：`boot` / `home`（16x32 大时钟）/ `menu`（6 项图标菜单）/ `inbox`（最新在上）/ `detail`
+（5 行正文 + `RELAY` 中继路径）/ `radio` / `about` / `confirm`（内嵌双线框模态）/ `pattern`（字体样张）。
 
-**Design Read**：复古手持寻呼机设备 UI，用户是单人业余无线电操作者，采用 90 年代末点阵寻呼机
-（Motorola Advisor 一类）的视觉语言，倾向 1-bit 单色系统：状态图标栏 + 反显选择条 + 大字号时钟。
-
-**Design Dials**：`DESIGN_VARIANCE 6 / MOTION_INTENSITY 2 / VISUAL_DENSITY 7`。密度 7 按 taste 第 7 节
-要求**用 1px 细线分隔数据、不用卡片盒**；运动强度 2 只保留一处有动机的动画（大时钟冒号闪烁，
-作为设备存活反馈）。
-
-**Anti-default**：1-bit 世界最偷懒的默认是「什么都套一个 1px 方框」（等价于 Web 的卡片默认）。
-本项目改用**单一 chrome 系统**，全屏只此一套：
-
-```text
-y0..7    顶部状态栏（反显）：左 屏幕名 | 右 [信号格] 3px [静音] 3px [未读数] 3px [信封]
-y8       1px 细线
-y10..56  内容区，6x8 行网格 y = 10 / 18 / 26 / 34 / 42 / 50
-x124..127 滚动轨（仅列表溢出时出现）
-```
-
-选择态一律用**反显条**，不加箭头、不换色。
-
-**新增 6x8 字体**（`font6x8.h`，由 `tools/gen_font.py --small` 生成，**固件与模拟器共用**），
-每行 21 字符；驱动新增 `lcd_hline` / `lcd_vline` / `lcd_rect` / `lcd_fill_rect` 与 2 倍放大绘制
-（8x16 放大成 16x32 用作大时钟）。全部仍在 `lcd_st7567.c`，真机与模拟器同一份代码。
-
-| 屏幕 | 内容 |
-|---|---|
-| `boot` | 2 倍放大 "BBCALL" + 副标题 + 固件版本 |
-| `home` | 状态栏 + **16x32 大时钟** + 频率/RX 数 + 最近一条来源与位置 |
-| `menu` | 6 项菜单：8x8 图标 + 名称 + 右对齐数值，选中行整行反显 |
-| `inbox` | 6 行，**最新在上**，每行 呼号 + 类型 + 摘要 + 未读 `*` |
-| `detail` | 标题 + 5 行正文 + 页脚（页码 / `RELAY <中继路径>` / `FIX` / `REP`） |
-| `radio` | 频率 + S 表 + RSSI / SNR / AFC / EXN + RX / DUP + 音频状态 |
-| `about` | 版本与硬件信息 |
-| `confirm` | 删除确认：填充块 + 内嵌 1px 框 + 反显文字 |
-
-图标家族统一 8x8、1px 线宽：信号格（4 柱高度 3/5/7/8，按 S 表点亮）、信封、静音喇叭、
-地图针、天线、对比度、信息 i、电源。
-
-用真实 5km 日志回放（`tools/sample_aprs_log.txt` 已补齐每帧之前最近的 `S=` 与 `R19=` 真实状态行）：
+用真实 5km 日志回放（`tools/sample_aprs_log.txt`，已补齐每帧之前最近的真实状态行）：
 
 ```text
 == HOME ==                            == MENU ==
@@ -730,9 +698,5 @@ y50  |BI4BKX C 3116.01N 1*|            y26  |AFC  14    EXN 315|
 
 （表中 `IJ`、`|g` 是读屏工具把 8x8 图标当字形匹配的结果，不是画面内容。）
 
-**已知留白（诚实标注）**：电池图标位保留但未启用，本板没有电池采样电路，与其画一个假电量不如留空；
-大时钟是**开机计时**而非墙上时钟（无 RTC），左侧 `UP` 即为此意；`Contrast` 菜单项在真机上会改
-ST7567 `0x81` 的值，模拟器里是空操作。
-
 > 固件 `bbcall_app.c` 自己的 LCD 画面还是旧的简单版（`BBCALL_LCD_ENABLED=0`，休眠中）。
-> 等 LCD 焊上以后，把 `simulator/src/ui_harness.c` 的这套版面移植过去即可。
+> 等 LCD 焊上后按 [UISkill.md](UISkill.md) 第 9 节移植。
