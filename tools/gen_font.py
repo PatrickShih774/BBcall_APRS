@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-生成 8x16 单色点阵 ASCII 字体（0x20..0x7F），供 ST7567 显示。
-输出: firmware/Src/font8x16.h 的 C 数组。
-用 Windows 等宽字体栅格化；字体可用 gen_font.py 的路径参数更换。
+生成 ST7567 单色点阵 ASCII 字体（0x20..0x7F）。
+
+用法：
+  python tools/gen_font.py <out.h>             # 8x16 大字号（标题/强调）
+  python tools/gen_font.py --small <out.h>     # 6x8 小字号（列表/正文）
+
+用 Windows 等宽字体栅格化；字体可用 CANDIDATES 更换。
+6x8：每字符 8 行、每行 6 像素，存在字节高 6 位（MSB=最左）。
 """
 
 import sys
 from PIL import Image, ImageDraw, ImageFont
-
 
 CANDIDATES = [
     r"C:\Windows\Fonts\consola.ttf",   # Consolas (等宽)
@@ -17,7 +21,7 @@ CANDIDATES = [
 ]
 
 
-def load_font(size: int = 16):
+def load_font(size):
     for p in CANDIDATES:
         try:
             return ImageFont.truetype(p, size=size)
@@ -26,43 +30,49 @@ def load_font(size: int = 16):
     return ImageFont.load_default()
 
 
-def main(out_path: str):
-    font = load_font(16)
-    rows = []
+def render(out_path, cw, ch, font_size, baseline, anchor, name, rows_name, comment):
+    font = load_font(font_size)
+    glyphs = []
     for c in range(0x20, 0x80):
-        img = Image.new("1", (8, 16), 0)
+        img = Image.new("1", (cw, ch), 0)
         d = ImageDraw.Draw(img)
-        # 垂直居中、留一点边距
-        d.text((0, 0), chr(c), font=font, fill=1)
-        # 转成每行一个字节（MSB=最左）
+        if anchor:
+            d.text((0, baseline), chr(c), font=font, fill=1, anchor=anchor)
+        else:
+            d.text((0, 0), chr(c), font=font, fill=1)
         bits = []
-        for y in range(16):
+        for y in range(ch):
             b = 0
-            for x in range(8):
+            for x in range(cw):
                 if img.getpixel((x, y)):
                     b |= (0x80 >> x)
             bits.append(b)
-        rows.append(bits)
+        glyphs.append(bits)
 
-    lines = []
-    lines.append("#ifndef FONT8X16_H")
-    lines.append("#define FONT8X16_H")
-    lines.append("")
-    lines.append("#include <stdint.h>")
-    lines.append("/* 由 tools/gen_font.py 生成：ASCII 0x20..0x7F, 每字符 16 行, 每行 8bit(MSB=左) */")
-    lines.append("const uint8_t font8x16[96][16] = {")
-    for bits in rows:
-        s = ", ".join("0x%02X" % b for b in bits)
-        lines.append("    { " + s + " },")
-    lines.append("};")
-    lines.append("")
-    lines.append("#endif")
+    lines = ["#ifndef %s" % name.upper().replace(".", "_").replace("H", "H"),
+             "#define %s" % name.upper().replace(".", "_"),
+             "",
+             "#include <stdint.h>",
+             "/* 由 tools/gen_font.py 生成：ASCII 0x20..0x7F, 每字符 %d 行, 每行 %dbit(MSB=左) */" % (ch, cw),
+             "const uint8_t %s[96][%d] = {" % (rows_name, ch)]
+    for bits in glyphs:
+        lines.append("    { " + ", ".join("0x%02X" % b for b in bits) + " },")
+    lines += ["};", "", "#endif"]
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    print("wrote %s (%d glyphs)" % (out_path, len(rows)))
+    print("wrote %s (%d glyphs, %dx%d) %s" % (out_path, len(glyphs), cw, ch, comment))
+
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] == "--small":
+        out = args[1] if len(args) > 1 else "font6x8.h"
+        render(out, 6, 8, 9, 7, "ls", "font6x8.h", "font6x8", "小字号")
+    else:
+        out = args[0] if args else "font8x16.h"
+        render(out, 8, 16, 16, 0, None, "font8x16.h", "font8x16", "大字号")
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else "firmware/Src/font8x16.h"
-    main(out)
+    main()

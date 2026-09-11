@@ -9,13 +9,15 @@
 #define UI_KIND_OTHER 3
 
 #define UI_INBOX_MAX 24
-#define UI_BODY_MAX  80
+#define UI_BODY_MAX  128
 
 /* 屏幕编号（与 lcd_sim 按键编号一致，便于 --screen） */
 #define UI_SCREEN_PATTERN 5
 #define UI_SCREEN_INBOX   6
 #define UI_SCREEN_STANDBY 7
 #define UI_SCREEN_DETAIL  10
+#define UI_SCREEN_BOOT    11
+#define UI_SCREEN_CONFIRM 12   /* 删除确认弹窗（叠在收件箱上） */
 
 void     ui_init(void);
 void     ui_handle_key(int key);
@@ -28,6 +30,7 @@ uint8_t  ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
                       uint8_t fixed, uint8_t repeat);
 
 uint16_t ui_inbox_count(void);
+uint16_t ui_unread_count(void);
 uint16_t ui_rx_total(void);
 uint16_t ui_dup_total(void);
 #endif

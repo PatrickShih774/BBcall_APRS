@@ -19,6 +19,8 @@ static int parse_screen(const char *s)
   if (!strcmp(s, "standby") || !strcmp(s, "s")) return UI_SCREEN_STANDBY;
   if (!strcmp(s, "inbox")   || !strcmp(s, "i")) return UI_SCREEN_INBOX;
   if (!strcmp(s, "detail")  || !strcmp(s, "d")) return UI_SCREEN_DETAIL;
+  if (!strcmp(s, "boot")    || !strcmp(s, "b")) return UI_SCREEN_BOOT;
+  if (!strcmp(s, "confirm") || !strcmp(s, "c")) return UI_SCREEN_CONFIRM;
   return -1;
 }
 
@@ -28,11 +30,11 @@ static void usage(void)
          "  --scale N        放大倍数 1..12（默认 4）\n"
          "  --selftest       无窗口渲染一帧并写出 BMP\n"
          "  --out FILE       自检输出文件名（默认 sim_selftest.bmp）\n"
-         "  --screen NAME    pattern|standby|inbox|detail\n"
+         "  --screen NAME    boot|standby|inbox|detail|pattern\n"
          "  --wav FILE       WAV -> modem.c 解调 -> 收件箱\n"
          "  --replay FILE    串口日志 [RAW] hex= 回放到收件箱\n"
          "  --demo           注入内置示例帧\n"
-         "\n按键: 上下=选择  Enter=打开  Backspace=返回  Delete=删除\n"
+         "\n按键: 上下=选择  Enter=打开  Backspace=返回  Delete=删除(二次确认)\n"
          "      T=图案  M=收件箱  S=待机  I=反显  B=背光  F3=面板方向  F12=截图  Esc=退出\n");
 }
 
@@ -40,7 +42,7 @@ int main(int argc, char **argv)
 {
   int scale = 4;
   int selftest = 0;
-  int screen = UI_SCREEN_PATTERN;
+  int screen = UI_SCREEN_STANDBY;
   int demo = 0;
   int i;
   const char *wav = NULL, *log = NULL, *out = "sim_selftest.bmp";
@@ -71,8 +73,8 @@ int main(int argc, char **argv)
   if (log) sim_feed_log(log);
   if (demo || (!wav && !log)) sim_feed_demo();
 
-  printf("[sim] 收件箱 %u 条 / 累计收到 %u 帧（重复抑制 %u）\n",
-         (unsigned)ui_inbox_count(), (unsigned)ui_rx_total(),
+  printf("[sim] 收件箱 %u 条（未读 %u）/ 累计收到 %u 帧（重复抑制 %u）\n",
+         (unsigned)ui_inbox_count(), (unsigned)ui_unread_count(), (unsigned)ui_rx_total(),
          (unsigned)ui_dup_total());
 
   ui_show(screen);

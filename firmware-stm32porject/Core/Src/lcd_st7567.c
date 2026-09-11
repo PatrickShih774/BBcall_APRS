@@ -15,6 +15,7 @@
 #include "bbcall_hw.h"
 #include "lcd_st7567.h"
 #include "font8x16.h"
+#include "font6x8.h"
 
 static uint8_t fb[LCD_FB_BYTES];
 
@@ -159,6 +160,39 @@ void lcd_draw_string8x16(uint8_t x, uint8_t y, const char *s, uint8_t on)
   while (*s && (cx + 8) <= LCD_W) {
     lcd_draw_char8x16(cx, y, (uint8_t)*s, on);
     cx += 8;
+    s++;
+  }
+}
+
+void lcd_fill_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on)
+{
+  uint8_t x, y, t;
+  if (x0 > x1) { t = x0; x0 = x1; x1 = t; }
+  if (y0 > y1) { t = y0; y0 = y1; y1 = t; }
+  if (x1 >= LCD_W) x1 = LCD_W - 1u;
+  if (y1 >= LCD_H) y1 = LCD_H - 1u;
+  for (y = y0; y <= y1; y++)
+    for (x = x0; x <= x1; x++) lcd_pixel(x, y, on);
+}
+
+void lcd_draw_char6x8(uint8_t x, uint8_t y, uint8_t ch, uint8_t on)
+{
+  const uint8_t *g;
+  int r, c;
+  if (ch < 0x20u) ch = 0x20u;
+  if (ch > 0x7Fu) ch = 0x20u;
+  g = font6x8[ch - 0x20u];
+  for (r = 0; r < 8; r++)
+    for (c = 0; c < 6; c++)
+      if (g[r] & (0x80u >> c)) lcd_pixel((uint8_t)(x + c), (uint8_t)(y + r), on);
+}
+
+void lcd_draw_string6x8(uint8_t x, uint8_t y, const char *s, uint8_t on)
+{
+  uint8_t cx = x;
+  while (*s && (uint8_t)(cx + 6u) <= LCD_W) {
+    lcd_draw_char6x8(cx, y, (uint8_t)*s, on);
+    cx = (uint8_t)(cx + 6u);
     s++;
   }
 }
