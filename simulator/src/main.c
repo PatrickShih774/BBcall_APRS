@@ -43,6 +43,7 @@ static void usage(void)
          "  --wav FILE       WAV -> modem.c 解调 -> 收件箱\n"
          "  --replay FILE    串口日志 [RAW] hex= 回放到收件箱\n"
          "  --clock SEC      主页大时钟的固定值（自检截图用）\n"
+         "  --keys LIST      按键序列（逗号分隔，如 4,3），用于验证导航路径\n"
          "  --demo           注入内置示例帧\n"
          "\n按键: 上下=选择  Enter=打开  Backspace=返回  Delete=删除(二次确认)\n"
          "      T=图案  M=收件箱  S=待机  I=反显  B=背光  F3=面板方向  F12=截图  Esc=退出\n");
@@ -52,11 +53,12 @@ int main(int argc, char **argv)
 {
   int scale = 4;
   int selftest = 0;
-  int screen = UI_SCREEN_STANDBY;
+  int screen = UI_SCREEN_MSG_INBOX;   /* 开机即消息列表：它是本机唯一的主功能 */
   int demo = 0;
   int clock_sec = -1;
   int i;
   const char *wav = NULL, *log = NULL, *out = "sim_selftest.bmp";
+  const char *keys = NULL;
 
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
@@ -69,6 +71,7 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav = argv[++i];
     else if (!strcmp(argv[i], "--replay") && i + 1 < argc) log = argv[++i];
     else if (!strcmp(argv[i], "--clock") && i + 1 < argc) clock_sec = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = argv[++i];
     else if (!strcmp(argv[i], "--demo")) demo = 1;
     else if (!strcmp(argv[i], "--standby")) screen = UI_SCREEN_STANDBY;
     else if (!strcmp(argv[i], "--message") || !strcmp(argv[i], "--inbox")) screen = UI_SCREEN_INBOX;
@@ -94,6 +97,19 @@ int main(int argc, char **argv)
          (unsigned)ui_dup_total());
 
   ui_show(screen);
+
+  /* --keys "4,3"：按顺序派发按键，用于验证导航路径（自检可复现） */
+  if (keys) {
+    const char *q = keys;
+    printf("[sim] 按键序列:");
+    while (*q) {
+      int k = atoi(q);
+      if (k > 0) { printf(" %d", k); ui_handle_key(k); }
+      while (*q && *q != ',') q++;
+      if (*q == ',') q++;
+    }
+    printf("\n");
+  }
   lcd_sim_render();
 
   if (selftest) {

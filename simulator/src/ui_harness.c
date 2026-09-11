@@ -310,7 +310,7 @@ static void draw_home(void)
   char buf[40];
   char clk[8];
   lcd_clear(0);
-  status_rail("HOME");
+  status_rail("STATUS");
   hair(SEP_Y);
 
   clock_hhmm(clk, sizeof(clk));
@@ -344,8 +344,9 @@ static void draw_home(void)
 /* 菜单                                                                */
 /* ------------------------------------------------------------------ */
 #define MENU_N 6
+/* 二级菜单：只放设置与诊断。主功能（消息）是根屏，不在这里。 */
 static const char *const s_menu_label[MENU_N] = {
-  "Messenger", "Heard", "Radio", "Contrast", "Backlight", "About"
+  "Status", "Heard", "Radio", "Contrast", "Backlight", "About"
 };
 
 static void menu_icon(uint8_t i, uint8_t x, uint8_t y, uint8_t ink)
@@ -878,7 +879,7 @@ void ui_handle_key(int key)
 
   switch (s_scr) {
     case UI_SCREEN_HOME:
-      if (key == 1 || key == 2 || key == 3) ui_show(UI_SCREEN_MENU);
+      if (key == 1 || key == 2 || key == 3 || key == 4) ui_show(UI_SCREEN_MENU);
       break;
 
     case UI_SCREEN_MENU:
@@ -886,7 +887,7 @@ void ui_handle_key(int key)
       else if (key == 2) { if (s_menu_sel + 1u < MENU_N) s_menu_sel++; draw_menu(); }
       else if (key == 3) {
         switch (s_menu_sel) {
-          case 0: s_msg_sel = 0u; s_msg_top = 0u; ui_show(UI_SCREEN_MSG_INBOX); break;
+          case 0: ui_show(UI_SCREEN_HOME); break;
           case 1: s_sel = 0u; s_top = 0u; ui_show(UI_SCREEN_INBOX); break;
           case 2: ui_show(UI_SCREEN_RADIO); break;
           case 3: break;                       /* Contrast：真机改 0x81 值 */
@@ -895,7 +896,7 @@ void ui_handle_key(int key)
           default: break;
         }
       }
-      else if (key == 4) ui_show(UI_SCREEN_HOME);
+      else if (key == 4) ui_show(UI_SCREEN_MSG_INBOX);   /* 根屏是消息列表 */
       break;
 
     case UI_SCREEN_INBOX:
@@ -955,7 +956,7 @@ void ui_handle_key(int key)
       break;
 
     default:
-      if (key == 4) ui_show(UI_SCREEN_HOME);
+      if (key == 4) ui_show(UI_SCREEN_MSG_INBOX);   /* 根屏是消息列表 */
       break;
   }
 }

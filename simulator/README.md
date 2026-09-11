@@ -128,7 +128,7 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 | `confirm` | 删除确认：填充块 + 内嵌 1px 框 + 反显文字 |
 | `pattern` | 棋盘格 + 两套字体全字符样张 |
 | `cnfont` | 中文字库样张：16x16 汉字，8 列 x 3 行 = 24 字/页，上下翻页 |
-| `messages` | 收件箱 6 行，最新在上：`*` 未读 + 正文预览 + 年龄（`NOW`/`12m`/`3h`） |
+| `messages` | **根屏（开机即达）**：收件箱 6 行，最新在上：`*` 未读 + 正文预览 + 年龄（`NOW`/`12m`/`3h`） |
 | `msgread` | 阅读页：`FROM:` + 年龄 + 正文 4 行 + 页脚 `BACK` / `DEL` |
 
 ### 按键
@@ -139,13 +139,30 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 | Enter | 打开（主页/菜单进入下一级；列表进入详情并标记已读） |
 | Backspace | 返回上一级（详情 -> 列表 -> 菜单 -> 主页） |
 | Delete | 删除选中消息（反显弹窗二次确认） |
-| M | 菜单（菜单第 1 项进入 Messenger） |
+| M | 二级菜单（设置 / 诊断；从收件箱按 BACK 也能进） |
 | S | 主页 |
 | T | 字体样张 |
 | I / B | 反显 / 背光开关 |
 | F3 | 切换面板 SEG 方向（对比两种接线） |
 | F12 | 截屏 `lcd_sim.bmp` |
 | Esc | 退出 |
+
+### 导航
+
+```text
+开机 → boot 闪屏 → messages（收件箱，根屏）
+                     ├ Enter → READ
+                     ├ DEL   → 删除确认
+                     └ BACK  → MENU（Status / Heard / Radio / Contrast / Backlight / About）
+```
+
+自检可以直接验证这条路径（`--keys` 是按键序列，1=上 2=下 3=OK 4=BACK 5=图案 7=主页 8=删除 9=菜单）：
+
+```powershell
+.\bbcall_sim.exe --selftest --demo --scale 2 --out root.bmp             # 开机即收件箱
+.\bbcall_sim.exe --selftest --demo --scale 2 --keys 4 --out menu.bmp    # BACK -> 二级菜单
+.\bbcall_sim.exe --selftest --demo --scale 2 --keys 4,3 --out status.bmp # 再 OK -> STATUS
+```
 
 ### 自检与数据
 
