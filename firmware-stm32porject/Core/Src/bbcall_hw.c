@@ -249,8 +249,13 @@ void TIM3_IRQHandler(void)
   if (TIM3->SR & 0x0001u) {   /* UIF */
     TIM3->SR = (uint16_t)~0x0001u;
     ADC1->CR2 |= ADC_CR2_SWSTART;
-    while ((ADC1->SR & ADC_SR_EOC) == 0u) { }
-    uint16_t v = (uint16_t)ADC1->DR;
-    modem_adc_sample(v);
+    uint32_t guard = 0;
+    while (((ADC1->SR & ADC_SR_EOC) == 0u) && (guard++ < 2000u)) { }
+    if (ADC1->SR & ADC_SR_EOC) {
+      uint16_t v = (uint16_t)ADC1->DR;
+      modem_adc_sample(v);
+    } else {
+      (void)ADC1->DR;   /* 超时：丢弃本次采样，避免中断死等 */
+    }
   }
 }

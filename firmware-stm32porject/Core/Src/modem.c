@@ -32,12 +32,14 @@ static uint16_t s_fix2_count = 0;
 static uint8_t s_last_fixed = 0;
 #define REF_N 4u
 #define REF_MAX_LEN 160u
-#define REF_MAX_DIFF 8u
+#define REF_MAX_DIFF 4u
 typedef struct { uint8_t valid; uint16_t len; uint8_t frame[REF_MAX_LEN]; } ref_t;
 static ref_t s_ref[REF_N];
 static uint8_t s_ref_pos = 0;
 static uint16_t s_rep_count = 0;
 static uint8_t s_last_rep = 0;
+static ax25_frame_t s_isr_frame;
+static ax25_frame_t s_main_frame;
 
 static int16_t s_ring[8];              /* 最近 8 个去直流样本 */
 static uint32_t s_nsamp = 0;           /* 累计采样数 */
@@ -53,10 +55,11 @@ static uint16_t s_other_hits = 0;
 #define TR_N 9u
 typedef struct {
   ax25_hdlc_t hdlc;
-  int32_t next_q8;
+  uint32_t next_q8;
   int32_t period_q8;
   uint8_t prev_tone;
   uint8_t have_tone;
+  uint8_t have_next;
 } tr_dec_t;
 static tr_dec_t s_trd[TR_N];
 static const int32_t tr_period_q8[3] = { 2022, 2048, 2074 };  /* 7.90 / 8.00 / 8.10 采样/bit */
@@ -183,9 +186,10 @@ void modem_reset_sync(void)
   for (uint8_t i = 0; i < TR_N; i++) {
     ax25_hdlc_init(&s_trd[i].hdlc);
     s_trd[i].period_q8 = tr_period_q8[i % 3u];
-    s_trd[i].next_q8 = -1;
+    s_trd[i].next_q8 = 0;
     s_trd[i].prev_tone = 0;
     s_trd[i].have_tone = 0;
+    s_trd[i].have_next = 0;
   }
   s_tr_last_sign = 0; s_tr_cand_sign = 0; s_tr_cand_cnt = 0; s_tr_ncross = 0; s_tr_have_sign = 0;
 }
@@ -201,12 +205,11 @@ static void feed_dec(uint8_t idx, uint8_t tone)
   uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;  /* NRZI: 不变=1, 跳变=0 */
   d->prev_tone = tone;
 
-  ax25_frame_t f;
-  if (ax25_hdlc_feed_bit(&d->hdlc, bit, &f)) {
-    if (ax25_check_frame(f.frame, f.len)) {
-      modem_push_frame(&f);
-    } else if (ax25_plausible(f.frame, f.len)) {
-      modem_push_bad(&f);
+  if (ax25_hdlc_feed_bit(&d->hdlc, bit, &s_isr_frame)) {
+    if (ax25_check_frame(s_isr_frame.frame, s_isr_frame.len)) {
+      modem_push_frame(&s_isr_frame);
+    } else if (ax25_plausible(s_isr_frame.frame, s_isr_frame.len)) {
+      modem_push_bad(&s_isr_frame);
     }
   }
 }
@@ -261,35 +264,37 @@ void modem_adc_sample(uint16_t adc)
       (!s_tr_have_sign || s_tr_cand_sign != s_tr_last_sign)) {
     s_tr_last_sign = s_tr_cand_sign;
     s_tr_have_sign = 1;
-    int32_t base_q8 = (int32_t)s_tr_ncross * 256;
+    uint32_t base_q8 = s_tr_ncross * 256u;
     for (uint8_t i = 0; i < TR_N; i++) {
-      s_trd[i].next_q8 = base_q8 + s_trd[i].period_q8 / 2 + tr_off_q8[i / 3u];
+      s_trd[i].next_q8 = base_q8 + (uint32_t)(s_trd[i].period_q8 / 2) + (uint32_t)tr_off_q8[i / 3u];
+      s_trd[i].have_next = 1;
     }
   }
   {
-    int32_t cur_q8 = (int32_t)(s_nsamp - 1u) * 256;
+    uint32_t cur_q8 = s_nsamp * 256u;
     for (uint8_t i = 0; i < TR_N; i++) {
       tr_dec_t *d = &s_trd[i];
-      if (d->next_q8 < 0 || cur_q8 < d->next_q8) continue;
-      if (cur_q8 - d->next_q8 > d->period_q8 * 8) {   /* 落后太多：重新对准 */
-        d->next_q8 = cur_q8 + d->period_q8 / 2;
+      if (!d->have_next) continue;
+      int32_t diff = (int32_t)(cur_q8 - d->next_q8);
+      if (diff < 0) continue;
+      if (diff > (d->period_q8 * 8)) {   /* 落后太多：重新对准 */
+        d->next_q8 = cur_q8 + (uint32_t)(d->period_q8 / 2);
         continue;
       }
       uint8_t tone = (v >= 0) ? 0u : 1u;
       if (d->have_tone) {
         uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;
-        ax25_frame_t f;
-        if (ax25_hdlc_feed_bit(&d->hdlc, bit, &f)) {
-          if (ax25_check_frame(f.frame, f.len)) {
-            modem_push_frame(&f);
-          } else if (ax25_plausible(f.frame, f.len)) {
-            modem_push_bad(&f);
+        if (ax25_hdlc_feed_bit(&d->hdlc, bit, &s_isr_frame)) {
+          if (ax25_check_frame(s_isr_frame.frame, s_isr_frame.len)) {
+            modem_push_frame(&s_isr_frame);
+          } else if (ax25_plausible(s_isr_frame.frame, s_isr_frame.len)) {
+            modem_push_bad(&s_isr_frame);
           }
         }
       }
       d->prev_tone = tone;
       d->have_tone = 1;
-      d->next_q8 += d->period_q8;
+      d->next_q8 += (uint32_t)d->period_q8;
     }
   }  s_last_tone = (uint8_t)(tone_full + 1u);
   if (tone_full == 0u) s_mark_hits++; else s_space_hits++;
@@ -354,24 +359,24 @@ uint8_t modem_get_frame(ax25_frame_t *out)
     return 1;
   }
   while (s_bad_tail != s_bad_head) {
-    ax25_frame_t f = s_bad_q[s_bad_tail];
+    s_main_frame = s_bad_q[s_bad_tail];
     s_bad_tail = (uint8_t)((s_bad_tail + 1u) & (MODEM_BADN - 1u));
-    if (ax25_correct_single_bit(f.frame, f.len)) {
+    if (ax25_correct_single_bit(s_main_frame.frame, s_main_frame.len)) {
       s_fix_count++;
       s_last_fixed = 1;
       s_last_rep = 0;
-      *out = f;
+      *out = s_main_frame;
       return 1;
     }
-    if (ax25_correct_two_bits(f.frame, f.len)) {
+    if (ax25_correct_two_bits(s_main_frame.frame, s_main_frame.len)) {
       s_fix2_count++;
       s_fix_count++;
       s_last_fixed = 1;
       s_last_rep = 0;
-      *out = f;
+      *out = s_main_frame;
       return 1;
     }
-    if (ref_match(&f, out)) {
+    if (ref_match(&s_main_frame, out)) {
       return 1;
     }
   }

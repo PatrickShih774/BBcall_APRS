@@ -152,6 +152,7 @@ uint8_t ax25_correct_single_bit(uint8_t *frame, uint16_t len)
     idx += 7;
     out->npath++;
   }
+  if ((uint16_t)(idx + 4u) > len) return 0;   /* 还需要 control+pid+FCS */
   out->control = body[idx];
   out->pid = body[idx + 1];
   uint16_t info_len = len - 2u - (idx + 2u);

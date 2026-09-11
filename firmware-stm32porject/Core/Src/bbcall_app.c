@@ -115,7 +115,7 @@ void bbcall_app_loop(void)
   static uint32_t t_sq = 0;
 #endif
   static uint8_t audio_muted = BBCALL_SW_SQUELCH ? 1u : 0u;
-  ax25_frame_t fr;
+  static ax25_frame_t fr;
   static uint16_t dup_hash[8];
   static char dup_name[8][7];
   static uint32_t dup_time[8];
@@ -167,7 +167,7 @@ void bbcall_app_loop(void)
     for (uint8_t i = 0; i < fr.len; i++) hw_console_hex8(fr.frame[i]);
     hw_console_puts("\r\n");
 #endif
-    ax25_decoded_t d;
+    static ax25_decoded_t d;
     if (ax25_decode(fr.frame, fr.len, &d)) {
       hw_console_puts("\r\n[FRAME] src=");
       hw_console_puts(d.src);
@@ -194,7 +194,7 @@ void bbcall_app_loop(void)
         mice_dest[i] = (char)((c == 0u) ? ' ' : (char)c);
       }
       mice_dest[6] = '\0';
-      aprs_mice_t mi;
+      static aprs_mice_t mi;
       if (aprs_parse_mice(mice_dest, d.info, d.info_len, &mi)) {
         hw_console_puts(" [MICE] lat=");
         hw_console_puts(mi.lat);
@@ -210,7 +210,7 @@ void bbcall_app_loop(void)
         hw_console_puts(mi.comment);
         hw_console_puts("\r\n");
       }
-      aprs_position_t pos;
+      static aprs_position_t pos;
       if (aprs_parse_position(d.info, d.info_len, &pos)) {
         hw_console_puts(" [POS] lat=");
         hw_console_puts(pos.lat);
@@ -219,7 +219,7 @@ void bbcall_app_loop(void)
         if (pos.comment[0]) { hw_console_puts(" comment="); hw_console_puts(pos.comment); }
         hw_console_puts("\r\n");
       }
-      aprs_message_t m;
+      static aprs_message_t m;
       if (aprs_parse_message(d.info, d.info_len, &m)) {
         hw_console_puts(" msg=");
         for (uint8_t i = 0; i < m.body_len; i++) hw_console_putc((char)m.body[i]);
