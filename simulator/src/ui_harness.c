@@ -242,11 +242,18 @@ static void icon_wave(uint8_t x, uint8_t y, uint8_t ink)
 /* ------------------------------------------------------------------ */
 /* Chrome：状态栏 + 滚动轨                                             */
 /* ------------------------------------------------------------------ */
-static void status_rail(const char *title)
+/* 一级屏（待机页 / 收件箱）：反显状态栏带右侧图标群。
+ * 二级页（菜单及其子页）：同一个反显底，但标题是面包屑、且**不画图标群**，
+ * 内容再缩进 6px、选中用内侧反显条——一眼就能分出自己在哪一层。
+ * 分成两套是因为踩过坑：一级屏和二级页长得一模一样时，用户看不出层级。 */
+#define SUB_X 6u
+
+static void status_rail_ex(const char *title, uint8_t icons)
 {
   char buf[12];
   lcd_fill_rect(0, RAIL_Y, 127, RAIL_H, 1);      /* 反显底 */
   t6(6, RAIL_Y, title, 0);                       /* 挖字标题（x 对齐 6 像素栅格） */
+  if (!icons) return;
 
   /* 右侧：从右往左右对齐排 [信号格] 3px [静音] 3px [未读数] 3px [信封] */
   {
@@ -269,6 +276,22 @@ static void status_rail(const char *title)
     }
     x = (uint8_t)(x - 8u);
     icon_mail(x, RAIL_Y, 0);
+  }
+}
+
+static void status_rail(const char *title) { status_rail_ex(title, 1u); }
+
+/* 二级页的文本：缩进 6px */
+static void sub(uint8_t y, const char *s) { t6(SUB_X, y, s, 1); }
+
+/* 二级页的列表行：缩进 + 选中用内侧反显条（一级屏是整行反显 0..127） */
+static void sub_row(uint8_t y, const char *s, uint8_t sel)
+{
+  if (sel) {
+    lcd_fill_rect(SUB_X, y, 127, (uint8_t)(y + 7u), 1);
+    t6(SUB_X, y, s, 0);
+  } else {
+    t6(SUB_X, y, s, 1);
   }
 }
 
@@ -365,16 +388,16 @@ static void draw_menu(void)
 {
   uint8_t i;
   lcd_clear(0);
-  status_rail("MENU");
+  status_rail_ex("MENU", 0u);      /* 二级页：无图标群 */
   hair(SEP_Y);
 
   for (i = 0; i < MENU_N; i++) {
     uint8_t y = ROW(i);
     uint8_t sel = (i == s_menu_sel) ? 1u : 0u;
     uint8_t ink = sel ? 0u : 1u;
-    if (sel) lcd_fill_rect(0, y, 123, (uint8_t)(y + 7u), 1);
-    menu_icon(i, 2, y, ink);
-    t6(12, y, s_menu_label[i], ink);
+    if (sel) lcd_fill_rect(SUB_X, y, 127, (uint8_t)(y + 7u), 1);   /* 内侧反显条 */
+    menu_icon(i, SUB_X, y, ink);
+    t6((uint8_t)(SUB_X + 10u), y, s_menu_label[i], ink);
   }
   scroll_rail(0, MENU_N, MENU_N);
   lcd_flush();
@@ -389,14 +412,14 @@ static void draw_inbox(void)
   char hdr[24];
   uint8_t n = s_count, i, vis = 6u;
   lcd_clear(0);
-  snprintf(hdr, sizeof(hdr), "HEARD %u/%u",
+  snprintf(hdr, sizeof(hdr), "MENU>HEARD %u/%u",
            (unsigned)(n ? s_sel + 1u : 0u), (unsigned)n);
-  status_rail(hdr);
+  status_rail_ex(hdr, 0u);
   hair(SEP_Y);
 
   if (n == 0u) {
-    t6(0, ROW(1), "no station yet", 1);
-    t6(0, ROW(4), "M=menu  S=home", 1);
+    sub(ROW(1), "no station yet");
+    sub(ROW(4), "BACK=MENU");
     lcd_flush();
     return;
   }
@@ -414,12 +437,7 @@ static void draw_inbox(void)
     sel = (nth == s_sel) ? 1u : 0u;
     snprintf(line, sizeof(line), "%-6.6s %c %-10.10s%c",
              it->src, kind_char(it->kind), it->title, it->read ? ' ' : '*');
-    if (sel) {
-      lcd_fill_rect(0, ROW(i), 123, (uint8_t)(ROW(i) + 7u), 1);
-      t6(0, ROW(i), line, 0);
-    } else {
-      t6(0, ROW(i), line, 1);
-    }
+    sub_row(ROW(i), line, sel);
   }
   scroll_rail(s_top, n, vis);
   lcd_flush();
@@ -443,13 +461,13 @@ static void draw_detail(void)
   if (s_page >= pages) s_page = (uint8_t)(pages - 1u);
 
   lcd_clear(0);
-  snprintf(hdr, sizeof(hdr), "%s %s", kind_tag(it->kind), it->src);
-  status_rail(hdr);
+  snprintf(hdr, sizeof(hdr), "HEARD>%s", it->src);
+  status_rail_ex(hdr, 0u);
   hair(SEP_Y);
 
   for (i = 0; i < 5u; i++) {
     uint8_t idx = (uint8_t)(s_page * 5u + i);
-    if (idx < n) t6(0, ROW(i), lines[idx], 1);
+    if (idx < n) sub(ROW(i), lines[idx]);
   }
 
   snprintf(foot, sizeof(foot), "%u/%u", (unsigned)(s_page + 1u), (unsigned)pages);
@@ -457,7 +475,7 @@ static void draw_detail(void)
                          strncat(foot, it->path, sizeof(foot) - strlen(foot) - 1u); }
   else if (it->fixed)  strncat(foot, " FIX", sizeof(foot) - strlen(foot) - 1u);
   else if (it->repeat) strncat(foot, " REP", sizeof(foot) - strlen(foot) - 1u);
-  t6(0, ROW(5), foot, 1);
+  sub(ROW(5), foot);
   lcd_flush();
 }
 
@@ -468,25 +486,25 @@ static void draw_radio(void)
 {
   char buf[28];
   lcd_clear(0);
-  status_rail("RADIO");
+  status_rail_ex("MENU>RADIO", 0u);
   hair(SEP_Y);
 
   snprintf(buf, sizeof(buf), "%lu.%03lu MHz  S%u",
            (unsigned long)(s_freq_khz / 1000u), (unsigned long)(s_freq_khz % 1000u),
            (unsigned)s_smeter);
-  t6(0, ROW(0), buf, 1);
+  sub(ROW(0), buf);
 
   snprintf(buf, sizeof(buf), "RSSI %-5u SNR %-5u", (unsigned)s_rssi, (unsigned)s_snr);
-  t6(0, ROW(1), buf, 1);
+  sub(ROW(1), buf);
 
   snprintf(buf, sizeof(buf), "AFC  %-5u EXN %-5u", (unsigned)s_afc, (unsigned)s_exn);
-  t6(0, ROW(2), buf, 1);
+  sub(ROW(2), buf);
 
   snprintf(buf, sizeof(buf), "RX %u  DUP %u", (unsigned)s_rx_total, (unsigned)s_dup_total);
-  t6(0, ROW(3), buf, 1);
+  sub(ROW(3), buf);
 
-  t6(0, ROW(4), s_muted ? "audio: muted" : "audio: on", 1);
-  t6(0, ROW(5), "BACK=MENU", 1);
+  sub(ROW(4), s_muted ? "audio: muted" : "audio: on");
+  sub(ROW(5), "BACK=MENU");
   lcd_flush();
 }
 
@@ -494,18 +512,18 @@ static void draw_about(void)
 {
   char buf[24];
   lcd_clear(0);
-  status_rail("ABOUT");
+  status_rail_ex("MENU>ABOUT", 0u);
   hair(SEP_Y);
-  t6(0, ROW(0), "BBCALL_APRS", 1);
-  t6(0, ROW(1), "FW " UI_FW_VER "  GPL-3.0", 1);
-  t6(0, ROW(2), "STM32F103C8T6", 1);
-  t6(0, ROW(3), "ST7567 128x64 LCD", 1);
-  t6(0, ROW(4), "BK4802P 21.25MHz IF", 1);
+  sub(ROW(0), "BBCALL_APRS");
+  sub(ROW(1), "FW " UI_FW_VER "  GPL-3.0");
+  sub(ROW(2), "STM32F103C8T6");
+  sub(ROW(3), "ST7567 128x64 LCD");
+  sub(ROW(4), "BK4802P 21.25MHz IF");
   {                                   /* 中文字库状态如实显示，便于真机核对 */
     uint16_t cnc = cn_font_count();
     if (cnc > 0u) snprintf(buf, sizeof(buf), "CN FONT %u", (unsigned)cnc);
     else          snprintf(buf, sizeof(buf), "CN FONT OFF");
-    t6(0, ROW(5), buf, 1);
+    sub(ROW(5), buf);
   }
   lcd_flush();
 }
@@ -608,22 +626,22 @@ static void draw_msg_read(void)
   if (n == 0u) { lines[0][0] = 0; n = 1u; }
 
   lcd_clear(0);
-  snprintf(buf, sizeof(buf), "READ %u/%u",
+  snprintf(buf, sizeof(buf), "INBOX>READ %u/%u",
            (unsigned)(s_msg_sel + 1u), (unsigned)msg_store_count_inbox());
-  status_rail(buf);
+  status_rail_ex(buf, 0u);
   hair(SEP_Y);
 
   snprintf(buf, sizeof(buf), "FROM:%s", m->from);
-  t6(0, ROW(0), buf, 1);
+  sub(ROW(0), buf);
   t6_right(ROW(0), age, 1);
 
   dotted_sep(ROW(1));
   for (i = 0; i < 4u; i++) {
-    if (i < n) t6(0, (uint8_t)(ROW(1) + 2u + i * 8u), lines[i], 1);
+    if (i < n) sub((uint8_t)(ROW(1) + 2u + i * 8u), lines[i]);
   }
   dotted_sep(52);
 
-  t6(0, 54, "BACK", 1);
+  sub(54, "BACK");
   t6_right(54, "DEL", 1);
   lcd_flush();
 }
@@ -639,10 +657,10 @@ static void draw_cnfont(void)
 
   lcd_clear(0);
   if (total == 0u) {                       /* CN_FONT_ENABLED=0 时如实说明 */
-    status_rail("CN FONT");
+    status_rail_ex("MENU>CNFONT", 0u);
     hair(SEP_Y);
-    t6(0, ROW(2), "CN font disabled", 1);
-    t6(0, ROW(4), "run tools/gen_cn_font.py", 1);
+    sub(ROW(2), "CN font disabled");
+    sub(ROW(4), "run tools/gen_cn_font.py");
     lcd_flush();
     return;
   }
@@ -650,8 +668,8 @@ static void draw_cnfont(void)
   if (pages == 0u) pages = 1u;
   if (s_cn_page >= pages) s_cn_page = (uint8_t)(pages - 1u);
 
-  snprintf(hdr, sizeof(hdr), "CN %u/%u", (unsigned)(s_cn_page + 1u), (unsigned)pages);
-  status_rail(hdr);
+  snprintf(hdr, sizeof(hdr), "MENU>CNFONT %u/%u", (unsigned)(s_cn_page + 1u), (unsigned)pages);
+  status_rail_ex(hdr, 0u);
   hair(SEP_Y);
 
   for (i = 0; i < per; i++) {
