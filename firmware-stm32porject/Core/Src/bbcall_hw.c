@@ -216,7 +216,27 @@ void hw_timers_init(void)
   NVIC_EnableIRQ(TIM3_IRQn);
 }
 
-void TIM2_IRQHandler(void)
+
+/* ---------------- 独立看门狗 ---------------- */
+void hw_watchdog_init(uint32_t ms)
+{
+  /* 调试暂停时冻结 IWDG，避免调试时被复位 */
+  DBGMCU->CR |= DBGMCU_CR_DBG_IWDG_STOP;
+  /* LSI ~40kHz，预分频 64 -> 625Hz */
+  uint32_t reload = (ms * 625u) / 1000u;
+  if (reload > 4095u) reload = 4095u;
+  if (reload < 1u) reload = 1u;
+  IWDG->KR = 0x5555u;              /* 解锁 */
+  IWDG->PR = 0x04u;                /* /64 */
+  IWDG->RLR = (uint16_t)reload;
+  IWDG->KR = 0xAAAAu;              /* 先喂一次 */
+  IWDG->KR = 0xCCCCu;              /* 启动 */
+}
+
+void hw_watchdog_feed(void)
+{
+  IWDG->KR = 0xAAAAu;
+}void TIM2_IRQHandler(void)
 {
   static uint16_t last = 0;
   static uint8_t have_last = 0;

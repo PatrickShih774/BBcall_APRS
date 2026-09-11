@@ -89,7 +89,8 @@ void bbcall_app_init(void)
 #endif
 
   modem_init();
-  hw_timers_init();             /* TIM2 捕获 + TIM3 采样，中断喂 modem */
+  hw_timers_init();             /* TIM3 ADC 采样，中断喂 modem */
+  hw_watchdog_init(2000u);      /* 2 秒独立看门狗 */
 #if BBCALL_SW_SQUELCH
   bk4802_set_rx_audio_mute(1);  /* 上电静音，检测到有效信号再放开 */
 #endif
@@ -321,6 +322,7 @@ void bbcall_app_loop(void)
 #endif
   }
 
+  hw_watchdog_feed();
 #if BBCALL_SW_SQUELCH
   /* 软件静噪：RSSI>=110 就放开音频。
    * 不查 EXN：近距离强信号会干扰 I2C，EXN 读错会导致一直不放行。 */
