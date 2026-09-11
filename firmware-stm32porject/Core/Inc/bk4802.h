@@ -4,6 +4,7 @@
 void bk4802_init(void);
 void bk4802_write_reg(uint8_t reg, uint16_t data);
 uint16_t bk4802_read_reg(uint8_t reg);
+uint16_t bk4802_i2c_error_count(void);
 void bk4802_enter_rx(void);
 void bk4802_set_rx_freq_mhz(double mhz);
 void bk4802_apply_audio_config(void);

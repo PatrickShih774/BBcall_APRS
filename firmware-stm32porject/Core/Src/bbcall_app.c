@@ -300,6 +300,7 @@ void bbcall_app_loop(void)
     hw_console_puts(" FIX="); hw_console_u16(modem_get_fix_count());
     hw_console_puts(" FIX2="); hw_console_u16(modem_get_fix2_count());
     hw_console_puts(" REP="); hw_console_u16(modem_get_rep_count());
+    hw_console_puts(" I2CE="); hw_console_u16(bk4802_i2c_error_count());
     hw_console_puts(" AFC=");
     hw_console_u16(bk4802_read_reg(25) & 0x00FFu);
     hw_console_puts(" EXN=");

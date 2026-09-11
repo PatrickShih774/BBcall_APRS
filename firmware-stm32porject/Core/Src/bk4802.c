@@ -35,6 +35,27 @@ static void sda_set_input(void)
   HAL_GPIO_Init(BK4802_I2C_GPIO, &g);
 }
 
+/* I2C 错误计数与总线恢复 */
+static uint16_t s_i2c_err = 0;
+
+uint16_t bk4802_i2c_error_count(void)
+{
+  return s_i2c_err;
+}
+
+static void i2c_recover(void)
+{
+  /* 释放 SDA，发 9 个 SCL 脉冲让从机退出，再补一个 STOP */
+  sda_set_input();
+  for (uint8_t i = 0; i < 9u; i++) {
+    scl_lo(); hw_delay_us(2);
+    scl_hi(); hw_delay_us(2);
+  }
+  sda_set_output();
+  sda_lo(); hw_delay_us(2);
+  scl_hi(); hw_delay_us(2);
+  sda_hi(); hw_delay_us(2);
+}
 static void i2c_start(void)
 {
   sda_set_output();
@@ -50,7 +71,7 @@ static void i2c_stop(void)
   scl_hi(); sda_hi(); hw_delay_us(2);
 }
 
-static void i2c_byte(uint8_t b)
+static uint8_t i2c_byte(uint8_t b)
 {
   sda_set_output();
   for (int i = 7; i >= 0; i--) {
@@ -58,11 +79,15 @@ static void i2c_byte(uint8_t b)
     hw_delay_us(1);
     scl_hi(); hw_delay_us(2); scl_lo(); hw_delay_us(1);
   }
-  /* ACK 位：SDA 切输入让从机拉低，不校验 */
+  /* ACK 位：SDA 切输入，SCL 拉高后采样；返回 0=ACK，1=NACK */
   sda_set_input();
   hw_delay_us(1);
-  scl_hi(); hw_delay_us(2); scl_lo();
+  scl_hi(); hw_delay_us(3);
+  uint8_t nack = HAL_GPIO_ReadPin(BK4802_I2C_GPIO, BK4802_SDA_PIN) ? 1u : 0u;
+  scl_lo(); hw_delay_us(1);
   sda_set_output();
+  if (nack) s_i2c_err++;
+  return nack;
 }
 
 static uint8_t i2c_read(uint8_t ack)
@@ -123,27 +148,39 @@ void bk4802_init(void)
 
 void bk4802_write_reg(uint8_t reg, uint16_t data)
 {
-  i2c_start();
-  i2c_byte(BK4802_I2C_ADDR_W);
-  i2c_byte(reg);
-  i2c_byte((uint8_t)(data >> 8));
-  i2c_byte((uint8_t)(data & 0xFF));
-  i2c_stop();
+  for (uint8_t attempt = 0; attempt < 3u; attempt++) {
+    i2c_start();
+    uint8_t bad = i2c_byte(BK4802_I2C_ADDR_W);
+    bad |= i2c_byte(reg);
+    bad |= i2c_byte((uint8_t)(data >> 8));
+    bad |= i2c_byte((uint8_t)(data & 0xFF));
+    i2c_stop();
+    if (!bad) { hw_delay_us(50); return; }
+    s_i2c_err++;
+    i2c_recover();
+  }
   hw_delay_us(50);
 }
 
 uint16_t bk4802_read_reg(uint8_t reg)
 {
-  uint16_t hi, lo;
-  i2c_start();
-  i2c_byte(BK4802_I2C_ADDR_W);
-  i2c_byte(reg);
-  i2c_start();
-  i2c_byte(BK4802_I2C_ADDR_W | 1u);
-  hi = i2c_read(1);
-  lo = i2c_read(0);
-  i2c_stop();
-  return (uint16_t)((hi << 8) | lo);
+  for (uint8_t attempt = 0; attempt < 3u; attempt++) {
+    i2c_start();
+    uint8_t bad = i2c_byte(BK4802_I2C_ADDR_W);
+    bad |= i2c_byte(reg);
+    i2c_start();
+    bad |= i2c_byte((uint8_t)(BK4802_I2C_ADDR_W | 1u));
+    if (!bad) {
+      uint16_t hi = i2c_read(1);
+      uint16_t lo = i2c_read(0);
+      i2c_stop();
+      return (uint16_t)((hi << 8) | lo);
+    }
+    i2c_stop();
+    s_i2c_err++;
+    i2c_recover();
+  }
+  return 0xFFFFu;
 }
 
 void bk4802_enter_rx(void)
