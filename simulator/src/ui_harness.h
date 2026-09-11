@@ -24,6 +24,7 @@
 #define UI_SCREEN_MSG_SENT    22
 #define UI_SCREEN_MSG_READ    23
 #define UI_SCREEN_MSG_COMPOSE 24
+#define UI_SCREEN_CNFONT      30   /* 中文字库样张 */
 #define UI_SCREEN_MENU    13
 #define UI_SCREEN_RADIO   14
 #define UI_SCREEN_ABOUT   15

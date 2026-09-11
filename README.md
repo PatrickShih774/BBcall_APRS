@@ -656,6 +656,30 @@ y32  |12125.77E M0:   |
 y48  |1/2    RELAY    |
 ```
 
+### 13.4.1 中文字库（16x16 子集）
+
+界面文案目前是 ASCII。中文字库链路已打通，方案参考
+[EthanYan6/Dondji](https://github.com/EthanYan6/Dondji)（Apache-2.0：菜单汉化 + 中文输入法 + 中文信道名）：
+
+- **布局沿用它的形状**：`[位图][Unicode 索引 4B/项 升序][拼音表][版本字节]`。
+  Dondji 把字库放**外部 SPI Flash**、固件只留布局常量；我们暂时只做**片上子集**，
+  保持同一形状是为了将来接外部 Flash、加拼音表时读取逻辑不用改。
+- **字源换成 GNU Unifont**：Dondji 用 WenQuanYi Bitmap Song，而它是 **GPL v2 only + 字体嵌入例外**，
+  与本项目 GPL-3.0 不兼容；Unifont 自 2013 起是 **GPLv2+ / OFL-1.1 双许可**，且本身就是 16x16 点阵。
+- **预算**：每字 36 字节（位图 32 + 索引 4）。当前子集 107 字，目标平台实测占 **4,028 字节** Flash；
+  片上约可放 1055 字；全 GB2312（6763 字）需约 243KB，必须外置 SPI Flash。
+- 工具：`tools/gen_cn_font.py`（字符清单 `tools/cn_chars.txt`）；`CN_FONT_ENABLED` 控制启用，
+  模拟器检测到 `cn_font_data.h` 会自动打开；`--screen cnfont` 可逐页检查字形，
+  About 页显示 `CN FONT <字数>`。
+
+```powershell
+python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.txt `
+    --out-header firmware-stm32porject\Core\Inc\cn_font_data.h --out-bin tools\cn_font.bin
+```
+
+> 重新生成字库后**必须同步布局常量**。Dondji 文档记录过这个坑：只刷新字库 bin 而没改拼音表偏移，
+> 结果是"任意拼音候选错乱、大量音节失败"，不是个别字问题而是整表错位。
+
 ### 13.5 UI 重设计：复古寻呼机（BB 机）风格
 
 界面按 `ui-design` + `taste-skill` 的 overlay 契约重做。**完整规范、检查表与真机移植步骤见

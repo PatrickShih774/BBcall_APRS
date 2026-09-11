@@ -157,7 +157,7 @@ BK4802P FM 接收 → EAROP 音频（D 类 PWM）
 | 风险 | 对策 |
 |---|---|
 | RAM/Flash 紧张 | 外置 W25Q64/AT24C512；字库子集化；`AX25_MAX_FRAME` 已降到 256 |
-| 中文显示 | 先子集字库；全量 GB2312 放外部 Flash |
+| 中文显示 | **已落地子集方案**（见下方「中文显示方案」）；全量 GB2312 放外部 Flash |
 | 弱信号解码率 | 射频前端（BPF/匹配/LNA）、音频整形、重复包合并；见 README 第 9 节 |
 | VOX/PTT 时序 | 用 150ms VOX 测试音频或手动 MOX；发射端关闭 ALC/压缩 |
 | 静噪影响解码 | 解码时保持音频通路常开；软件静噪默认关闭 |
@@ -252,6 +252,62 @@ UI harness: simulator/src/ui_harness.c（待机/收件箱/详情/删除 + 收件
 - 把 `sim_feed.c` 的 WAV 解码包一层命令行批处理，做「批量音频回归测试」
   （喂一批 WAV，检查解出的呼号/正文是否与期望一致）；
 - 按 [UISkill.md](UISkill.md) 第 9 节把 UI 状态机移植进固件（等 LCD 焊上）。
+## 8.5 中文显示方案（参考 Dondji）
+
+**现状**：字模只有 ASCII（`font8x16.h` / `font6x8.h`），中文显示是已知缺口。
+
+**参考**：[EthanYan6/Dondji](https://github.com/EthanYan6/Dondji)（Apache-2.0，101★，泉盛 UV-K1/UV-K5 V3）
+是目前中文做得最完整的同类固件：菜单汉化 + 中文输入法 + 中文信道名。它的字库方案值得照搬：
+
+| 项 | Dondji |
+|---|---|
+| 字模 | 12x12，每字 12 行 x uint16_t = 24 字节 |
+| 存放 | **外部 SPI Flash**（基址 0x024000），固件只留 `CN_FONT_*` 布局常量 |
+| 布局 | `[位图][Unicode 索引 4B/项 升序][拼音表][版本字节]`，6766 字共 205,367 B |
+| 字源 | WenQuanYi Bitmap Song 9pt |
+
+**我们采用**：同一套**布局形状**（位图 + 4 字节 Unicode 升序索引 + 版本字节），
+将来接外部 SPI Flash、再加拼音表时，读取逻辑一行不用改。
+
+**我们不采用**：
+
+- **字源不能用 WQY Bitmap Song**：GPL v2（仅此一版）+ 字体嵌入例外，与本项目 GPL-3.0
+  **不兼容**（GPLv2-only 无法并入 GPLv3）。改用 **GNU Unifont**
+  （2013 起 GPLv2+ 或 OFL-1.1 双许可，且本身就是 16x16 点阵）；见 `THIRD_PARTY_NOTICES.md`。
+- **暂不做拼音输入法**：本项目没有键盘，信道名也暂不支持中文输入。
+
+**片上预算**（STM32F103C8T6，64KB Flash；当前 text 24,160 B，可用约 38KB）：
+每字 `16x16 位图 32B + 索引 4B = 36B`。
+
+| 字数 | 占用 | 说明 |
+|---|---|---|
+| 107 | 3.9 KB | 当前子集（菜单/状态用词 + 常用字），**实测编译后 4,028 B** |
+| 500 | 18 KB | 可覆盖常见人名地名 |
+| 约 1055 | 38 KB | 片上极限，不留余量 |
+
+全 GB2312（6763 字）需约 243KB，**必须外置 SPI Flash**（第 7 节风险对策里的 W25Q64）。
+
+**工具链**
+
+```bash
+python tools/gen_cn_font.py --unifont <unifont.hex> --chars-file tools/cn_chars.txt \
+    --out-header firmware-stm32porject/Core/Inc/cn_font_data.h --out-bin tools/cn_font.bin
+```
+
+`CN_FONT_ENABLED=1` 时启用（`bbcall_cfg.h`，默认 0）；模拟器 `build_win.ps1` 检测到
+`cn_font_data.h` 会自动打开。字符清单在 `tools/cn_chars.txt`，`tools/cn_font.bin` 是生成的裸字库
+（`.gitignore` 已排除，可随时重新生成）。
+
+> 真机启用时注意：`Core/Src/cn_font.c` 需要**在 STM32CubeIDE 里刷新工程**才会进入构建
+> （命令行 `make` 用的是已有 makefile，不会自动收录新文件）。
+
+**踩坑提醒（来自 Dondji 文档）**：重新生成字库后**必须同步固件的布局常量**。
+它那边的现象是只刷了新字库 bin 却忘了改 `CN_FONT_PY_OFFSET`，固件按旧偏移去扫拼音区，
+结果是「任意拼音候选错乱、大量音节匹配失败」，不是个别字的问题而是整表错位。
+我们同理：位图长度一变，索引区起始地址就变。
+
+**模拟器自检**：`--screen cnfont` 逐页显示字库全部字形；About 页显示 `CN FONT <字数>`
+（未启用时显示 `CN FONT OFF`），便于真机核对刷入的字库版本。
 ## 9. 参考项目与许可
 
 - MM-Radio（BSD-2-Clause，主参考/工程底座）；

@@ -16,6 +16,9 @@
 #include "lcd_st7567.h"
 #include "font8x16.h"
 #include "font6x8.h"
+#if CN_FONT_ENABLED
+#include "cn_font.h"
+#endif
 
 static uint8_t fb[LCD_FB_BYTES];
 
@@ -251,6 +254,24 @@ void lcd_draw_string6x8(uint8_t x, uint8_t y, const char *s, uint8_t on)
     s++;
   }
 }
+
+#if CN_FONT_ENABLED
+/* 16x16 中文字形：每行一个 uint16_t，MSB = 最左像素 */
+void lcd_draw_cn16(uint8_t x, uint8_t y, uint32_t ucs, uint8_t on)
+{
+  const uint16_t *g = cn_font_lookup(ucs);
+  int r, c;
+  if (!g) return;
+  for (r = 0; r < 16; r++) {
+    uint16_t bits = g[r];
+    for (c = 0; c < 16; c++)
+      if (bits & (0x8000u >> c)) lcd_pixel((uint8_t)(x + c), (uint8_t)(y + r), on);
+  }
+}
+#else
+void lcd_draw_cn16(uint8_t x, uint8_t y, uint32_t ucs, uint8_t on)
+{ (void)x; (void)y; (void)ucs; (void)on; }
+#endif
 
 void lcd_flush(void)
 {

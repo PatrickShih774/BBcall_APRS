@@ -21,6 +21,7 @@ add_executable(bbcall_sim
   ${FW}/Core/Src/ax25.c
   ${FW}/Core/Src/aprs.c
   ${FW}/Core/Src/modem.c
+  ${FW}/Core/Src/cn_font.c
 )
 
 target_include_directories(bbcall_sim PRIVATE

@@ -27,6 +27,7 @@ static int parse_screen(const char *s)
   if (!strcmp(s, "msgread"))  return UI_SCREEN_MSG_READ;
   if (!strcmp(s, "compose"))  return UI_SCREEN_MSG_COMPOSE;
   if (!strcmp(s, "heard"))    return UI_SCREEN_INBOX;
+  if (!strcmp(s, "cnfont"))   return UI_SCREEN_CNFONT;
   if (!strcmp(s, "menu")    || !strcmp(s, "m")) return UI_SCREEN_MENU;
   if (!strcmp(s, "radio")   || !strcmp(s, "r")) return UI_SCREEN_RADIO;
   if (!strcmp(s, "about")) return UI_SCREEN_ABOUT;

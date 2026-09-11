@@ -44,6 +44,25 @@
   按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `UISkill.md` 第 11 节。
 - 合规说明：Apache-2.0 与 GPL-3.0 兼容；本项目未纳入其源码，仅作设计参考并在文档中标注出处。
   如后续需要直接复用其代码，应保留 Apache-2.0 许可与 NOTICE 要求。
+## GNU Unifont（中文字模字源）
+
+- 项目：https://unifoundry.com/unifont/ ，本仓库使用 `unifont-16.0.01.hex`
+- 许可：**OFL-1.1 或 GPLv2-or-later 双许可**（自 2013 起）。两种都与本项目 GPL-3.0 兼容。
+- 用途：`firmware-stm32porject/Core/Inc/cn_font_data.h` 里的 16x16 中文字形子集由它生成。
+- 许可文本：`licenses/GNU-Unifont-OFL.txt`
+- 生成方式：`tools/gen_cn_font.py`（字形为纯点阵数据，未修改）
+
+> **不要改用 WenQuanYi Bitmap Song**：它是 GPL v2（仅此一版）+ 字体嵌入例外，
+> 与本项目 GPL-3.0 不兼容（GPLv2-only 无法并入 GPLv3）。同理适用于其它 GPLv2-only 的点阵字库。
+
+## EthanYan6/Dondji（中文字库方案参考）
+
+- 仓库：https://github.com/EthanYan6/Dondji ，许可：**Apache-2.0**
+- 用途：中文显示方案的**设计参考**。其字库布局为
+  `[位图][Unicode 索引 4B/项 升序][拼音表][版本字节]`，放在**外部 SPI Flash**，固件只保留布局常量；
+  本项目沿用同一形状（见 `tools/gen_cn_font.py` 与 `PLAN.md` 中文显示一节）。
+- **未复制其代码，也未使用其字模数据**（其字源为 WQY Bitmap Song，许可与本项目不兼容）。
+- 合规说明：Apache-2.0 与 GPL-3.0 兼容；仅作设计参考并在文档标注出处。
 ## STMicroelectronics STM32 HAL / CMSIS
 
 - 位置：`firmware-stm32porject/Drivers/`

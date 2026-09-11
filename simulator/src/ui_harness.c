@@ -16,6 +16,7 @@
 #include "ax25.h"
 #include "aprs.h"
 #include "msg_store.h"
+#include "cn_font.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -57,6 +58,7 @@ static uint8_t   s_msg_top;
 static uint8_t   s_msg_sent;          /* READ 页来源：0=Inbox 1=Sent */
 static char      s_comp[MSG_TEXT_MAX + 1];   /* COMPOSE 缓冲 */
 static uint8_t   s_comp_len;
+static uint8_t   s_cn_page;           /* 中文字库样张分页 */
 static uint8_t   s_smeter;            /* 0..9 */
 static uint8_t   s_muted;
 static uint16_t  s_rx_total, s_unread, s_dup_total;
@@ -504,7 +506,12 @@ static void draw_about(void)
   t6(0, ROW(2), "STM32F103C8T6", 1);
   t6(0, ROW(3), "ST7567 128x64 LCD", 1);
   t6(0, ROW(4), "BK4802P 21.25MHz IF", 1);
-  t6(0, ROW(5), "144.640 MHz APRS", 1);
+  {                                   /* 中文字库状态如实显示，便于真机核对 */
+    uint16_t cnc = cn_font_count();
+    if (cnc > 0u) snprintf(buf, sizeof(buf), "CN FONT %u", (unsigned)cnc);
+    else          snprintf(buf, sizeof(buf), "CN FONT OFF");
+    t6(0, ROW(5), buf, 1);
+  }
   lcd_flush();
 }
 
@@ -775,6 +782,42 @@ static void draw_msg_compose(void)
   t6_right(54, "TX OFF", 1);                 /* 本项目仅接收，不假装能发 */
   lcd_flush();
 }
+/* ------------------------------------------------------------------ */
+/* 中文字库样张：8 列 x 3 行 = 24 字/页，直接在屏上验字库与索引          */
+/* ------------------------------------------------------------------ */
+static void draw_cnfont(void)
+{
+  char hdr[24];
+  uint16_t total = cn_font_count();
+  uint8_t per = 24u;
+  uint8_t pages, i;
+
+  lcd_clear(0);
+  if (total == 0u) {                       /* CN_FONT_ENABLED=0 时如实说明 */
+    status_rail("CN FONT");
+    hair(SEP_Y);
+    t6(0, ROW(2), "CN font disabled", 1);
+    t6(0, ROW(4), "run tools/gen_cn_font.py", 1);
+    lcd_flush();
+    return;
+  }
+  pages = (uint8_t)((total + per - 1u) / per);
+  if (pages == 0u) pages = 1u;
+  if (s_cn_page >= pages) s_cn_page = (uint8_t)(pages - 1u);
+
+  snprintf(hdr, sizeof(hdr), "CN %u/%u", (unsigned)(s_cn_page + 1u), (unsigned)pages);
+  status_rail(hdr);
+  hair(SEP_Y);
+
+  for (i = 0; i < per; i++) {
+    uint16_t idx = (uint16_t)(s_cn_page * per + i);
+    if (idx >= total) break;
+    lcd_draw_cn16((uint8_t)((i % 8u) * 16u),
+                  (uint8_t)(10u + (i / 8u) * 16u),
+                  cn_font_code_at(idx), 1);
+  }
+  lcd_flush();
+}
 static void redraw(void)
 {
   switch (s_scr) {
@@ -790,6 +833,7 @@ static void redraw(void)
     case UI_SCREEN_MSG_SENT:    draw_msg_list(1u);  break;
     case UI_SCREEN_MSG_READ:    draw_msg_read();    break;
     case UI_SCREEN_MSG_COMPOSE: draw_msg_compose(); break;
+    case UI_SCREEN_CNFONT:      draw_cnfont();      break;
     default:               draw_pattern();break;
   }
   if (s_confirm) draw_confirm();
@@ -940,7 +984,7 @@ void ui_init(void)
   lcd_init();
   s_count = 0u; s_sel = 0u; s_top = 0u; s_page = 0u; s_confirm = 0u;
   s_menu_sel = 0u; s_msg_hub_sel = 0u; s_msg_sel = 0u;
-  s_msg_top = 0u; s_msg_sent = 0u; s_comp_len = 0u; s_comp[0] = 0;
+  s_msg_top = 0u; s_msg_sent = 0u; s_comp_len = 0u; s_comp[0] = 0; s_cn_page = 0u;
   msg_store_init();
   s_rx_total = 0u; s_unread = 0u; s_dup_total = 0u; s_dup_pos = 0u;
   s_smeter = 0u; s_muted = 1u;
@@ -1099,6 +1143,12 @@ void ui_handle_key(int key)
         if (s_comp_len > 0u) { s_comp[--s_comp_len] = 0; draw_msg_compose(); }
         else ui_show(UI_SCREEN_MSG_HUB);
       }
+      break;
+
+    case UI_SCREEN_CNFONT:
+      if (key == 1) { if (s_cn_page > 0u) s_cn_page--; draw_cnfont(); }
+      else if (key == 2) { s_cn_page++; draw_cnfont(); }
+      else if (key == 4 || key == 3) ui_show(UI_SCREEN_MENU);
       break;
 
     default:

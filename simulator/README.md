@@ -125,6 +125,7 @@ Web 规则到 1-bit 的等价物、唯一 chrome 系统、图标家族、屏幕�
 | `about` | 版本与硬件信息 |
 | `confirm` | 删除确认：填充块 + 内嵌 1px 框 + 反显文字 |
 | `pattern` | 棋盘格 + 两套字体全字符样张 |
+| `cnfont` | 中文字库样张：16x16 汉字，8 列 x 3 行 = 24 字/页，上下翻页 |
 | `messenger` | Messenger 启动器：INBOX / HEARD / COMPOSE / SENT，选中项右侧 24x24 大图标 |
 | `msginbox` | 收件箱 6 行，最新在上：`*` 未读 + 正文预览 + 年龄（`NOW`/`12m`/`3h`） |
 | `msgsent` | 已发 6 行，行首 `+` 已确认 / `x` 失败 / `-` 待确认 |
@@ -159,6 +160,22 @@ cd simulator\build-win
 
 `--screen` 可取 `boot` / `home` / `menu` / `inbox` / `detail` / `radio` / `about` / `confirm` / `pattern`；
 `--clock SEC` 固定大时钟（截图用）。
+
+### 中文字库（布局参考 Dondji）
+
+字库由 `tools/gen_cn_font.py` 生成，布局沿用 [EthanYan6/Dondji](https://github.com/EthanYan6/Dondji)
+（Apache-2.0）的形状：`[位图][Unicode 索引 4B/项 升序][版本字节]`，16x16 点阵。
+
+```powershell
+python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.txt `
+    --out-header firmware-stm32porject\Core\Inc\cn_font_data.h --out-bin tools\cn_font.bin
+```
+
+- `build_win.ps1` 检测到 `Core/Inc/cn_font_data.h` 会自动加 `-DCN_FONT_ENABLED=1`；
+- 当前子集 107 字、3,853 字节，目标平台实测编译后占 4,028 字节 Flash；
+- `--screen cnfont` 逐页看全部字形；About 页显示 `CN FONT <字数>`（未启用则 `CN FONT OFF`）；
+- **不要用 WenQuanYi Bitmap Song**：GPL v2 only，与本项目 GPL-3.0 不兼容；默认字源是
+  GNU Unifont（OFL-1.1 / GPLv2+ 双许可）。
 
 ### Messenger（参考 GOGUFW）
 
