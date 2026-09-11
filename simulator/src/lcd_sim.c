@@ -172,6 +172,28 @@ void lcd_sim_save_bmp(const char *path)
   SDL_FreeSurface(surf);
 }
 
+/* SDL 键码 -> 内部键码。
+ * 字母键（S/M/T）与数字键都能按：数字键直接用内部编码，与 --keys 的编号一致，
+ * 免得"文档写 7 是待机页、键盘却没有 7"这种困惑。 */
+int lcd_sim_map_key(int sdl_sym)
+{
+  switch (sdl_sym) {
+    case SDLK_UP:        return SIM_KEY_UP;
+    case SDLK_DOWN:      return SIM_KEY_DOWN;
+    case SDLK_RETURN:    case SDLK_KP_ENTER: return SIM_KEY_OK;
+    case SDLK_BACKSPACE: return SIM_KEY_BACK;
+    case SDLK_DELETE:    return SIM_KEY_DEL;
+    case SDLK_t: case SDLK_5: case SDLK_KP_5: return SIM_KEY_PATTERN;
+    case SDLK_m: case SDLK_9: case SDLK_KP_9: return SIM_KEY_MESSAGES;
+    case SDLK_s: case SDLK_7: case SDLK_KP_7: return SIM_KEY_STANDBY;
+    case SDLK_1: case SDLK_KP_1: return SIM_KEY_UP;
+    case SDLK_2: case SDLK_KP_2: return SIM_KEY_DOWN;
+    case SDLK_3: case SDLK_KP_3: return SIM_KEY_OK;
+    case SDLK_4: case SDLK_KP_4: return SIM_KEY_BACK;
+    case SDLK_8: case SDLK_KP_8: return SIM_KEY_DEL;
+    default: return 0;
+  }
+}
 void lcd_sim_poll_events(void)
 {
   SDL_Event ev;
@@ -179,19 +201,13 @@ void lcd_sim_poll_events(void)
     if (ev.type == SDL_QUIT) { s_running = 0; continue; }
 
     if (ev.type == SDL_KEYDOWN) {
+      int k = lcd_sim_map_key(ev.key.keysym.sym);
+      if (k != 0) push_key(k);
       switch (ev.key.keysym.sym) {
         case SDLK_ESCAPE: s_running = 0; break;
-        case SDLK_UP: push_key(SIM_KEY_UP); break;
-        case SDLK_DOWN: push_key(SIM_KEY_DOWN); break;
-        case SDLK_RETURN: case SDLK_KP_ENTER: push_key(SIM_KEY_OK); break;
-        case SDLK_BACKSPACE: push_key(SIM_KEY_BACK); break;
-        case SDLK_t: push_key(SIM_KEY_PATTERN); break;
-        case SDLK_m: push_key(SIM_KEY_MESSAGES); break;
-        case SDLK_s: push_key(SIM_KEY_STANDBY); break;
         case SDLK_i: lcd_sim_toggle_invert(); break;
         case SDLK_b: lcd_sim_toggle_backlight(); break;
         case SDLK_F3: lcd_sim_toggle_panel(); break;
-        case SDLK_DELETE: push_key(SIM_KEY_DEL); break;
         case SDLK_F12: lcd_sim_save_bmp("lcd_sim.bmp"); break;
         default: break;
       }

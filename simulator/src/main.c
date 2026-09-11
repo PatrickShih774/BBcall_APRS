@@ -33,6 +33,34 @@ static int parse_screen(const char *s)
   return -1;
 }
 
+/* 键盘映射自检：SDL 键码 -> 内部键码。
+ * 加这个是因为踩过"文档说按 7 是待机页、键盘却没绑数字键"的坑——这类问题不该靠人肉发现。 */
+static void keymap_report(void)
+{
+  static const struct { int sym; const char *name; int want; } T[] = {
+    { SDLK_1, "1", SIM_KEY_UP },      { SDLK_2, "2", SIM_KEY_DOWN },
+    { SDLK_3, "3", SIM_KEY_OK },      { SDLK_4, "4", SIM_KEY_BACK },
+    { SDLK_5, "5", SIM_KEY_PATTERN }, { SDLK_7, "7", SIM_KEY_STANDBY },
+    { SDLK_8, "8", SIM_KEY_DEL },     { SDLK_9, "9", SIM_KEY_MESSAGES },
+    { SDLK_s, "S", SIM_KEY_STANDBY }, { SDLK_m, "M", SIM_KEY_MESSAGES },
+    { SDLK_t, "T", SIM_KEY_PATTERN },
+    { SDLK_UP, "Up", SIM_KEY_UP },    { SDLK_DOWN, "Down", SIM_KEY_DOWN },
+    { SDLK_RETURN, "Enter", SIM_KEY_OK },
+    { SDLK_BACKSPACE, "Backspace", SIM_KEY_BACK },
+    { SDLK_DELETE, "Delete", SIM_KEY_DEL },
+  };
+  int i, fail = 0;
+  printf("[sim] 键盘映射自检（SDL 键 -> 内部键码）:\n");
+  for (i = 0; i < (int)(sizeof(T) / sizeof(T[0])); i++) {
+    int got = lcd_sim_map_key(T[i].sym);
+    int ok = (got == T[i].want);
+    if (!ok) fail++;
+    printf("    %-10s -> %-2d  %s\n", T[i].name, got, ok ? "OK" : "FAIL");
+  }
+  printf("[sim] 键盘映射自检：%s（共 %d 项）\n", fail ? "有失败" : "全部通过",
+         (int)(sizeof(T) / sizeof(T[0])));
+}
+
 static void usage(void)
 {
   printf("用法: bbcall_sim [选项]\n"
@@ -44,6 +72,7 @@ static void usage(void)
          "  --replay FILE    串口日志 [RAW] hex= 回放到收件箱\n"
          "  --clock SEC      主页大时钟的固定值（自检截图用）\n"
          "  --keys LIST      按键序列（逗号分隔，如 4,3），用于验证导航路径\n"
+         "  --keymap         打印并自检键盘映射（SDL 键 -> 内部键码）\n"
          "  --demo           注入内置示例帧\n"
          "\n按键: 上下=选择  Enter=打开  Backspace=返回  Delete=删除(二次确认)\n"
          "      T=图案  M=收件箱  S=待机  I=反显  B=背光  F3=面板方向  F12=截图  Esc=退出\n");
@@ -72,6 +101,7 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--replay") && i + 1 < argc) log = argv[++i];
     else if (!strcmp(argv[i], "--clock") && i + 1 < argc) clock_sec = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = argv[++i];
+    else if (!strcmp(argv[i], "--keymap")) { keymap_report(); return 0; }
     else if (!strcmp(argv[i], "--demo")) demo = 1;
     else if (!strcmp(argv[i], "--standby")) screen = UI_SCREEN_STANDBY;
     else if (!strcmp(argv[i], "--message") || !strcmp(argv[i], "--inbox")) screen = UI_SCREEN_INBOX;
@@ -118,6 +148,11 @@ int main(int argc, char **argv)
     lcd_sim_shutdown();
     return 0;
   }
+
+  printf("[sim] 键盘：1/2 上下  3 确定  4 返回（在待机页或收件箱上进入二级菜单）\n"
+         "[sim]       7 待机页  9 收件箱  8 删除  5 字体样张\n"
+         "[sim]       S 待机页  M 收件箱  T 样张  I 反显  B 背光  F3 面板  F12 截图  Esc 退出\n"
+         "[sim]       注意：先把鼠标点进模拟器窗口，否则按键不会送进来\n");
 
   while (!lcd_sim_should_quit()) {
     int key;
