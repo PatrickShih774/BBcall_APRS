@@ -1,16 +1,9 @@
 #ifndef LCD_SIM_H
 #define LCD_SIM_H
 #include <stdint.h>
+#include "ui_harness.h"   /* SIM_KEY_* 键码（设备层定义） */
 
-#define SIM_KEY_UP       1
-#define SIM_KEY_DOWN     2
-#define SIM_KEY_OK       3
-#define SIM_KEY_BACK     4
-#define SIM_KEY_PATTERN  5
-#define SIM_KEY_MESSAGE  6
-#define SIM_KEY_STANDBY  7
-#define SIM_KEY_DEL      8
-#define SIM_KEY_MESSAGES 9
+/* 键盘映射：↑ ↓ Enter；Enter 按住 ≥620ms 松开后发 SIM_KEY_OK_LONG（design.md §9）。 */
 
 int  lcd_sim_init(const char *title, int scale);
 void lcd_sim_shutdown(void);

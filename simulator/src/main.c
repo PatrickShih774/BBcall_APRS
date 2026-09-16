@@ -1,35 +1,25 @@
 /*
- * BBcall_APRS PC LCD 模拟器主程序
+ * BBcall_APRS PC LCD 模拟器主程序（design.md v2.0 三态模型）
  *
  * 复用固件代码：lcd_st7567.c（ST7567 驱动/绘图）、ax25.c、aprs.c、modem.c。
  * 数据来源：--wav（音频解调）/ --replay（串口日志回放）/ --demo（内置示例）。
+ * 按键模型与真机一致：只有 ▲ ▼ ●（Enter 长按 620ms = 长按）。
  */
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include "lcd_sim.h"
 #include "ui_harness.h"
 #include "sim_feed.h"
-#include "msg_store.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static int parse_screen(const char *s)
 {
-  if (!strcmp(s, "pattern") || !strcmp(s, "t")) return UI_SCREEN_PATTERN;
-  if (!strcmp(s, "standby") || !strcmp(s, "s")) return UI_SCREEN_STANDBY;
-  if (!strcmp(s, "inbox")   || !strcmp(s, "i")) return UI_SCREEN_INBOX;
-  if (!strcmp(s, "detail")  || !strcmp(s, "d")) return UI_SCREEN_DETAIL;
-  if (!strcmp(s, "home")    || !strcmp(s, "h")) return UI_SCREEN_HOME;
-  if (!strcmp(s, "messages") || !strcmp(s, "msg")) return UI_SCREEN_MSG_INBOX;
-  if (!strcmp(s, "msgread"))  return UI_SCREEN_MSG_READ;
-  if (!strcmp(s, "heard"))    return UI_SCREEN_INBOX;
-  if (!strcmp(s, "cnfont"))   return UI_SCREEN_CNFONT;
-  if (!strcmp(s, "menu")    || !strcmp(s, "m")) return UI_SCREEN_MENU;
-  if (!strcmp(s, "radio")   || !strcmp(s, "r")) return UI_SCREEN_RADIO;
-  if (!strcmp(s, "about")) return UI_SCREEN_ABOUT;
-  if (!strcmp(s, "boot")    || !strcmp(s, "b")) return UI_SCREEN_BOOT;
-  if (!strcmp(s, "confirm") || !strcmp(s, "c")) return UI_SCREEN_CONFIRM;
+  if (!strcmp(s, "idle")    || !strcmp(s, "standby") || !strcmp(s, "s")) return UI_SCREEN_IDLE;
+  if (!strcmp(s, "unread")  || !strcmp(s, "u"))                          return UI_SCREEN_UNREAD;
+  if (!strcmp(s, "inbox")   || !strcmp(s, "i") || !strcmp(s, "messages")) return UI_SCREEN_INBOX;
+  if (!strcmp(s, "pattern") || !strcmp(s, "t"))                          return UI_SCREEN_PATTERN;
   return -1;
 }
 
@@ -38,16 +28,12 @@ static int parse_screen(const char *s)
 static void keymap_report(void)
 {
   static const struct { int sym; const char *name; int want; } T[] = {
-    { SDLK_1, "1", SIM_KEY_UP },      { SDLK_2, "2", SIM_KEY_DOWN },
-    { SDLK_3, "3", SIM_KEY_OK },      { SDLK_4, "4", SIM_KEY_BACK },
-    { SDLK_5, "5", SIM_KEY_PATTERN }, { SDLK_7, "7", SIM_KEY_STANDBY },
-    { SDLK_8, "8", SIM_KEY_DEL },     { SDLK_9, "9", SIM_KEY_MESSAGES },
-    { SDLK_s, "S", SIM_KEY_STANDBY }, { SDLK_m, "M", SIM_KEY_MESSAGES },
-    { SDLK_t, "T", SIM_KEY_PATTERN },
-    { SDLK_UP, "Up", SIM_KEY_UP },    { SDLK_DOWN, "Down", SIM_KEY_DOWN },
+    { SDLK_1, "1", SIM_KEY_UP },
+    { SDLK_2, "2", SIM_KEY_DOWN },
+    { SDLK_3, "3", SIM_KEY_OK },
+    { SDLK_UP, "Up", SIM_KEY_UP },
+    { SDLK_DOWN, "Down", SIM_KEY_DOWN },
     { SDLK_RETURN, "Enter", SIM_KEY_OK },
-    { SDLK_BACKSPACE, "Backspace", SIM_KEY_BACK },
-    { SDLK_DELETE, "Delete", SIM_KEY_DEL },
   };
   int i, fail = 0;
   printf("[sim] 键盘映射自检（SDL 键 -> 内部键码）:\n");
@@ -57,8 +43,8 @@ static void keymap_report(void)
     if (!ok) fail++;
     printf("    %-10s -> %-2d  %s\n", T[i].name, got, ok ? "OK" : "FAIL");
   }
-  printf("[sim] 键盘映射自检：%s（共 %d 项）\n", fail ? "有失败" : "全部通过",
-         (int)(sizeof(T) / sizeof(T[0])));
+  printf("[sim] 键盘映射自检：%s（共 %d 项；Enter 长按 %dms 由事件循环判定期）\n",
+         fail ? "有失败" : "全部通过", (int)(sizeof(T) / sizeof(T[0])), 620);
 }
 
 static void usage(void)
@@ -67,27 +53,31 @@ static void usage(void)
          "  --scale N        放大倍数 1..12（默认 4）\n"
          "  --selftest       无窗口渲染一帧并写出 BMP\n"
          "  --out FILE       自检输出文件名（默认 sim_selftest.bmp）\n"
-         "  --screen NAME    boot|home|menu|inbox|heard|detail|radio|about|pattern|messages|msgread|cnfont|confirm\n"
+         "  --screen NAME    idle|unread|inbox|pattern（自检渲染指定态）\n"
          "  --wav FILE       WAV -> modem.c 解调 -> 收件箱\n"
          "  --replay FILE    串口日志 [RAW] hex= 回放到收件箱\n"
-         "  --clock SEC      主页大时钟的固定值（自检截图用）\n"
-         "  --keys LIST      按键序列（逗号分隔，如 4,3），用于验证导航路径\n"
-         "  --keymap         打印并自检键盘映射（SDL 键 -> 内部键码）\n"
-         "  --demo           注入内置示例帧\n"
-         "\n按键: 上下=选择  Enter=打开  Backspace=返回  Delete=删除(二次确认)\n"
-         "      T=图案  M=收件箱  S=待机  I=反显  B=背光  F3=面板方向  F12=截图  Esc=退出\n");
+         "  --demo           注入内置示例帧（含中文消息；无外部文件时的默认）\n"
+         "  --clock SEC      设备时钟固定值（自检截图用，决定时钟/时间显示）\n"
+         "  --wallclock W,M,D  模拟 RTC：态 1 大格显示 周W M/D（如 3,9,16 = 周三 9/16）\n"
+         "  --mycall CALL    本机呼号（态 1 上格，默认 NOCALL）\n"
+         "  --batt N         电量挡位 0 低 / 1 中 / 2 高（默认无采样，显示 --）\n"
+         "  --keys LIST      按键序列（1=上 2=下 3=确定 4=长按确定），验证导航路径\n"
+         "  --keymap         打印并自检键盘映射\n"
+         "\n按键: 上/下 = 翻条(收件箱)  Enter = 确定  Enter 长按 620ms = 退出/最外层\n"
+         "      I=反显  B=背光  F3=面板方向  F12=截图  Esc=退出\n");
 }
 
 int main(int argc, char **argv)
 {
   int scale = 4;
   int selftest = 0;
-  int screen = UI_SCREEN_MSG_INBOX;   /* 开机即消息列表：它是本机唯一的主功能 */
+  int screen = 0;                     /* 0 = 按状态机自动（未读>0 则有未读态） */
   int demo = 0;
   int clock_sec = -1;
+  int batt = -1;
   int i;
   const char *wav = NULL, *log = NULL, *out = "sim_selftest.bmp";
-  const char *keys = NULL;
+  const char *keys = NULL, *mycall = NULL, *wallclock = NULL;
 
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
@@ -100,11 +90,12 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav = argv[++i];
     else if (!strcmp(argv[i], "--replay") && i + 1 < argc) log = argv[++i];
     else if (!strcmp(argv[i], "--clock") && i + 1 < argc) clock_sec = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--wallclock") && i + 1 < argc) wallclock = argv[++i];
+    else if (!strcmp(argv[i], "--mycall") && i + 1 < argc) mycall = argv[++i];
+    else if (!strcmp(argv[i], "--batt") && i + 1 < argc) batt = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = argv[++i];
     else if (!strcmp(argv[i], "--keymap")) { keymap_report(); return 0; }
     else if (!strcmp(argv[i], "--demo")) demo = 1;
-    else if (!strcmp(argv[i], "--standby")) screen = UI_SCREEN_STANDBY;
-    else if (!strcmp(argv[i], "--message") || !strcmp(argv[i], "--inbox")) screen = UI_SCREEN_INBOX;
     else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { usage(); return 0; }
   }
 
@@ -113,22 +104,31 @@ int main(int argc, char **argv)
 
   ui_init();
   ui_set_rx_freq_khz(144640u);
+  if (mycall) ui_set_mycall(mycall);
+  if (batt >= 0) ui_set_batt((int8_t)batt);
+  if (wallclock) {
+    unsigned w = 0, mo = 0, d = 0;
+    if (sscanf(wallclock, "%u,%u,%u", &w, &mo, &d) == 3 && w < 7)
+      ui_set_wallclock((uint8_t)w, (uint8_t)mo, (uint8_t)d);
+    else
+      printf("[sim] --wallclock 格式应为 W,M,D（W: 0=周日..6=周六），已忽略: %s\n", wallclock);
+  }
   if (clock_sec >= 0) ui_set_clock_ms((uint32_t)clock_sec * 1000u);
 
   if (wav) sim_feed_wav(wav);
   if (log) sim_feed_log(log);
   if (demo || (!wav && !log)) {
-    sim_feed_demo();
-    msg_store_add_demo();     /* Sent/Drafts 侧演示数据（本项目不发射） */
+    sim_feed_demo();          /* 内置示例帧 */
   }
 
   printf("[sim] 收件箱 %u 条（未读 %u）/ 累计收到 %u 帧（重复抑制 %u）\n",
          (unsigned)ui_inbox_count(), (unsigned)ui_unread_count(), (unsigned)ui_rx_total(),
          (unsigned)ui_dup_total());
 
-  ui_show(screen);
+  if (screen) ui_show(screen);
+  else        ui_show(ui_unread_count() > 0u ? UI_SCREEN_UNREAD : UI_SCREEN_IDLE);
 
-  /* --keys "4,3"：按顺序派发按键，用于验证导航路径（自检可复现） */
+  /* --keys "3,2,2"：按顺序派发按键，用于验证导航路径（自检可复现） */
   if (keys) {
     const char *q = keys;
     printf("[sim] 按键序列:");
@@ -149,9 +149,8 @@ int main(int argc, char **argv)
     return 0;
   }
 
-  printf("[sim] 键盘：1/2 上下  3 确定  4 返回（在待机页或收件箱上进入二级菜单）\n"
-         "[sim]       7 待机页  9 收件箱  8 删除  5 字体样张\n"
-         "[sim]       S 待机页  M 收件箱  T 样张  I 反显  B 背光  F3 面板  F12 截图  Esc 退出\n"
+  printf("[sim] 键盘：↑ ↓ 翻条（仅收件箱）  Enter 确定  Enter 长按 620ms 退出/最外层\n"
+         "[sim]       I 反显  B 背光  F3 面板方向  F12 截图  Esc 退出\n"
          "[sim]       注意：先把鼠标点进模拟器窗口，否则按键不会送进来\n");
 
   while (!lcd_sim_should_quit()) {

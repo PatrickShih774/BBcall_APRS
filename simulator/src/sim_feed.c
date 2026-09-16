@@ -206,16 +206,15 @@ int sim_feed_log(const char *path)
     while (*eol && *eol != '\n' && *eol != '\r') eol++;
     if (*eol) { *eol = 0; eol++; }
     {
-      /* 顺带解析状态行：S 表 / 静音 / R19 电台参数（供状态栏与 RADIO 页显示真实值） */
+      /* 顺带解析状态行：S 表 / 静音。
+       * 注意：R19 的 RSSI=/SNR= 是 BK4802 原始寄存器读数，未标定为 dBm，
+       * 按 design.md §12.2「没有测量就不显示」，回放路径不注入 RSSI/SNR，
+       * 界面上对应格显示 --；需要演示数值时用 --demo（注入已标定样例）。
+       * S=/M= 在新版三态界面没有显示位置（design.md §12.2：信号强度保持不画），
+       * 解析后仅留在此，将来设置/诊断页落地后再接。 */
       uint32_t v = 0;
-      if (find_uint(line, "S=", &v) && v <= 9u) ui_set_smeter((uint8_t)v);
-      if (find_uint(line, "M=", &v)) ui_set_muted((uint8_t)(v & 1u));
-      {
-        uint32_t a, b, c, d;
-        if (find_uint(line, "RSSI=", &a) && find_uint(line, "SNR=", &b) &&
-            find_uint(line, "AFC=", &c) && find_uint(line, "EXN=", &d))
-          ui_set_radio_stats((uint16_t)a, (uint16_t)b, (uint16_t)c, (uint16_t)d);
-      }
+      (void)v;
+      (void)find_uint;
     }
     {
       const char *hx = find_sub(line, "hex=");
@@ -258,8 +257,12 @@ int sim_feed_log(const char *path)
   return count;
 }
 
-/* ---------------- 内置示例 ---------------- */
-/* 与 tools/ax25_reference.py 的 build_frame 等价，避免依赖外部文件 */
+/* ---------------- 内置示例 ----------------
+ * 与 tools/ax25_reference.py 的 build_frame 等价，避免依赖外部文件。
+ * 数据对齐 HTML 原型 MSGS：三条中文消息 + 一条位置帧。
+ * 入箱顺序 = 数组顺序，每条插到队首，所以最后入箱的（BG5BLB 中文消息）是队首最新。
+ * RSSI/SNR 用 ui_set_radio_stats 在入箱前注入（已标定样例值，仅用于演示显示链路；
+ * 真机无采样时按 design.md §12.2 显示 --，日志回放路径不注入）。 */
 static uint8_t *demo_frame(const char *dest, const char *src, const char *info, uint16_t *out_len)
 {
   static uint8_t frame[300];
@@ -303,17 +306,22 @@ static uint8_t *demo_frame(const char *dest, const char *src, const char *info, 
 
 int sim_feed_demo(void)
 {
-  static const struct { const char *dst; const char *src; const char *info; } demo[4] = {
-    { "APRS    ", "BG5BLH", ":BG5BLH   :Hello APRS 144.640" },
-    { "APRS    ", "BG5AOZ", "=2945.58N/12137.26E[BBcall from MMradio/A=000039" },
-    { "APRS    ", "BY4SZ ",  ">Status: BBcall_APRS simulator  144.640MHz" },
-    { "APRS    ", "BG5BLH", "!2954.05N/12132.86E>Test position 144.640MHz" }
+  static const struct { const char *dst; const char *src; const char *info;
+                        int16_t rssi, snr; } demo[4] = {
+    { "APRS    ", "BG5AOZ", "=2954.05N/12132.86E>Test position 144.640MHz", -90, 15 },
+    { "APRS    ", "N0CALL", ":N0CALL   :位置已存 电量低",                   -95, 9  },
+    { "APRS    ", "BG5BLH", ":BG5BLH   :中继信号 正常",                     -88, 18 },
+    { "APRS    ", "BG5BLB", ":BG5BLB   :有内鬼 停止交易",                   -92, 12 }
   };
   int i, count = 0;
+  uint32_t now = ui_clock_ms();
   for (i = 0; i < 4; i++) {
     uint16_t len = 0;
     uint8_t *fr = demo_frame(demo[i].dst, demo[i].src, demo[i].info, &len);
-    if (ax25_check_frame(fr, len) && ui_feed_ax25(fr, len, (uint32_t)(1000 + i * 1500), 0, 0)) count++;
+    /* 接收时刻 = 当前设备时钟回推：4 条间隔 45s，最新一条 1.5s 前（看起来像"刚到"） */
+    uint32_t t = now - (uint32_t)((3 - i) * 45000 + 1500);
+    ui_set_radio_stats(demo[i].rssi, demo[i].snr);
+    if (ax25_check_frame(fr, len) && ui_feed_ax25(fr, len, t, 0, 0)) count++;
   }
   printf("[sim] 内置示例注入 %d 条\n", count);
   return count;

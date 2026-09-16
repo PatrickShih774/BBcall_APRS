@@ -3,10 +3,11 @@
 用 SDL2 模拟 ST7567 128×64 单色点阵，**直接编译固件里的代码**：
 
 ```text
-lcd_st7567.c  ST7567 驱动 / 绘图 / 8x16 字体
+lcd_st7567.c  ST7567 驱动 / 绘图原语（含反显填充）/ Fusion Pixel 字模绘制
 ax25.c        HDLC 去填充 / CRC-16/X.25 / 地址解析 / 纠错
 aprs.c        APRS 消息 / 位置 / Mic-E 解析
 modem.c       1200 baud Bell202 AFSK 解调（16 相位 + 9 条跳变对齐）
+ui_harness.c  三态界面（待机 / 有未读 / 收件箱）与按键状态机
 ```
 
 不烧录 STM32 就能看到屏幕效果，也能回放真实接收数据。
@@ -45,8 +46,8 @@ cd simulator\build-win
 # 直接解调 WAV（走固件 modem.c 的完整链路）
 .\bbcall_sim.exe --wav ..\..\tools\test_aprs_144.wav --scale 4
 
-# 无窗口自检：把某个界面渲染成 BMP
-.\bbcall_sim.exe --selftest --wav ..\..\tools\test_aprs_144.wav --screen detail --out detail.bmp
+# 无窗口自检：把某个屏幕态渲染成 BMP（--demo 注入内置示例帧）
+.\bbcall_sim.exe --selftest --demo --screen unread --out unread.bmp
 ```
 
 ### 命令行参数
@@ -55,103 +56,110 @@ cd simulator\build-win
 --scale N        放大倍数 1..12（默认 4）
 --selftest       无窗口（SDL dummy 驱动）渲染一帧并写出 BMP
 --out FILE       自检输出文件名（默认 sim_selftest.bmp，按 scale 放大）
---screen NAME    boot | standby | inbox | detail | confirm | pattern
+--screen NAME    idle | unread | inbox | pattern（默认按未读数自动选待机/有未读）
 --wav FILE       WAV -> modem.c 解调 -> 收件箱
 --replay FILE    串口日志 [RAW] len=.. hex=.. 回放到收件箱
---demo           注入内置示例帧
+--demo           注入内置示例帧（无外部文件时的默认）
+--clock SEC      设备时钟固定值（自检截图用，决定时钟/时刻显示）
+--wallclock W,M,D  模拟 RTC：待机大格显示 周W M/D（如 3,9,16 = 周三 9/16）
+--mycall CALL    本机呼号（待机右上格，默认 NOCALL）
+--batt N         电量挡位 0 低 / 1 中 / 2 高（默认无采样，显示 --）
+--keys LIST      按键序列（1=上 2=下 3=确定 4=长按确定），验证导航路径
+--keymap         打印并自检键盘映射
 -h / --help      帮助
 ```
 
+屏幕坐标、字模、按键语义以仓库根目录 [design.md](../design.md) v2.0 为唯一权威规范
+（§5 骨架 / §6 三态 / §8 硬规则 / §13 验证）。
+
 ### 按键
 
-物理键与数字键**等价**（数字键用的是内部键码，与 `--keys` 的编号一致）：
+按键模型与真机一致，只有 **▲ ▼ ●** 三个键（物理键与数字键等价）：
 
 | 物理键 | 数字键 | 内部键码 | 作用 |
 |---|---|---|---|
-| ↑ / ↓ | `1` / `2` | 1 / 2 | 列表或菜单上下移动 |
-| Enter | `3` | 3 | 打开 / 确认 |
-| Backspace | `4` | 4 | 返回上一级；**在待机页或收件箱上进入二级菜单** |
-| T | `5` | 5 | 字体样张 |
-| S | `7` | 7 | **待机页**（一级屏：大时钟 + 频率 + 计数 + 最近一条） |
-| Delete | `8` | 8 | 删除选中消息（反显弹窗二次确认） |
-| M | `9` | 9 | **收件箱**（一级屏，主功能） |
+| ↑ / ↓ | `1` / `2` | 1 / 2 | 收件箱内滚动（先滚正文，到底再翻条）；待机/有未读态为死键 |
+| Enter | `3` | 3 | 有未读 → 打开收件箱；收件箱内标已读并前进到下一条 |
+| Enter 长按 ≥620ms | `4` | 4 | 退出收件箱；未读清零自动回待机 |
 | I / B | — | — | 反显 / 背光开关 |
 | F3 / F12 / Esc | — | — | 面板 SEG 方向 / 截图 / 退出 |
 
 > 窗口必须先点一下拿到焦点，否则按键不会送进来。
-> 键映射本身可自检：`.\bbcall_sim.exe --keymap`（16 项，逐条打印 SDL 键 -> 内部键码）。
+> 键映射本身可自检：`.\bbcall_sim.exe --keymap`（6 项，逐条打印 SDL 键 -> 内部键码，
+> Enter 长按 620ms 的判定在事件循环里，不在这 6 项内）。
 > 加这个自检是因为踩过一次坑：文档写"按 7 是待机页"，但键盘当时只绑了字母 S，数字键根本没映射。
+
 ### 导航
 
 ```text
-开机 → boot 闪屏
-        ↓
-   一级屏（并列，可随时互切）
-     ├ STANDBY   待机页（S 键）   大时钟 + 频率 + RX/MSG + 最近一条
-     └ MESSAGES  收件箱（M 键）   主功能，开机默认停在这里
-            │ BACK
-            ▼
-     二级菜单 MENU：Heard / Radio / Contrast / Backlight / About
-            │ BACK → 回到进入菜单前的那块一级屏（不是固定回某一个）
+无未读 → 待机态     大格恒反显：时钟(2x) + 日期/开机时长；右半三小格：本机 / 电量 / 未读
+有未读 → 有未读态   大格恒反显：最新未读的发件人+正文前两行+时刻；右半：APRS / - / RSSI / SNR
+● 短按 → 收件箱态   顶栏反显（发件人 + n/N）；正文两行；元信息两行（时刻 RSSI / 路径 CRC）
+▲▼ 滚动；● 短按标已读并前进；● 长按 620ms 退出；未读清零自动回待机
 ```
 
-两层的视觉刻意不同：一级屏（STANDBY / INBOX）状态栏右侧有图标群、选中行整行反显；
-二级页（MENU 及其子页）状态栏是面包屑（`MENU>HEARD`）且右侧留空、内容缩进 6px、选中用内侧反显条。
+整个 UI 只有这三个屏幕态（design.md §6）；设置与诊断类二级页本规范尚未覆盖。
 
-自检可以直接验证整条路径（`--keys` 是按键序列：1=上 2=下 3=OK 4=BACK 5=图案 7=待机 8=删除 9=收件箱）：
+自检可以直接验证导航路径（`--keys` 是按键序列：1=上 2=下 3=确定 4=长按确定）：
 
 ```powershell
-.\bbcall_sim.exe --selftest --demo --scale 2 --out a.bmp                  # 开机即收件箱
-.\bbcall_sim.exe --selftest --demo --scale 2 --keys 7 --out b.bmp         # S -> 待机页
-.\bbcall_sim.exe --selftest --demo --scale 2 --keys 7,4 --out c.bmp       # 待机 BACK -> 二级菜单
-.\bbcall_sim.exe --selftest --demo --scale 2 --keys 7,4,4 --out d.bmp     # 菜单 BACK -> 回待机页
-.\bbcall_sim.exe --selftest --demo --scale 2 --keys 4,3 --out e.bmp       # 菜单第 1 项 -> HEARD
-.\bbcall_sim.exe --keymap                                                 # 键盘映射自检（16 项）
+.\bbcall_sim.exe --selftest --clock 51960 --wallclock 3,9,16 --mycall BG5BLH --batt 2 --demo --out a.bmp   # 有未读态（14:26 / 周三 9/16）
+.\bbcall_sim.exe --selftest --demo --keys 3 --out b.bmp                                                  # ● 打开收件箱
+.\bbcall_sim.exe --selftest --demo --keys 3,2 --out c.bmp                                                # ▼ 滚正文/翻条
+.\bbcall_sim.exe --selftest --demo --keys 3,3,3,3 --out d.bmp                                            # 连按 ● 全部标已读 → 回待机
+.\bbcall_sim.exe --keymap                                                                                # 键盘映射自检（6 项）
 ```
+
+逐屏读屏校验（`tools/verify_ui.py`，从原型字表逐像素比对，差异必须为 0）：
+
+```powershell
+python ..\..\tools\verify_ui.py a.bmp unread   # 规格：idle|unread|inbox|inbox2
+```
+
 ### 自检与数据
 
 ```powershell
 cd simulator\build-win
-.\bbcall_sim.exe --selftest --scale 3 --clock 4337 --screen home --out home.bmp
-.\bbcall_sim.exe --selftest --replay ..\..\tools\sample_aprs_log.txt --screen radio --out radio.bmp
-.\bbcall_sim.exe --selftest --wav ..\..\tools\test_aprs_144.wav --screen detail --out wav.bmp
+.\bbcall_sim.exe --selftest --clock 51960 --wallclock 3,9,16 --mycall BG5BLH --batt 2 --demo --screen idle --out idle.bmp
+.\bbcall_sim.exe --selftest --demo --screen inbox --out inbox.bmp
+.\bbcall_sim.exe --selftest --replay ..\..\tools\sample_aprs_log.txt --screen inbox --out replay.bmp
+.\bbcall_sim.exe --selftest --wav ..\..\tools\test_aprs_144.wav --screen inbox --out wav.bmp
 ```
 
-`--screen` 可取 `boot` / `home` / `menu` / `inbox` / `detail` / `radio` / `about` / `confirm` / `pattern`；
-`--clock SEC` 固定大时钟（截图用）。
+`--screen` 可取 `idle` / `unread` / `inbox` / `pattern`；不给 `--screen` 时按未读数自动选择。
+`--clock SEC` 固定设备时钟（决定时钟与消息时刻显示）；`--wallclock W,M,D` 模拟 RTC。
 
-### 中文字库（布局参考 Dondji）
+### 字体（Fusion Pixel 12px/10px）
 
-字库由 `tools/gen_cn_font.py` 生成，布局沿用 [EthanYan6/Dondji](https://github.com/EthanYan6/Dondji)
-（Apache-2.0）的形状：`[位图][Unicode 索引 4B/项 升序][版本字节]`，16x16 点阵。
+三态界面只用 **Fusion Pixel** 字模：12px 用于正文/数值，10px 用于小格标签，
+共 374 字形（95 ASCII + 279 汉字），由 `tools/gen_fusion_font.py` 从原型
+`bbcall-aprs-screen-states.html` 内嵌字表提取，生成
+`firmware-stm32porject/Core/Inc/fusion_font.h`（16.4 KB 常量数据）。
 
-```powershell
-python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.txt `
-    --out-header firmware-stm32porject\Core\Inc\cn_font_data.h --out-bin tools\cn_font.bin
-```
+**单源共用**：`ui_harness.c/h` 与 `fusion_font.h` 的真身都在固件
+`firmware-stm32porject/Core/` 下，模拟器构建（`build_win.ps1` / Makefile / CMake）
+直接编译固件那份，不再保留副本——模拟器看到的就是真机跑的代码。
+规范与许可见 [design.md](../design.md) §3.5；与旧 `gen_font.py` ASCII 字模混用不允许。
 
-- `build_win.ps1` 检测到 `Core/Inc/cn_font_data.h` 会自动加 `-DCN_FONT_ENABLED=1`；
-- 当前子集 107 字、3,853 字节，目标平台实测编译后占 4,028 字节 Flash；
-- `--screen cnfont` 逐页看全部字形；About 页显示 `CN FONT <字数>`（未启用则 `CN FONT OFF`）；
-- **不要用 WenQuanYi Bitmap Song**：GPL v2 only，与本项目 GPL-3.0 不兼容；默认字源是
-  GNU Unifont（OFL-1.1 / GPLv2+ 双许可）。
+### 统一收件箱（三态模型的主屏；数据规则参考 GOGUFW）
 
-### Messenger（参考 GOGUFW）
-
-消息界面的版面参考 [Gogu-Qs/GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)
+UI v2.0（2026-09-16）把界面收敛为**三态**：待机 / 有未读 / 收件箱，收件箱是主功能屏
+（版面与数据规则见 [design.md](../design.md) §6）。更早的 v2.0（2026-09-14）曾把 v1 并存的
+HEARD 台站列表与 MESSAGES 消息列表合并为一个统一收件箱——消息 / 位置 / Mic-E / 其它帧同列，
+类型用 `M/P/C/X` 标注；该结构沿革保留作历史记录。数据规则参考
+[Gogu-Qs/GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)
 （Apache-2.0，UV-K1 / UV-K5 V3 定制固件，同样是 128x64 单色 LCD）。
-采用的规范与有意偏离都记在根目录 [UISkill.md](../UISkill.md) 第 11 节。
+采用的规范与取舍都记在根目录 [design.md](../design.md) §11（唯一权威规范）。
 
-- 数据模型：`simulator/src/msg_store.c`（Inbox 16 / Sent 8 / Drafts 8，正文 36 字符，
-  按 `(from,id)` 去重，`ackNNN` 更新送达状态并记录 ACK 来源）；
-- 收到的 APRS 消息会自动进 Messenger 收件箱，同时仍进 HEARD 条目列表；
-- **本项目仅接收**：界面不提供任何发射入口（没有 SEND / REPLY / Resend）。
-  最初照搬 GOGUFW 做过 4 项启动器 + COMPOSE + SENT，实测过于复杂且是死路，已砍成
-  `messages` + `msgread` 两屏；Sent 数据结构与 `ackNNN` 分流保留在数据层，打开发射能力后可直接复用。
+- 最新在上；消息时刻按 `rx_ms` 显示 `HH:MM:SS`；未读 `*` 行首；
+- ackNNN 送达确认只计数、不进收件箱；
+- **本项目仅接收**：界面不提供任何发射入口（没有 SEND / REPLY / Resend）；
+- `simulator/src/msg_store.c` 数据模型（Inbox 16 / Sent 8 / Drafts 8，正文 36 字符，
+  按 `(from,id)` 去重，`ackNNN` 更新送达状态并记录 ACK 来源）保留给将来双向能力复用，
+  三态 UI 起不再编译该文件（分流逻辑已内联进 `ui_feed_ax25()`）。
 
-状态栏信号格与 `radio` 页的数值取自日志里真实的 `S=` 与 `R19=` 行。
-`tools/sample_aprs_log.txt` 是压缩版真实日志：每个 `[RAW]` 帧前补上它在原日志中最近一次的
-`S=` / `R19=` / `M=` 状态行，所以显示的是真数据而不是编出来的。
+RSSI/SNR 只在有标定注入时显示：用 `ui_set_radio_stats()` 在入箱前注入、随条目捕获；
+日志回放的 `R19=` 原始寄存器值未标定，不注入（design.md §12.2），收件箱元信息处显示 `--`。
 ## 关于屏幕方向（已修复水平翻转）
 
 固件 `lcd_init()` 原先发送 `0xA1`（SEG/ADC 段反向）+ `0xC0`（COM 正常），
@@ -216,7 +224,7 @@ third_party/sdl2/
 - `lcd_sim.c` 实现 ST7567 命令/数据显示状态机：页地址 `0xB0-0xB7`、列地址低/高半字节
   `0x00-0x0F` / `0x10-0x1F`、显示开关 `0xAE/0xAF`、反显 `0xA6/0xA7`、全亮 `0xA4/0xA5`、
   起始行 `0x40-0x7F`、SEG 方向 `0xA0/0xA1`、COM 方向 `0xC0/0xC8`、复位 `0xE2`；
-- `ui_harness.c` 是收件箱/详情/待机界面与按键状态机，解析复用 `ax25.c`、`aprs.c`；
+- `ui_harness.c` 是三态界面（待机 / 有未读 / 收件箱）与按键状态机，解析复用 `ax25.c`、`aprs.c`；
 - `sim_feed.c` 是三种数据源（WAV / 日志 / 示例）；
 - `sim_hal.c` 提供最小 HAL/GPIO/延时桩，让固件 .c 能在 PC 编译；
 - 真机固件构建不受影响：`LCD_SIM` 只在模拟器构建中定义。

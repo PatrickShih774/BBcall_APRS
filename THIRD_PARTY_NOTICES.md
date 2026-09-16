@@ -40,10 +40,22 @@
   因此本项目参考了它的消息模型与版面参数：正文 36 字符上限、Inbox 16 / Sent 8 / Drafts 8、
   `NOW`/`12m`/`3h` 年龄列、未读 `*`、送达 `+`/`x`/`-`、按 `(from,id)` 去重、`ackNNN` 送达确认、
   点状分隔线（1 实 3 空）、右对齐计数留安全边距、启动器选中项右侧大图标。
-- **未复制其代码**：本项目的实现（`simulator/src/msg_store.c`、`ui_harness.c` 的 Messenger 段）
-  按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `UISkill.md` 第 11 节。
+- **未复制其代码**：本项目最初版的实现（`simulator/src/msg_store.c`、`ui_harness.c` 的 Messenger 段）
+  按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `design.md` §11
+  （原 `UISkill.md` 第 11 节，已并入 design.md v2.0）。
 - 合规说明：Apache-2.0 与 GPL-3.0 兼容；本项目未纳入其源码，仅作设计参考并在文档中标注出处。
   如后续需要直接复用其代码，应保留 Apache-2.0 许可与 NOTICE 要求。
+## Fusion Pixel Font（UI 字模字源）
+
+- 仓库：https://github.com/TakWolf/fusion-pixel-font ，Copyright (c) 2022, TakWolf
+- 许可：**SIL Open Font License 1.1**（字体部分；构建程序为 MIT，与本项目无关）
+- 用途：UI v2.0 三态界面的全部字模（Fusion Pixel 12px/10px 单宽版，374 字形子集），
+  经 `tools/gen_fusion_font.py` 从原型内嵌字表提取为 `firmware-stm32porject/Core/Inc/fusion_font.h`
+  （字形为纯点阵数据，未修改）。
+- 许可文本：`licenses/Fusion-Pixel-OFL.txt`（上游各字型许可见该仓库 `LICENSES/` 目录；
+  本项目只提取位图子集，未随包再分发）。
+- 合规说明：OFL-1.1 允许嵌入与再分发（含修改版），与 GPL-3.0 无冲突；保留本声明与许可文本即可。
+
 ## X11 misc-fixed 点阵字体（ASCII 字模字源）
 
 - 位置：`tools/bdf/6x9.bdf`、`tools/bdf/7x13.bdf`

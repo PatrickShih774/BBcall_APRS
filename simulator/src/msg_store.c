@@ -4,6 +4,9 @@
  * 字段与容量参考 GOGUFW（Gogu-Qs/GOGUFW-UV-K1-Messenger，Apache-2.0）：
  * 正文 36 字符、Inbox 16 / Sent 8、按 (from, id) 去重、多源 ACK。
  * 列表顺序按本项目约定：最新在上。
+ *
+ * v2.0（2026-09-14）起 UI 不再调用本模块：统一收件箱（ui_harness.c 的 s_box）
+ * 内联了 ackNNN 分流，Sent/ACK 结构保留在这里，供将来打开发射能力时整体复用。
  */
 #include "msg_store.h"
 #include <string.h>

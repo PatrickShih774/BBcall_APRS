@@ -28,9 +28,22 @@
 
 /* 中文字库：1 = 启用（需要 Core/Inc/cn_font_data.h，由 tools/gen_cn_font.py 生成）。
  * 16x16 点阵，每字 36 字节（位图 32 + 索引 4）；STM32F103C8T6 只有 64KB Flash，
- * 所以只放子集（当前 107 字约 3.9KB），全字库需外置 SPI Flash（见 PLAN 中文显示一节）。 */
+ * 所以只放子集（当前 107 字约 3.9KB），全字库需外置 SPI Flash（见 PLAN 中文显示一节）。
+ * 注：UI v2.0 三态界面改用 Fusion Pixel 字模（fusion_font.h），不再走本链路。 */
 #ifndef CN_FONT_ENABLED
 #define CN_FONT_ENABLED   0
+#endif
+
+/* ---------- UI v2.0 三态界面（design.md v2.0；唯一权威规范） ----------
+ * BBCALL_LCD_ENABLED = 1：启用 ST7567 LCD 三态界面（待机/有未读/收件箱）。
+ * LCD 未焊接时可置 0，退回纯串口调试模式。源文件：Core/Src/ui_harness.c
+ * （模拟器与真机共用同一文件，LCD_SIM 区分底层）。 */
+#ifndef BBCALL_LCD_ENABLED
+#define BBCALL_LCD_ENABLED 1
+#endif
+/* 本机呼号：显示在待机页右上格；改成你的呼号 */
+#ifndef BBCALL_MYCALL
+#define BBCALL_MYCALL "BG5BLH"
 #endif
 
 /* ---------- 告警 / 按键 / 状态 ---------- */

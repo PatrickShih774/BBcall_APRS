@@ -17,7 +17,7 @@
 - [硬件改进方案](#9-硬件改进方案提升解码率)
 - [BB 机功能规划](PLAN.md)
 - [PC LCD 模拟器](#13-pc-端-lcd-模拟器sdl2)
-- [UI 设计规范 UISkill.md](UISkill.md)
+- [UI 设计规范 design.md](design.md)
 - [许可与合规](#11-许可与合规)
 
 用 **BK4802P（玩具对讲 FM 收发芯片）+ STM32F103C8T6 + ST7567 12864 LCD**
@@ -658,6 +658,12 @@ y48  |1/2    RELAY    |
 
 ### 13.4.1 中文字库（16x16 子集）
 
+> **已被取代（2026-09-16）**：UI v2.0 重设计后，中文显示改用 **Fusion Pixel 12px/10px 字模**
+> （`tools/gen_fusion_font.py` 生成 `firmware-stm32porject/Core/Inc/fusion_font.h`，374 字形，规格见
+> [design.md](design.md) §3.5）。下面的 GNU Unifont 16x16 子集方案与 `cn_font_data.h` /
+> `CN_FONT_ENABLED` 链路保留作历史记录，新 UI（`ui_harness.c`）不再编译 `cn_font.c`，
+> `build_win.ps1` 也不再自动检测该头文件。
+
 > **阶段说明（重要）**：本轮只做到「**字库链路**」为止——生成器、查找、绘制、自检样张都已就绪并验证。
 > **界面文案的汉化（把 HOME/MENU/INBOX 等换成中文）明确排到后续阶段执行**，不在当前范围内；
 > 后续阶段的排期与验收见 [PLAN.md](PLAN.md) 第 6 节 v0.7 与第 8.5 节。
@@ -687,6 +693,10 @@ python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.
 > 结果是"任意拼音候选错乱、大量音节失败"，不是个别字问题而是整表错位。
 
 ### 13.4.2 ASCII 字模：等间距、点阵源与生成方式
+
+> **现状（2026-09-16）**：UI v2.0 的三态界面**只用 Fusion Pixel 字模**（见 design.md §3.5），
+> 下列 `gen_font.py` 8×16/6×8 字模不再参与新界面渲染；按 design.md §3 规定，与 Fusion Pixel
+> 混用**不允许**，`gen_font.py` 仅保留作纯 ASCII 兜底字模的生成工具。本小节其余内容作历史记录保留。
 
 两套 ASCII 字模都由 `tools/gen_font.py` 生成，**是等间距的**：
 
@@ -720,63 +730,52 @@ python tools\gen_font.py --bdf tools\bdf\7x13.bdf --w 8 --h 16 `
 > 改字体或尺寸后必须重跑并抽查 `M W H K N L` 与降部 `g j p q y`。
 ### 13.5 UI 重设计：复古寻呼机（BB 机）风格
 
-**导航结构**：一级屏只有两个且并列，**待机页与收件箱**；设置与诊断全部进二级菜单。
-两层页面在视觉上刻意做得不同，避免看不出层级：一级屏是**带图标群的状态栏 + 整行反显**，
-二级页是**面包屑标题（`MENU>HEARD`）+ 无图标 + 内容缩进 6px + 内侧反显条**。
+**导航结构（v2.0，2026-09-16）**：整个 UI 只有**三个屏幕态**——待机 / 有未读 / 收件箱，
+坐标、字模、按键状态机全部锁死在 [design.md](design.md)（§5 骨架 / §6 三态 / §8 硬规则），
+该文件是唯一权威规范（原 `UISkill.md` 已并入其中，文件本体已删除，历史版本见 git）。
 
 ```text
-开机 → boot 闪屏 → 一级屏（并列，可随时互切）
-                     ├ STANDBY   待机页：大时钟 + 频率 + 计数 + 最近一条   （S 键）
-                     └ MESSAGES  收件箱：主功能，开机默认停在这里          （M 键）
-                            │ BACK
-                            ▼
-                     二级菜单 MENU：Heard / Radio / Contrast / Backlight / About
-                            │ BACK → 回到进入菜单前的那块一级屏
+无未读 → 待机态     大格恒反显：时钟(2x) + 日期/开机时长；右半三小格：本机 / 电量 / 未读
+有未读 → 有未读态   大格恒反显：最新未读的发件人+正文前两行+时刻；右半：APRS / - / RSSI / SNR
+● 短按 → 收件箱态   顶栏反显（发件人 + n/N）；正文两行；元信息两行（时刻 RSSI / 路径 CRC）
+▲▼ 滚动（先滚正文再翻条）；● 短按标已读并前进；● 长按 620ms 退出；未读清零自动回待机
 ```
-界面按 `ui-design` + `taste-skill` 的 overlay 契约重做。**完整规范、检查表与真机移植步骤见
-[UISkill.md](UISkill.md)**（含适用范围声明、Design Dials、屏幕版面模板、硬规则、Pre-flight 检查表）。
-这里只留摘要与验收记录。
+
+按键只有 ▲ ▼ ● 三个（● 长按 620ms = 退出/返回最外层），与真机一致。
+
+**历史沿革**：v2.0（2026-09-14）曾把 HEARD 台站列表与 MESSAGES 消息列表并存，
+实测让用户困惑（两套收件箱），合并为统一收件箱；ackNNN 送达确认只计数不进收件箱。
+磁贴方案（G 息屏 / G2c 收件箱，预览见 `ui_previews/G*.png`）的墨量分层、层级可辨等原则
+以规则形式并入 design.md §4/§5，版面本身废弃。再早的 boot/home/menu/detail/radio/about
+七屏 chrome 系统（反显状态栏 + 6 行 6x8 网格）已被三态模型整体取代，仅作历史记录保留。
 
 - **Design Read**：90 年代末点阵寻呼机（Motorola Advisor 一类）视觉语言；
   `DESIGN_VARIANCE 6 / MOTION_INTENSITY 2 / VISUAL_DENSITY 7`
   （密度 7 -> 用 1px 细线分隔数据、不用卡片盒；运动 2 -> 只保留大时钟冒号闪烁）。
-- **唯一 chrome 系统**：反显状态栏（信号格 + 静音 + 未读数 + 信封）+ 1px 细线 +
-  6 行 6x8 网格（y = 10/18/26/34/42/50）+ 右侧滚动轨；选择态一律整行反显。
-- **两套字体**：`font8x16.h`（16 字符/行，标题；2 倍放大成 16x32 用作大时钟）、
-  `font6x8.h`（21 字符/行，状态栏 / 列表 / 正文 / 菜单）。
-- 界面状态机在 `simulator/src/ui_harness.c`；绘图原语（`lcd_fill_rect` / `lcd_hline` / `lcd_vline` /
-  `lcd_rect` / 放大绘制 / 两套字模）在固件 `lcd_st7567.c`，**真机与模拟器同一份代码**。
-- 数据全部来自真实来源：状态栏信号格与 `radio` 页的 RSSI/SNR/AFC/EXN 取自日志里真实的
-  `S=` 与 `R19=` 行；本板没有电池采样电路，所以电池位保留但留空，不画假电量。
+- **字体**：**Fusion Pixel 12px（正文/数值）+ 10px（标签）**，374 字形（95 ASCII + 279 汉字），
+  由 `tools/gen_fusion_font.py` 从原型 `bbcall-aprs-screen-states.html` 内嵌字表提取，
+  生成 `firmware-stm32porject/Core/Inc/fusion_font.h`；与旧 `gen_font.py` ASCII 字模混用不允许（design.md §3）。
+- 界面状态机在 `firmware-stm32porject/Core/Src/ui_harness.c`（三态，模拟器与真机单源共用）；绘图原语（`lcd_fill_rect` / `lcd_hline` /
+  `lcd_vline` / 反显填充 / Fusion Pixel 字模绘制）在固件 `lcd_st7567.c`，**真机与模拟器同一份代码**。
+- 数据全部诚实显示、无采样就留白（design.md §12）：无 RTC 时日期行显示开机时长（`UP HH:MM`）；
+  本板无电池采样电路，电量位显示 `--`；RSSI/SNR 只在有注入时显示，日志回放的未标定
+  原始寄存器值不注入，显示 `--`。
 
-消息界面的版面参考 [GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)
-（Apache-2.0，同样是 128x64 单色 LCD 的对讲机固件）：采用它的 36 字符正文上限、`NOW`/`12m`/`3h`
-年龄列、未读 `*`、按 `(from,id)` 去重与点状分隔线。**最初照搬的 4 项启动器实测过于复杂，已砍成两屏**：
-`messages`（收件箱）与 `msgread`（阅读）。砍掉 COMPOSE/DRAFTS（仅接收，只能存草稿）、SENT（永远为空）
-以及 Messenger 启动器本身（其 HEARD 与主菜单重复）。取舍逐条记在 [UISkill.md](UISkill.md) 第 11 节。
-屏幕：`boot` / `home`（16x32 大时钟）/ `menu`（6 项图标菜单）/ `inbox`（HEARD，最新在上）/ `detail`
-（5 行正文 + `RELAY` 中继路径）/ `radio` / `about` / `confirm`（内嵌双线框模态）/ `pattern`（字体样张）。
+消息界面的数据规则（最新在上、`NOW`/`12m`/`3h` 年龄列、未读 `*`、60s 重复包抑制）参考
+[GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)
+（Apache-2.0，同样是 128x64 单色 LCD 的对讲机固件）。取舍逐条记在 [design.md](design.md) §11。
+当前屏幕：`idle`（待机）/ `unread`（有未读）/ `inbox`（收件箱）/ `pattern`（点阵样张）；
+设置与诊断类二级页本规范尚未覆盖（design.md §12 留白）。
 
-用真实 5km 日志回放（`tools/sample_aprs_log.txt`，已补齐每帧之前最近的真实状态行）：
+**验收**（三态模型，2026-09-16）：`tools/verify_ui.py` 对 `idle / unread / inbox / inbox2`
+四张截图做逐像素校验（反显底填充、挖字极性、坐标、分隔线），**全部通过、差异为 0**；
+`--keymap` 键盘映射自检 6 项全过；`build_win.ps1 -Selftest` 编译 + 固定参数自检通过；
+13 帧真实日志回放注入 13 条消息正常。截图：`simulator/build-win/v3_idle.png` /
+`v3_unread.png` / `v3_inbox.png`。
 
-```text
-== HOME ==                            == MENU ==
-rail | HOME|                          rail | MENU|
-clk  |01 12|   (16x32 放大)           y10  |IJInbox           13|  <-反显(选中)
-y46  |144.640 MHz     RX 13|          y18  |  Positions|
-y54  |BD4BE  MIC-E  3111.28|          y26  |  Radio|
-                                      y34  ||gContrast|
-== INBOX ==                           y42  |  Backlight|
-rail | INBOX 1/13|                    y50  |  About|
-y10  |BD4BE  C 3111.28N 1*|  <-反显
-y18  |BD4SDX P 3054.31N 1*|            == RADIO ==
-y26  |BH4FSK C 3037.90N 1*|            rail | RADIO|
-y34  |BG4AIZ C 3137.15N 1*|            y10  |144.640 MHz  S4|
-y42  |BD4BE  C 3111.28N 1*|            y18  |RSSI 72    SNR 19|
-y50  |BI4BKX C 3116.01N 1*|            y26  |AFC  14    EXN 315|
-```
-
-（表中 `IJ`、`|g` 是读屏工具把 8x8 图标当字形匹配的结果，不是画面内容。）
-
-> 固件 `bbcall_app.c` 自己的 LCD 画面还是旧的简单版（`BBCALL_LCD_ENABLED=0`，休眠中）。
-> 等 LCD 焊上后按 [UISkill.md](UISkill.md) 第 9 节移植。
+> **固件移植（2026-09-16 已落地，待真机烧录验证）**：三态 UI 已移入固件
+> `Core/Src/ui_harness.c`（模拟器与真机**单源共用**，模拟器构建直接编译固件目录这份），
+> `bbcall_app.c` 完成接线（按键 PB12/13/14、背光 PB0 按 15s、喂帧、时钟），
+> 由 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED`（默认 1）与 `BBCALL_MYCALL` 控制。
+> 移植细节与三条实现补全见 [design.md](design.md) §12.4；
+> CubeIDE 里需 **F5 刷新工程**让新文件进构建。

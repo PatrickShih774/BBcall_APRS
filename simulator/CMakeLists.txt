@@ -14,14 +14,12 @@ add_executable(bbcall_sim
   src/main.c
   src/sim_hal.c
   src/lcd_sim.c
-  src/ui_harness.c
   src/sim_feed.c
-  src/msg_store.c
+  ${FW}/Core/Src/ui_harness.c
   ${FW}/Core/Src/lcd_st7567.c
   ${FW}/Core/Src/ax25.c
   ${FW}/Core/Src/aprs.c
   ${FW}/Core/Src/modem.c
-  ${FW}/Core/Src/cn_font.c
 )
 
 target_include_directories(bbcall_sim PRIVATE

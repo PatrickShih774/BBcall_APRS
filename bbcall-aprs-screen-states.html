@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="zh-CN" data-screen="oled">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BBcall_APRS · 128×64 屏幕三态 · 可点按演示</title>
+<style>
+  /* ─── 令牌 · 仪器语言 ─────────────────────────────────────────────────
+     页面和屏幕说同一种语言：只有纸与墨。唯一的彩色是那颗"通电"指示灯。
+     点阵字 = 机器标注（编号 / 读数 / 单位）；无衬线 = 人的叙述。 */
+  :root {
+    --bg:      oklch(96.5% 0.004 250);
+    --surface: oklch(100% 0 0);
+    --fg:      oklch(19% 0.015 250);
+    --muted:   oklch(45% 0.012 250);   /* 对 --bg 约 4.9:1，正文过 4.5 线 */
+    --border:  oklch(84% 0.008 250);
+    --accent:  oklch(56% 0.19 28);          /* 信号红：只给"空中"指示灯 */
+
+    --fg-soft: color-mix(in oklch, var(--fg) 6%, transparent);
+    /* 屏幕主题：画布只有两种"墨"，切主题就是换这两种墨 + 是否显示点阵间隙。
+       OLED = 自发光，纯黑纯白、对比拉满、像素之间没有缝。
+       LCD  = 靠背光透射，关态不是白而是偏灰绿的灰、开态是暗蓝灰，对比降下来，
+              而且能看见点阵之间那圈真实的物理间隙。 */
+    --lcd-ink:   var(--fg);
+    --lcd-paper: var(--surface);
+    --lcd-grid:  0;
+
+    --font-display: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+    --font-mono: var(--font-display);
+    /* 展示标题：拉丁走等宽、中文点名衬线。不显式指定的话，中文会落到系统默认字体，
+       换台机器就是另一个样子 —— 展示字体不能听天由命。 */
+    --font-title: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, Consolas,
+                  'Songti SC', 'SimSun', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
+
+    --gutter: clamp(20px, 4vw, 48px);
+    --rule: 1px solid var(--border);
+  }
+
+  /* LCD 主题：FSTN 液晶的实测观感——关态是偏灰绿的灰、开态是暗蓝灰，
+     两者对比约 5:1（真液晶大致就在这个量级），并显示点阵间隙。 */
+  html[data-screen="lcd"] {
+    --lcd-ink:   oklch(28% 0.03 250);
+    --lcd-paper: oklch(76% 0.012 155);
+    --lcd-grid:  1;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.7;   /* CJK 正文取 1.7，拉丁可更紧但这里以中文为主 */
+    -webkit-font-smoothing: antialiased;
+  }
+  p { margin: 0; text-wrap: pretty; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+  dl, dd, dt, figure { margin: 0; }
+  code { font-family: var(--font-mono); font-size: .88em; background: var(--fg-soft); padding: 1px 4px; }
+
+  .wrap { max-width: 1240px; margin-inline: auto; padding-inline: var(--gutter); }
+
+  /* ─── 顶栏：一条仪器条，不是导航 ───────────────────────────────────── */
+  .rail { border-bottom: var(--rule); }
+  .rail-in { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding-block: 11px; flex-wrap: wrap; }
+  .rail b { font-family: var(--font-display); font-size: 14px; font-weight: 600; }
+  .rail span { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .01em; color: var(--muted); }
+
+  /* ─── 头图：一句话，不做营销腔 ─────────────────────────────────────── */
+  .lede { padding-block: clamp(48px, 8vw, 104px) clamp(32px, 5vw, 56px); }
+  .lede h1 {
+    font-family: var(--font-title);
+    font-size: clamp(30px, 5vw, 60px);
+    /* 中文展示标题：CJK 字形填满 em 框，行高取 1.32 才不相撞；
+       负字距是拉丁文的做法，中文在固定 em 网格上会被挤，所以用 0 */
+    line-height: 1.32; letter-spacing: 0; font-weight: 600;
+    /* 第二行是 13 个全角字，按 1ch ≈ 0.6em 折算约 21.7ch——
+       22ch 只剩 1.5% 余量，字体稍有出入就会折行，把成对的两句拆散。
+       放到 26ch 留足余量，断行仍由 <br> 决定。 */
+    max-width: 26ch;
+  }
+  .lede h1 em { font-style: normal; }
+  .lede p { margin-top: 20px; max-width: 62ch; color: var(--muted); font-size: 16.5px; }
+  .facts { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--fg); display: flex; flex-wrap: wrap; gap: 4px 28px; }
+  .facts span { font-family: var(--font-mono); font-size: 12px; letter-spacing: .01em; color: var(--muted); }
+
+  /* ─── 尺寸标注（技术图纸语言）────────────────────────────────────── */
+  .dim { display: flex; align-items: center; gap: 12px; }
+  .dim i { flex: 1; height: 8px; border-bottom: 1px solid var(--fg); }
+  .dim i:first-child { border-left: 1px solid var(--fg); }
+  .dim i:last-child { border-right: 1px solid var(--fg); }
+  .dim b { font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: .08em; color: var(--muted); white-space: nowrap; }
+
+  /* ─── 设备：本页主角 ──────────────────────────────────────────────── */
+  .device { padding-block: clamp(28px, 4vw, 48px) clamp(40px, 6vw, 72px); }
+  .device-stage { display: flex; justify-content: center; align-items: stretch; gap: 12px; margin-top: 18px; }
+  /* 竖向标注 = 竖线 + 两端刻度 + 旋转标签，和横向那条同构 */
+  .dim-v { display: flex; align-items: center; gap: 8px; }
+  .dim-v .line { align-self: stretch; width: 7px; border-left: 1px solid var(--fg); border-top: 1px solid var(--fg); border-bottom: 1px solid var(--fg); }
+  .dim-v b {
+    writing-mode: vertical-rl; white-space: nowrap;   /* 不换行，否则 64 px 会断成两截 */
+    font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: .08em;
+    color: var(--muted);
+  }
+  /* 标注线的宽度由 JS 对齐到画布实际宽度，不然量的是容器不是屏幕 */
+  #dim-w { margin-bottom: 14px; }
+  /* flex:1 让宽度由容器决定；否则 clientWidth 会被画布自己撑开，整数倍放大算不出来 */
+  .scr-hold { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+  canvas.lcd {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: var(--lcd-paper);
+    outline: 1px solid var(--fg);
+  }
+  .stills canvas { background: var(--lcd-paper); }
+
+  /* 点阵间隙：用一层背景网格盖在画布上，缝隙取屏幕底色，
+     所以开态像素之间是被底色分开的——和真液晶一样。
+     用百分比做格子尺寸，主屏和缩略图能共用同一套规则。 */
+  .scr-frame { position: relative; line-height: 0; }
+  .scr-frame::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    opacity: var(--lcd-grid);
+    background-image:
+      linear-gradient(to right,  var(--lcd-paper) 0 11%, transparent 11%),
+      linear-gradient(to bottom, var(--lcd-paper) 0 11%, transparent 11%);
+    background-size: calc(100% / 128) calc(100% / 64);
+  }
+
+  /* ─── 屏幕主题开关 ────────────────────────────────────────────────── */
+  .themes { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+  .themes > span { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .themes button {
+    font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .06em;
+    padding: 5px 12px; min-height: 30px;
+    background: transparent; color: var(--fg);
+    border: 1px solid var(--muted); border-radius: 2px; cursor: pointer;
+    transition: background .1s ease, border-color .1s ease;
+  }
+  .themes button:hover { border-color: var(--fg); background: var(--fg-soft); }
+  .themes button.on { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+  .themes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .scale-note { margin-top: 12px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .01em; color: var(--muted); text-align: center; }
+
+  /* ─── 三个按键 ────────────────────────────────────────────────────── */
+  .keys { display: flex; justify-content: center; gap: 16px; margin-top: 32px; flex-wrap: wrap; }
+  .key {
+    width: 96px; padding: 12px 8px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--fg);
+    border-radius: 2px;
+    color: var(--fg);
+    cursor: pointer;
+    touch-action: manipulation;   /* 去掉双击缩放延迟：这三个键会被连点 */
+    user-select: none;
+    transition: background .1s ease, transform .04s ease;
+  }
+  .key .sym { font-family: var(--font-mono); font-size: 17px; line-height: 1; }
+  .key .name { font-size: 12.5px; }
+  .key .pin { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
+  /* 悬停只加深底色，文字维持满墨——对比度不降 */
+  .key:hover { background: var(--fg-soft); }
+  .key:active, .key.is-down { background: var(--fg); color: var(--surface); transform: translateY(1px); }
+  .key:active .pin, .key.is-down .pin { color: color-mix(in oklch, var(--surface) 72%, transparent); }
+  .key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ─── 读数条 ──────────────────────────────────────────────────────── */
+  .readout {
+    margin-top: 28px; border-top: 1px solid var(--fg); border-bottom: var(--rule);
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .readout > div { padding: 12px 0; }
+  .readout > div + div { border-left: var(--rule); padding-left: 16px; }
+  .readout dt { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .readout dd { margin-top: 4px; font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+  .led { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: 1px; }
+  .led.dim { background: color-mix(in oklch, var(--accent) 26%, transparent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .led.live { animation: pulse 1.1s ease-out 2; }
+    @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+  }
+  .ro-log { margin-top: 12px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-height: 1.6em; }
+
+  .inject-row { margin-top: 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 18px; min-height: 44px;
+    background: var(--surface); color: var(--fg);
+    border: 1px solid var(--fg); border-radius: 2px;
+    font-size: 14.5px; cursor: pointer;
+    transition: background .1s ease;
+  }
+  .btn:hover { background: var(--fg-soft); }
+  .btn:active { background: var(--fg); color: var(--surface); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .inject-row span { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); max-width: 46ch; }
+
+  /* ─── 三态静帧 ────────────────────────────────────────────────────── */
+  .stills-sec { padding-block: clamp(40px, 6vw, 72px); border-top: 1px solid var(--fg); }
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  /* 纯中文标题不用负字距：中文在固定 em 网格上，收紧只会让字形互相挤 */
+  .sec-head h2 { font-family: var(--font-title); font-size: clamp(20px, 2.4vw, 26px); letter-spacing: 0; font-weight: 600; }
+  .sec-head span { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .stills { margin-top: 28px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+  .stills figure { border-top: 1px solid var(--fg); padding-top: 16px; }
+  .stills canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; image-rendering: crisp-edges; outline: 1px solid var(--fg); }
+  .stills figcaption { margin-top: 12px; font-size: 13.5px; }
+  .stills figcaption b { display: block; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); font-weight: 400; letter-spacing: .06em; margin-bottom: 3px; }
+
+  /* ─── 附注：压成三栏，不再铺表格 ──────────────────────────────────── */
+  .notes-sec { padding-block: clamp(40px, 6vw, 72px) clamp(48px, 7vw, 88px); border-top: 1px solid var(--fg); }
+  .notes { margin-top: 28px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+  .note { border-top: var(--rule); padding-top: 14px; }
+  .note h3 { font-family: var(--font-display); font-size: 14.5px; margin-bottom: 10px; }
+  .note p, .note li { font-size: 13.5px; color: var(--muted); line-height: 1.7; }
+  .note ol, .note ul { margin: 0; padding-left: 1.15em; }
+  .note li + li { margin-top: 7px; }
+  .note strong { color: var(--fg); }
+  .note dl { margin-top: 4px; }
+  .note dl > div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: var(--rule); }
+  .note dt { font-size: 13px; color: var(--muted); }
+  .note dd { font-family: var(--font-mono); font-size: 12.5px; }
+
+  .foot { border-top: 1px solid var(--fg); padding-block: 28px 40px; }
+  .foot-in { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+
+  /* 视觉隐藏：给设备区补标题层级用，不占版面 */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 900px) {
+    .stills { grid-template-columns: 1fr; }
+    .notes { grid-template-columns: 1fr; }
+    .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .readout > div:nth-child(3) { border-left: 0; padding-left: 0; border-top: var(--rule); }
+    .readout > div:nth-child(4) { border-top: var(--rule); }
+    .dim-v { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="rail" data-od-id="topnav">
+  <div class="wrap rail-in">
+    <b>BBcall_APRS · 屏幕三态</b>
+    <span>128 × 64 · 1-bit · 三个按键 · 仅接收 144.640 MHz</span>
+  </div>
+</header>
+
+<main id="content">
+
+  <section class="lede" data-od-id="hero">
+    <div class="wrap">
+      <h1>复刻的是一台 BB 机<br /><em>屏幕只要三态：等、瞥、读。</em></h1>
+      <p>仓库里 RF → 音频 → ADC → 判频 → NRZI → HDLC → AX.25 → APRS 这条链路已经打通，ST7567 那块屏还没焊上去——这一稿补的是最后一段。设备只收不发、只有单色、只有三个按键，所以屏幕只需要回答：现在几点、谁发来了什么、这条到底写了什么。</p>
+      <div class="facts">
+        <span>画布 128 × 64</span>
+        <span>驱动 ST7567</span>
+        <span>字模 Fusion Pixel 12 / 10 px</span>
+        <span>按键 PB12 / PB13 / PB14</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="device" data-od-id="device">
+    <div class="wrap">
+      <h2 class="sr-only">设备演示 —— 128 × 64 屏幕与三个按键</h2>
+      <div class="device-stage">
+        <div class="dim-v"><span class="line"></span><b>64 px</b></div>
+        <div class="scr-hold">
+          <div class="themes" data-od-id="themes" role="group" aria-label="屏幕主题">
+            <span>屏幕</span>
+            <button type="button" data-screen="oled" class="on" aria-pressed="true">OLED</button>
+            <button type="button" data-screen="lcd" aria-pressed="false">LCD</button>
+          </div>
+          <div class="dim" id="dim-w" data-od-id="dim-width"><i></i><b>128 px</b><i></i></div>
+          <div class="scr-frame">
+            <canvas class="lcd" id="cv-main" width="128" height="64" role="img" aria-label="设备屏幕"></canvas>
+          </div>
+          <p class="scale-note" id="scale-note"></p>
+          <noscript><p class="scale-note">屏幕由脚本逐像素绘制 —— 请在启用 JavaScript 的环境中查看。</p></noscript>
+        </div>
+      </div>
+
+      <div class="keys" data-od-id="keys">
+        <button class="key" data-key="up" type="button"><span class="sym">▲</span><span class="name">上</span><span class="pin">PB12</span></button>
+        <button class="key" data-key="down" type="button"><span class="sym">▼</span><span class="name">下</span><span class="pin">PB13</span></button>
+        <button class="key" data-key="ok" type="button"><span class="sym">●</span><span class="name">确定</span><span class="pin">PB14</span></button>
+      </div>
+
+      <dl class="readout" data-od-id="readout">
+        <div><dt>状态</dt><dd id="ro-view">待机</dd></div>
+        <div><dt>焦点</dt><dd id="ro-focus">大格</dd></div>
+        <div><dt>未读</dt><dd id="ro-unread">0</dd></div>
+        <div><dt>空中</dt><dd><i class="led dim" id="led" aria-hidden="true"></i><span id="ro-air">空闲</span></dd></div>
+      </dl>
+      <p class="ro-log" id="ro-log" aria-live="polite">待机与有未读态只有 ● 有效（进入收件箱）；收件箱里 ▲▼ 翻条、● 标记已读。长按 ● 退出。</p>
+
+      <div class="inject-row">
+        <button class="btn" id="btn-inject" type="button">注入一个数据包</button>
+        <span>相当于空中有人发了一包。设备只收不发，所以页面演的正是接收端。</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="stills-sec" data-od-id="stills">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>三态</h2>
+        <span>每块 128 × 64，逐像素绘制，无插值</span>
+      </div>
+      <div class="stills">
+        <figure>
+          <div class="scr-frame"><canvas id="cv-s1" width="128" height="64" role="img" aria-label="待机态"></canvas></div>
+          <figcaption><b>态 1</b>待机 —— 大格是钟，三小格报本机呼号、电量、未读数。</figcaption>
+        </figure>
+        <figure>
+          <div class="scr-frame"><canvas id="cv-s2" width="128" height="64" role="img" aria-label="有未读态"></canvas></div>
+          <figcaption><b>态 2</b>有未读 —— 消息接管大格：呼号、正文两行、接收时间。</figcaption>
+        </figure>
+        <figure>
+          <div class="scr-frame"><canvas id="cv-s3" width="128" height="64" role="img" aria-label="收件箱态"></canvas></div>
+          <figcaption><b>态 3</b>收件箱 —— 全文加元信息。这一态故意不守磁贴骨架，读正文要的是行宽。</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="notes-sec" data-od-id="notes">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>附注</h2>
+        <span>做这块屏时算过的账</span>
+      </div>
+      <div class="notes">
+
+        <div class="note">
+          <h3>字模与像素账</h3>
+          <p>字模用 <strong>Fusion Pixel Font</strong>（缝合像素字体，TakWolf，SIL OFL 1.1）。它提供 BDF 格式，也就是每个字的<strong>原始点阵位图</strong>——本页直接抽出 <span class="num">374</span> 个字形嵌进来，<strong>渲染时没有任何字体参与</strong>：没有字体加载、没有抗锯齿、没有阈值化，每个墨点就是一个方块。</p>
+          <dl>
+            <div><dt>12px 档 ASCII</dt><dd>6 × 12</dd></div>
+            <div><dt>12px 档 汉字</dt><dd>12 × 12</dd></div>
+            <div><dt>10px 档 ASCII</dt><dd>5 × 10</dd></div>
+            <div><dt>128 宽一行可放</dt><dd>21 ASCII / 10 汉字</dd></div>
+            <div><dt>转 C 数组合计</dt><dd>7.5 KB</dd></div>
+          </dl>
+        </div>
+
+        <div class="note">
+          <h3>为什么是这套界面</h3>
+          <p>不是从审美出发挑的，是从芯片和按键倒推出来的。</p>
+          <ul>
+            <li><strong>只有三个按键、没有返回键</strong>——前两态零层级，整机只有一层深入（收件箱），长按退出。</li>
+            <li><strong>20 KB SRAM</strong>——版面是四块固定矩形，反显恒在大格，界面状态只有"当前是哪一态"一个枚举，没有滚动缓冲。</li>
+            <li><strong>位敲 SPI，无 DMA</strong>——待机态只有时钟那 64×64 在变，其余区域不重绘。</li>
+            <li><strong>单色 1-bit</strong>——层级靠反显和 1 像素分隔线，不靠灰度。</li>
+            <li><strong>包随机到达</strong>——格子只换内容，位置永不动。</li>
+          </ul>
+        </div>
+
+        <div class="note">
+          <h3>还没落地的</h3>
+          <ol>
+            <li><strong>三格依赖尚未实现的硬件。</strong>电量只显示 <code>高</code>/<code>中</code>/<code>低</code> 三挡——<code>86%</code> 那种小数是 1-bit 屏给不出的假精度；挡位可走分压进 ADC，也可先用 STM32 内部 VREFINT（零外部元件，但只在电池直供、无 LDO 时等效）。接收时间要 RTC（固件现有的 <code>[T=…ms]</code> 是开机相对时间）；未读若要跨断电保留则要外部存储。</li>
+            <li><strong>跨天的消息会被误读。</strong>只显示 <code>10:01:16</code> 不带日期，昨天的像今天的。建议当天只显示时间，非当天补"昨天"或月日。</li>
+            <li><strong>亮屏只能由新包或按键触发</strong>，不能让时钟每秒刷新把背光一直点着。</li>
+            <li><strong>收件箱进来容易出去难</strong>——这是唯一一层深入而设备没有返回键，退出规则必须写进固件按键表。</li>
+          </ol>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot" data-od-id="footer">
+  <div class="wrap foot-in">
+    <span>BBcall_APRS · 屏幕三态 · 128 × 64 · 1-bit 点阵</span>
+    <span>字形 © TakWolf · SIL OFL 1.1</span>
+  </div>
+</footer>
+
+<script>
+/* 点阵字模来自 Fusion Pixel Font（缝合像素字体, TakWolf）
+   https://github.com/TakWolf/fusion-pixel-font · SIL OFL 1.1
+   位图本身即 1-bit，渲染不做任何字体加载与抗锯齿。 */
+var G12 = {32:"0,0,0,",33:"2,2,1,11111101",34:"1,2,3,555",35:"0,2,5,0a0a1f0a0a1f0a0a",36:"0,1,5,040e15140c0605150e04",37:"0,2,5,09150a04040a1512",38:"0,2,5,0c1212140915120d",39:"2,2,1,111",40:"1,1,3,1224444221",41:"1,1,3,4221111224",42:"0,4,5,04150e1504",43:"0,4,5,04041f0404",44:"1,9,2,112",45:"0,6,5,1f",46:"2,9,1,1",47:"0,1,5,01010202040408081010",48:"0,2,5,0e1113151519110e",49:"0,2,5,041c04040404041f",50:"0,2,5,0e1101020408101f",51:"0,2,5,0e1101060101110e",52:"0,2,5,060a0a12121f0202",53:"0,2,5,1f10101e0101110e",54:"0,2,5,0e11101e1111110e",55:"0,2,5,1f01010202040404",56:"0,2,5,0e11110e1111110e",57:"0,2,5,0e1111110f01110e",58:"2,4,1,100001",59:"1,4,2,10000112",60:"1,3,4,1248421",61:"0,5,5,1f001f",62:"1,3,4,8421248",63:"0,2,5,0e11010204040004",64:"0,2,5,0e111315151517100e",65:"0,2,5,04040a0a0e111111",66:"0,2,5,1e11111e1111111e",67:"0,2,5,0e1110101010110e",68:"0,2,5,1e1111111111111e",69:"0,2,5,1f10101e1010101f",70:"0,2,5,1f10101e10101010",71:"0,2,5,0e1110101311110f",72:"0,2,5,1111111f11111111",73:"0,2,5,1f0404040404041f",74:"0,2,5,010101010111110e",75:"0,2,5,1112141818141211",76:"0,2,5,101010101010101f",77:"0,2,5,11111b1b15151111",78:"0,2,5,1119191515131311",79:"0,2,5,0e1111111111110e",80:"0,2,5,1e1111111e101010",81:"0,2,5,0e1111111115120d",82:"0,2,5,1e1111111e121111",83:"0,2,5,0e11100c0201110e",84:"0,2,5,1f04040404040404",85:"0,2,5,111111111111110e",86:"0,2,5,1111110a0a0a0404",87:"0,2,5,15151515150a0a0a",88:"0,2,5,11110a04040a1111",89:"0,2,5,11110a0a04040404",90:"0,2,5,1f0102040408101f",91:"1,1,3,7444444447",92:"0,1,5,10100808040402020101",93:"1,1,3,7111111117",94:"0,2,5,040a11",95:"0,11,5,1f",96:"2,2,2,21",97:"0,4,5,0e010f11110f",98:"0,2,5,10101e111111111e",99:"0,4,5,0e111010110e",100:"0,2,5,01010f111111110f",101:"0,4,5,0e111f10110e",102:"0,2,5,03041f0404040404",103:"0,4,5,0f111111110f010e",104:"0,2,5,1010161911111111",105:"0,2,5,04001c040404041f",106:"0,2,4,10f111111e",107:"0,2,5,1010111618141211",108:"0,2,5,1c04040404040403",109:"0,4,5,1a1515151515",110:"0,4,5,161911111111",111:"0,4,5,0e111111110e",112:"0,4,5,1e111111111e1010",113:"0,4,5,0f111111110f0101",114:"0,4,5,161910101010",115:"0,4,5,0e110c02110e",116:"0,2,5,04041f0404040403",117:"0,4,5,11111111130d",118:"0,4,5,11110a0a0404",119:"0,4,5,151515150a0a",120:"0,4,5,110a04040a11",121:"0,4,5,1111110a0a040418",122:"0,4,5,1f020408101f",123:"0,1,4,3444844443",124:"2,1,1,1111111111",125:"1,1,4,c22212222c",126:"0,5,5,081502",19968:"0,6,11,7ff",19971:"0,1,11,0400400400470787c004004004104103f",19975:"0,1,11,7ff04004004007e04204208208210260c",19977:"0,1,11,3fe0000000000001fc0000000000007ff",19978:"0,1,11,02002002002003e0200200200200207ff",19979:"0,1,11,7ff020020020028024022020020020020",19982:"0,1,11,0800ff0801001ff0010017f900100100e",20002:"0,1,11,01e3e00203fe0200207ff0400881043fa",20004:"0,1,11,7ff0880887ff489489555623401401407",20010:"0,1,11,020050088104623020020020020020020",20013:"0,1,11,0200207ff4214214217ff020020020020",20026:"0,1,11,2201200207ff021029045045081101606",20027:"0,1,11,0400207ff0200200203fe0200200207ff",20061:"0,1,11,0800800807f808808808810810920940f",20063:"0,1,11,02012012613a1e27221261201011010ff",20102:"1,1,9,1ff001002004008008008008008008038",20108:"0,2,11,3fe0000000000000000000007ff",20110:"0,1,11,3fe0200200200207ff0200200200200e0",20116:"0,1,11,3fe0400400403fc0840840841041047ff",20132:"0,1,11,0207ff00008810468b05002005018c603",20142:"0,1,11,0207ff1041fc0007ff4010f808810960f",20159:"0,1,11,17e10220420861021022022024124123f",20170:"0,1,11,02005018c6030200103fe004008010020",20174:"0,1,11,088088088088088154154154222222441",20182:"0,1,11,10814824b25d6e924924b24824124123f",20204:"0,1,11,14f121201241641241241241241241247",20214:"0,1,11,14814827f2886082082ff208208208208",20294:"0,1,11,17e14224224267e24224224227e2002ff",20301:"0,1,11,1101082ff2006422422222242242082ff",20302:"0,1,11,10617824824864827f248244245253269",20320:"0,1,11,14017f24128960822a22a249289208218",20351:"0,1,11,10817f20827f64924927f2282102282c7",20445:"0,1,11,17e14224227e6082082ff21c22a2c9208",20449:"0,1,11,1101082ff20067e20027e20027e24227e",20462:"0,1,11,12013e2642986e72882b228c2b220c270",20498:"0,1,11,1f91252452956ed2252252f92212392c7",20540:"0,1,11,10817f20827e64227e24227e2422422ff",20572:"0,1,11,1101ff24227e6002ff28127e208208238",20648:"0,1,11,10419f24520661f2c424f25924f26924f",20805:"0,1,11,0207ff0400881043fe08a08808810960f",20840:"0,1,11,02005018c6031fc0200203fe0200207ff",20843:"0,1,11,088088088088088104104104202202401",20844:"0,1,11,08808810410420244104008408411a3e2",20845:"0,1,11,0400200007ff000000104102202201401",20849:"0,1,11,0880883fe0880880887ff000088104603",20851:"0,1,11,1040883fe0200200207ff050088104603",20869:"0,1,11,0200207ff421421451489505401401407",20877:"0,1,11,7ff0203fe2223fe2222227ff20220220e",20889:"0,1,11,7ff4014810fc1001fe0020027fa00201c",20943:"0,1,11,40520527f044075045275252272445499",20998:"0,1,11,0880881041042025fd044044084104618",20999:"0,1,11,27f211211391611211211291321221046",21015:"0,1,11,7e11091091e92293294a9049041081307",21024:"0,1,11,7715555555555557fd5555555515513b7",21035:"0,1,11,7e14294297e91097e91291292212214c7",21040:"0,1,11,7f10851052257d50850857f50810f1707",21051:"0,1,11,0817f51052257c50851156250411a1617",21069:"0,1,11,1040887ff0003ea22a3ea22a3ea222266",21151:"0,1,11,01079017f111111111111191621021046",21152:"0,1,11,10010f7e91291291291291292292294cf",21313:"0,1,11,0200200200207ff020020020020020020",21315:"0,1,11,01e3e00200200207ff020020020020020",21319:"0,1,11,0643840840840847ff084084084104604",21322:"0,1,11,0202221240203fe0200207ff020020020",21387:"0,1,11,3ff2002102102102fe2102142122105ff",21448:"0,1,11,3fe20220210410408805002005018c603",21450:"0,1,11,7fc10410811011e18214412821026c583",21452:"0,1,11,7df05145145145145128a28a10428a451",21457:"0,1,11,2482444407ff0800fc14412821026c583",21462:"0,1,11,7e025f3d12512513d124a24a2e474a051",21464:"0,1,11,0207ff08828a4890883fe10408807078f",21488:"0,1,11,0400801042027fd0013fe2022022023fe",21491:"0,1,11,0400407ff0800801001fe3025021021fe",21495:"0,1,11,1fc1041041fc0007ff0800fc004004038",21516:"0,1,11,7ff4015fd4014f94894894894f9401407",21517:"0,1,11,04007e0823440280100ff7810810810ff",21518:"0,1,11,01e3e02002003ff2002fe2822822824fe",21521:"0,1,11,0400807ff4014f94894894894f9401407",21551:"0,1,11,0101ff1011011ff1001ff1812812814ff",21608:"0,1,11,1ff11117d11117d10117d14527d201407",21644:"0,1,11,06038f0890897e90891892c94a908f080",22122:"0,1,11,03e72253e57755557750857f71c02a049",22235:"0,1,11,7ff48948948948948950f6014014017ff",22238:"0,1,11,7ff4014014f94894894894f94014017ff",22312:"0,1,11,0400407ff08008810837f50810810817f",22343:"0,1,11,22023f241781231209201305619061006",22351:"0,1,11,17f10410878811a129149188608008008",22352:"0,1,11,0201241241242aa4710203fe0200207ff",22686:"0,1,11,2222ff2897ab2ff20027e34267e04207e",22797:"0,1,11,2003ff5021fe1021fe0400fe384078787",22806:"0,1,11,1081081c824824c54a089088108208408",22810:"0,1,11,02007c3840480340cf7110e101200c1f0",22823:"0,1,11,0200200207ff020050050088088104603",22826:"0,1,11,0200200207ff020050050088088144623",22833:"0,1,11,1201201fe2204200207ff050088104603",22836:"0,1,11,1100902101100107ff020028044182601",22905:"0,1,11,1081287ab2bd2e92a94ab2a81212a141f",22909:"0,1,11,13e1027842882882ff488288108288438",22914:"0,1,11,10011f7d125125145149129111129f440",22987:"0,1,11,1081087922a22fd2804bf2a11212a143f",23384:"0,1,11,0407ff08013e10430850817f108108118",23427:"0,1,11,0207ff4015011041181e01001011010ff",23436:"0,1,11,0207ff4015fd0000007ff08808810960f",23450:"0,1,11,0207ff4010003fe02012013e1202e041f",23481:"0,1,11,0207ff48932605018c6031fc1041041fc",23545:"0,1,11,0027820bf4822822a211211228228240e",23556:"0,1,11,1023c225f3c22423d224a7ca1422424ce",23558:"0,1,11,10f17151230c17010237f502122112106",23567:"0,1,11,0200200201241222222214210200200e0",23569:"0,1,11,0200201241222214210240080300c0700",23601:"0,1,11,10a7c90087ff4484547d4114555555327",24038:"0,1,11,0400407ff04008008017f1082084080ff",24050:"1,1,10,3fe0020022022023fe2002002012011ff",24120:"0,1,11,1247ff4015fd1041fc0203fe222226020",24179:"0,1,11,3fe0202221240207ff020020020020020",24180:"0,1,11,1001ff2104101fe1101107ff010010010",24230:"0,1,11,0103ff2443ff24427c2002fe2442385c7",24320:"0,1,11,7ff1041041041047ff104104204204404",24369:"0,1,11,7df0410417df4107df4512491452494d3",24378:"0,1,11,73e12213e70847f44974917f10810a67d",24405:"0,1,11,3fe0023fe0027ff0202221340681a4663",24448:"0,1,11,1102084ff10820860827e2082082082ff",24452:"0,1,11,17e2024041082346c323e20820820827f",24453:"0,1,11,10823e40810827f60227f22221220220e",24456:"0,1,11,17e24247e14224267e24924a244252261",24537:"0,1,11,11010857f5a052052012012012012013f",24555:"0,1,11,11011057e5925125121ff110128144183",24577:"0,1,11,0207ff0500881446230002a229148507c",24635:"0,1,11,1040883fe2022023fe0002a229148507c",24687:"0,1,11,0401fc1041fc1041fc1041fc2a229547d",24930:"0,1,11,13e12253e5a257f55517f122114108177",25104:"0,1,11,0140123ff2103d22522542482c9215463",25105:"0,1,11,0ca7091087ff10810a1ca70410510b311",25110:"0,1,11,0140127ff0103d22522543c80090d5723",25143:"0,1,11,0101ff1011011ff100100100200200400",25152:"0,1,11,0c331c2103d025f2523d2212212212422",25214:"0,1,11,21421271021f2f03126142082092356c3",25226:"0,1,11,27f24974924924937f64024024124163f",25233:"0,1,11,21026f74924924934964925926b208608",25442:"0,1,11,21021c72427e24a34a64a2ff2142226c1",25454:"0,1,11,27f24174127f24437f64425f25125169f",25509:"0,1,11,20827f72221427f30867f21222421c663",25511:"0,1,11,20827f74121422234163e20820820867f",25552:"0,1,11,27e24277e24227e3006ff22822f258687",25910:"0,1,11,09049049f4a24d24924945946880940a3",25913:"0,1,11,01079009f0a20d2792414414488514663",25968:"0,1,11,4a82c87ef1922ca4aa10a7ea1241ca631",25972:"0,1,11,0887ff2aa3ea1c42aa7ff02013e1207ff",25991:"0,1,11,0400207ff1041040880880500200d8707",26029:"0,1,11,4836bc5d04907ff4925d26b24924127e2",26032:"0,1,11,0837ec2281487ef08a7ea08a2aa492192",26041:"0,1,11,0400207ff04004007e04208208210260c",26080:"0,1,11,3fe0200200207ff05005009009111161f",26085:"1,1,9,1ff1011011011011ff1011011011011ff",26087:"1,1,10,27f24124124124127f24124124124127f",26089:"0,1,11,3fe2023fe2023fe0200207ff020020020",26102:"0,1,11,0027824bf4824827a249249248278200e",26126:"0,1,11,7bf4a14a14bf7a14a14bf4a17a1041087",26131:"0,1,11,3fe2023fe2023fe1001ff249449091126",26143:"0,1,11,3fe2023fe2023fe2203fe4203fe0207ff",26152:"0,1,11,02072053f55059071f51051051f710010",26159:"0,1,11,3fe2023fe2023fe0007ff12013e2e041f",26174:"0,1,11,3fe2023fe2023fe08848928a18c0887ff",26202:"0,1,11,02073c5445ff54974957f5145157250c7",26242:"0,1,11,1037dc21051f7d21223fe2023fe2023fe",26356:"0,1,11,7ff0203fe2223fe2223fe2201200c073f",26368:"0,1,11,3fe2023fe2027ff2403df2512ea74405b",26376:"0,1,10,0ff0810810ff0810810ff081101101207",26377:"0,1,11,0407ff0801001fe3025fe1021fe10210e",26399:"0,1,11,24f7e92493cf2493c924f7e9009251423",26410:"0,1,11,0200203fe0200207ff0a80a8124623020",26412:"0,1,11,0200207ff0a80a80a81241242fa421020",26426:"0,1,11,13c1247a41241243243a4524125125147",26597:"0,1,11,0207ff0a81247ff1041fc1041fc0007ff",26631:"0,1,11,13e10078017f1083083aa529129149118",26657:"0,1,11,10817f7801221413223a2514108114163",27169:"0,1,11,11417f79413e12233e3a257f108114163",27425:"0,1,11,42022023f04108a0082082142144224c1",27490:"0,1,11,02002002012013e1201201201201207ff",27491:"0,1,11,7ff02002002012013e1201201201207ff",27493:"0,1,11,02013e1201207ff0201226240080303c0",27599:"0,1,11,1001ff2005fe1221127ff2222123ff002",27604:"0,1,11,4104104114127dc4104104104114d170f",27668:"0,1,11,2003fe4003fc0007fc004004005005002",27744:"0,1,11,20814804b45d2e904904b24824144143f",27809:"0,1,11,23c1240244242c700007e2422244184e7",27979:"0,1,11,5f13151555553551551553552414a1517",28040:"0,1,11,24912a00847f24107f04127f241441443",28155:"0,1,11,27e1100104ff22404209125a255495430",28201:"0,1,11,23e12203e42223e00007f2552554554ff",28287:"0,1,11,4fe2820fe4822fe0281292aa26c4285ff",28385:"0,1,11,4242ff0244ff2240ff0a52a52db481483",29256:"0,1,11,2832bc2a03e023f2213b12aa2a42aa4d1",29366:"0,1,11,10a10950837f108114114314522122141",29575:"0,1,11,0207ff2221540202524f90207ff020020",29616:"0,1,11,07e74224a24a24a74a24a2083156250c7",30005:"0,1,11,0407fc4444447fc4444447fc04104103f",30334:"0,1,11,7ff0200403fe2022023fe2022022023fe",30340:"0,1,11,1102107df4614414497c54454414417c6",30410:"0,1,11,1040887ff00018c6030003fe2522527ff",30446:"1,1,9,1ff1011011ff1011011011ff1011011ff",30465:"0,1,11,1242224250280fe7021fe1021fe1021fe",30475:"0,1,11,3fe0203fe0407ff1023fe5021fe1021fe",30701:"0,1,11,27f38053e1221227be10012229229447f",30721:"0,1,11,7be10211221239269f2812812bd38100e",30828:"0,1,11,77f20827f44977f54957f5285107280c7",30830:"0,1,11,79011e12227f3a96bf2a92bf2a93a904b",31034:"0,1,11,3fe0000007ff0200201241222214210e0",31163:"0,1,11,0207ff08827228a3fe0207ff4895f5403",31186:"0,1,11,08870812a1297a9148309382504118160",31216:"0,1,11,0a073f12114978812a3aa349549108118",31354:"0,1,11,0207ff4010881046033fe0200200207ff",31532:"0,1,11,2103df4a43fe0223fe2203ff0a1121626",31561:"0,1,11,2103df4a43fe0207ff0047ff08404401c",31665:"0,1,11,2103df4a400011f7d111f39135f51111f",31867:"0,1,11,2221247ff0701ac6230207ff05018c603",32047:"0,1,11,3fe2223fe2223fe0883300c27fd124663",32416:"0,1,11,101111211491711111211797019181601",32428:"0,1,11,2102104ff51067e2104ff711011116610",32447:"0,1,11,10a10920f4b870810f23878900618d673",32456:"0,1,11,22023e4425a46182244c373000c16061e",32463:"0,1,11,27e2024045086342c343e70800810867f",32473:"0,1,11,20821442254163e20047f74104114167f",32479:"0,1,11,2102ff4205226422fd424724024145687",32487:"0,1,11,24425544e54465f24444e75504414067f",32493:"0,1,11,20823e40857f62125442477f008112661",32593:"0,1,11,7ff401445555489489555555621401407",32622:"0,1,11,7ff4897ff0207ff0201fc1041fc1047ff",32791:"0,1,11,1071387c810f7b81087cf138388549107",32852:"0,1,11,7a22943be2882883882ff2883d46a20c1",33267:"0,1,11,7ff0400881043fa0220203fe0200207ff",34920:"0,1,11,0203fe0203fe0207ff05009170a164183",34987:"0,1,11,40827f74914827f2e17512ca24424a2b1",35201:"0,1,11,7ff0503fe2523fe0407ff08418807078f",35282:"0,1,10,0800fc1043ff1111ff1111ff111111213",35745:"0,1,11,20810800800867f208208208288308208",35753:"0,1,11,20810800800870f10810810814818817f",35774:"0,1,11,43c2240240246c720027e2422243182e7",35810:"0,1,11,42023f0410bd62523d2252252bd301206",35823:"0,1,11,47e24204207e60027e2082ff2083142e3",35831:"0,1,11,40827e00807e6082ff24227e2c237e242",35835:"0,1,11,40827e0080ff6212942442ff2083322c1",35937:"0,1,11,1f82087fe2223fe0e17320cc73a0c9730",36134:"0,1,11,7d245255455855057f554554112292459",36317:"0,1,11,7bf4a04a07bf1211215a153f5205a063f",36335:"0,1,11,79049e4a27d41081145e353e5225a263e",36339:"0,1,11,7944944d57b61141145b65555145a5647",36719:"0,1,11,1107d021f52152a7c81081d4714122141",36820:"0,1,11,40727804004067f26125224c2b35004ff",36824:"0,1,11,4ff2080100106342522912102105004ff",36825:"0,1,11,4102080ff0026222142082142635004ff",36830:"0,1,11,4102ff02004864827f2082ff2085084ff",36865:"0,1,11,42221407f00860827f2082142635004ff",36895:"0,1,11,4082ff00807f64927f21c22a2c95084ff",36965:"0,1,11,27f10105247f20807f70812913f28047f",37027:"0,1,11,7ef1291297ea12a1297e912912e2284c8",37096:"0,1,11,08f3e900922a14a7f90093e922e2283e8",37324:"0,1,11,3fe2222223fe2222223fe0203fe0207ff",37325:"0,1,11,3fe0207ff2223fe2223fe0203fe0207ff",37327:"0,1,11,3fe2023fe2027ff2223fe2223fe0207ff",38169:"0,1,11,22437e4247242ff20077e24227e34227e",38271:"0,1,11,1041081101601007ff120110108144183",38376:"0,1,11,4ff201001401401401401401401401407",38386:"0,1,11,4ff2010214215fd4214714a9525421407",38388:"0,1,11,4ff2010014f94894894f94894894f9403",38431:"0,1,11,788488488508508488494494722422441",38477:"0,1,11,71051e56251c6e35085ff54874847f408",38480:"0,1,11,77e54257e54264257e54954a744452461",38500:"0,1,11,71c5225c153e60850857f50874a489418",38544:"0,1,11,71e52257f50167f50157f51072a4654bd",38646:"0,1,11,3fe0207ff5ad07018c6230103fe044038",38745:"0,1,11,1087ce1127df1057ff2453df2443c424c",38750:"0,1,11,08808878f08808878f08808878f088088",38899:"0,1,11,0203fe1040887ff0001fc1041fc1041fc",39029:"0,1,11,7ff0203fe20222222222222205018c603",39057:"0,1,11,11f5c451f5117d511535555508410a611",39564:"0,1,11,70811452254153e7800d11aa6aa08437f",39640:"0,1,11,0207ff1041fc0007ff4014f94894f9403",39740:"0,1,11,0403fe2223fe2223fe05405a09e11161f"};
+var G10 = {32:"0,0,0,",33:"2,2,1,1111101",34:"1,2,3,55",35:"0,2,4,5f59afa",36:"0,1,4,27aa633e2",37:"0,2,4,9122489",38:"0,2,4,4aa4ba5",39:"2,2,1,11",40:"1,1,3,122444221",41:"0,1,3,422111224",42:"1,4,3,52725",43:"0,4,4,22f22",44:"1,8,2,12",45:"0,6,4,f",46:"2,8,1,1",47:"0,1,4,112244488",48:"0,2,4,69bd996",49:"1,2,3,2622227",50:"0,2,4,691248f",51:"0,2,4,6912196",52:"0,2,4,35599f1",53:"0,2,4,f88e11e",54:"0,2,4,698e996",55:"0,2,4,f112244",56:"0,2,4,6996996",57:"0,2,4,6997196",58:"2,4,1,10001",59:"1,4,2,100012",60:"1,4,3,12421",61:"0,5,4,f0f",62:"1,4,3,42124",63:"0,2,4,6912202",64:"0,2,4,69bbb86",65:"0,2,4,6999f99",66:"0,2,4,e99e99e",67:"0,2,4,6988896",68:"0,2,4,e99999e",69:"0,2,4,f88e88f",70:"0,2,4,f88e888",71:"0,2,4,6988b97",72:"0,2,4,999f999",73:"0,2,4,f22222f",74:"0,2,4,1111996",75:"0,2,4,99aca99",76:"0,2,4,888888f",77:"0,2,4,9ff9999",78:"0,2,4,9ddbb99",79:"0,2,4,6999996",80:"0,2,4,e99e888",81:"0,2,4,69999a5",82:"0,2,4,e99ea99",83:"0,2,4,6986196",84:"0,2,4,f222222",85:"0,2,4,9999996",86:"0,2,4,9995552",87:"0,2,4,9999ff9",88:"0,2,4,9996999",89:"0,2,4,9955222",90:"0,2,4,f12448f",91:"1,1,3,744444447",92:"0,1,4,884422211",93:"0,1,3,711111117",94:"1,2,3,25",95:"0,9,4,f",96:"1,2,2,21",97:"0,4,4,61797",98:"0,2,4,88e999e",99:"0,4,4,69896",100:"0,2,4,1179997",101:"0,4,4,69f86",102:"0,2,4,34f4444",103:"0,4,4,799716",104:"0,2,4,88e9999",105:"0,2,4,20e222f",106:"0,2,3,10711116",107:"0,2,4,889aca9",108:"0,2,4,c444443",109:"0,4,4,9ff99",110:"0,4,4,e9999",111:"0,4,4,69996",112:"0,4,4,e99e88",113:"0,4,4,799711",114:"0,4,4,bc888",115:"0,4,4,7861e",116:"0,2,4,44f4443",117:"0,4,4,99997",118:"0,4,4,99552",119:"0,4,4,99ff9",120:"0,4,4,99699",121:"0,4,4,99552c",122:"0,4,4,f248f",123:"0,1,4,344484443",124:"2,1,1,111111111",125:"0,1,4,c2221222c",126:"0,4,4,5a",19968:"0,5,9,1ff",19971:"0,1,9,02002002303c1e002002102101f",19975:"0,1,9,1ff02002003e02204204208210c",19977:"0,1,9,0fe00000000007c0000000001ff",19978:"0,1,9,01001001001e0100100100101ff",19979:"0,1,9,1ff010010018014012010010010",19982:"0,1,9,04007f0400800ff0011fd00100e",20002:"0,1,9,0060f80100fe0101ff0200420fd",20004:"0,1,9,1ff0481ff1491491551a3101103",20010:"0,1,9,010028044193010010010010010",20013:"0,1,9,0100101ff1111111ff010010010",20026:"0,1,9,1200a01ff021029045045081106",20027:"0,1,9,0200101ff0100100fe0100101ff",20061:"0,1,9,0200201fc024024024024045187",20063:"0,1,9,01009009e0f219209609008107f",20102:"1,1,8,ff01020c0808080838",20108:"0,2,9,0fe0000000000000001ff",20110:"0,1,9,0fe0100100101ff010010010070",20116:"0,1,9,0fe0100100100fe0220220221ff",20132:"0,1,9,0101ff04408214502801006c183",20142:"0,1,9,0101ff04407c0001ff145044187",20159:"0,1,9,05f04108218408808809109108f",20170:"0,1,9,03804408217d0000fe002004038",20174:"0,1,9,0440440440440440aa0aa0aa111",20182:"0,1,9,04405409719d0b509409009109f",20204:"0,1,9,0a70911810a10a10a10a10a10a3",20214:"0,1,9,05405409f1a40840bf084084084",20294:"0,1,9,05f05109119f09109109f0800bf",20301:"0,1,9,0480440bf1800920920920840bf",20302:"0,1,9,05f05209219f0920910990800bf",20320:"0,1,9,05005f0911a40840960950a508c",20351:"0,1,9,04407f0841bf0a50bf09408c0b3",20445:"0,1,9,05f05109119f0840bf08e0950a4",20449:"0,1,9,0480440bf18009f08009f09109f",20462:"0,1,9,04804f0911aa0ac0b30ac0a309c",20498:"0,1,9,0fd0950a51fd12517d1251211fb",20540:"0,1,9,05e04409e19209e09209e0920bf",20572:"0,1,9,04407f0921920bf0a109e08408c",20648:"0,1,9,0a209708216f0a50af0a50b50a7",20805:"0,1,9,0101ff0240420fd02802904918f",20840:"0,1,9,03804408217d0100fe0100101ff",20843:"0,1,9,03c004004044042082082101101",20844:"0,1,9,03c08408212212104504408a0f2",20845:"0,1,9,0100101ff000000042042081101",20849:"0,1,9,0440441ff0440441ff000044183",20851:"0,1,9,0820440fe0100101ff028044183",20869:"0,1,9,0100101ff111129145101101103",20877:"0,1,9,1ff0100fe0920fe0921ff082086",20889:"0,1,9,1ff14107e04007e0021fa00201c",20943:"0,1,9,00513f0a403c0250bd12615a045",20998:"0,1,9,05e04208208117f12202204204c",20999:"0,1,9,0bf0890a90c91890910910e200c",21015:"0,1,9,1f9045075095155025025041183",21024:"0,1,9,1dd1551551551ff155155155155",21035:"0,1,9,1f11151151f50451f5095091133",21040:"0,1,9,1f10450951f50451f5045071183",21051:"0,1,9,0211fd0450950a504519506119b",21069:"0,1,9,0481ff0001e91291e91291e1123",21151:"0,1,9,0041c40bf0890890890911d1006",21152:"0,1,9,0400471f5095095095115115067",21313:"0,1,9,0100100101ff010010010010010",21315:"0,1,9,00e0f00100101ff010010010010",21319:"0,1,9,0341c40440441ff044044084104",21322:"0,1,9,0920540100fe0100101ff010010",21387:"0,1,9,0ff0800880880bf10810a00907f",21448:"0,1,9,0fe08208204404402801006c183",21450:"1,1,8,fe22247f41928c32c1",21452:"0,1,9,1ef0291291291290aa0440aa111",21457:"0,1,9,0a41221ff04007e0620a4098167",21462:"0,1,9,1ff0910f10950f50920921f5019",21464:"0,1,9,0101ff0280aa1290fe0440381c7",21488:"0,1,9,0200420821ff0000fe0820820fe",21491:"0,1,9,0101ff02002007e0c214204207e",21495:"0,1,9,0fe0820fe0001ff0400fe08201c",21516:"0,1,9,1ff10117d10117d14517d101103",21517:"0,1,9,02007e0c212401807f1a102103f",21518:"0,1,9,00e0f00800ff0800bf0a10a113f",21521:"0,1,9,0200401ff10117d14514517d103",21551:"0,1,9,0100fe0820fe0800bf0a10a113f",21608:"0,1,9,0ff0910fd0910ff0810fd14517f",21644:"0,1,9,0301cf0491f90490e90d914f040",22122:"0,1,9,01e1d217f16d17f14417f1d6025",22235:"0,1,9,1ff1291291291291471811011ff",22238:"0,1,9,1ff10117d14514514517d1011ff",22312:"0,1,9,0201ff0400480881be0880880bf",22343:"0,1,9,09009f1e109d0810870991c1006",22351:"0,1,9,0bf0821c208408c0960a51c4004",22352:"0,1,9,0100520520b51190100fe0101ff",22686:"0,1,9,0920bf1e90bf0a90bf0911d101f",22797:"0,1,9,0800ff14207e04207f0a203c1c3",22806:"0,1,9,0840f409415c156025024044184",22810:"0,1,9,01003c0c40270391d100a00c070",22823:"0,1,9,0100101ff010010028028044183",22826:"0,1,9,0100101ff0100100280440a2111",22833:"0,1,9,0900fe0901101ff010028044183",22836:"0,1,9,0480280880480101ff024042181",22905:"0,1,9,0840941d709d1751540900d110f",22909:"0,1,9,05f0411e20a413f0c40440a410c",22914:"0,1,9,04004f1e90a90a91290a904f1a0",22987:"0,1,9,0440441e90af1200cf0490a912f",23384:"0,1,9,0201ff04005e0821840bf08408c",23427:"0,1,9,0101ff10114104c07004004207e",23436:"0,1,9,0101ff10117d0001ff02804918f",23450:"0,1,9,0101ff1010fe01005e0500b010f",23481:"0,1,9,0101ff1450920280441ff04407c",23545:"0,1,9,0021f201f0a20aa0460420a2106",23556:"0,1,9,0811f111f1f11191f5051091133",23558:"0,1,9,04f0591470d80420df14204a046",23567:"0,1,9,010010092092091111111010030",23569:"0,1,9,0100100920911100320040180e0",23601:"0,1,9,0451e401f1e412a1ea04a16a0d3",24038:"0,1,9,0201ff0400400bf08810810807f",24050:"0,1,9,1fe0021021021fe1001001010ff",24120:"0,1,9,0921ff14507c0100fe092096010",24179:"0,1,9,0fe0100920541ff010010010010",24180:"0,1,9,04007f08817e0480481ff008008",24230:"0,1,9,0080ff0940ff0940be0a209c163",24320:"0,1,9,1ff0440440441ff044084084104",24369:"0,1,9,1ef0211ef1080e71ad0631ad063",24378:"0,1,9,1df0511df10411f1d505f04a19d",24405:"0,1,9,0fe0020fe0021ff09205c092131",24448:"0,1,9,08810403f04408419f0840840bf",24452:"0,1,9,0bf10101200c0b318409f0840bf",24453:"0,1,9,08813f00807f0821bf0820a2096",24456:"0,1,9,09f11101f05109f194095092099",24537:"0,1,9,04404417f15015015015005004f",24555:"0,1,9,04405f14514517f14414404a071",24577:"0,1,9,0101ff04409210901014a14103c",24635:"0,1,9,0440fe0820820fe01014a14103c",24687:"0,1,9,0200fe0820fe0820fe01014a17d",24930:"0,1,9,05e05215217f15517f15204c073",25104:"0,1,9,00a0ff0880ea0aa0aa0a40e511b",25105:"0,1,9,02a1c90481ff04806a1c40450db",25110:"0,1,9,0091ff0040f50950f20061c9031",25143:"0,1,9,0100080ff0810810ff080100100",25152:"0,1,9,1e300c1e812f12a1ea112112102",25214:"0,1,9,0850851ff0840850c618408a1b1",25226:"0,1,9,09f0951d50950df19009009118f",25233:"0,1,9,0b70a51e50a50a50e51ad0b7184",25442:"0,1,9,09e0a21df0950951bf08408a1b1",25454:"0,1,9,0bf0a11ff0a40bf1a40df09119f",25509:"0,1,9,0840bf1d20bf0880ff19209c1a3",25511:"0,1,9,0840ff1950940e71800bf0841ff",25552:"0,1,9,09f0911ff09109f0c419709c1b3",25910:"0,1,9,05015f15216214a14a1c414c073",25913:"0,1,9,0101df0520621ca10a1441cc033",25968:"0,1,9,1541671f90d51451fa0920e5119",25972:"0,1,9,0441ff0491f215d0f005f0901ff",25991:"0,1,9,0200101ff0440440280100281c7",26029:"0,1,9,14f1d81681ff1491e91491f1011",26032:"0,1,9,04f1f80a80af1fa04a1ea0d2152",26041:"0,1,9,0101ff02002003e04204208210c",26080:"0,1,9,0fe0100101ff01002802904918f",26085:"1,1,7,7f4141417f4141417f",26087:"1,1,8,bfa1a1a1bfa1a1a1bf",26089:"0,1,9,0fe0820fe0820fe0101ff010010",26102:"0,1,9,0021c215f1421d214a1421c2006",26126:"0,1,9,1df15115f1d115115f1d1011023",26131:"0,1,9,0fc0840fc0840fc0401ff091126",26143:"0,1,9,0fe0820fe0820fe1100fe0101ff",26152:"0,1,9,0101df16814f1c814814f1c8008",26159:"0,1,9,0fe0820fe0821ff01009e0d013f",26174:"0,1,9,0fe0820fe0820fe1290aa0281ff",26202:"0,1,9,00e1d217f1551d515f14a1d2023",26242:"0,1,9,04f1f80af0aa1fe0820fe0820fe",26356:"0,1,9,1ff0100fe0920fe0920fe0501ef",26368:"0,1,9,0fe0820fe0821ff0950f50921f5",26376:"0,1,9,07f04107f04104107f041081103",26377:"0,1,9,0201ff0400fe14207e04207e042",26399:"0,1,9,0af1f90af0e90a91ff0090a9113",26410:"0,1,9,0100fe0100101ff038054193010",26412:"0,1,9,0100101ff03805405409217d010",26426:"0,1,9,05e0521f20520d20d2152151061",26597:"0,1,9,0101ff0540921ff0820fe0821ff",26631:"0,1,9,09e0801c00bf1841d61a508408c",26657:"0,1,9,04405f1ea0510ca0ea14404a051",27169:"0,1,9,07f04a1df0510df0d117f14a071",27425:"0,1,9,11009f01502502408408410a131",27490:"0,1,9,01001001009009e0900900901ff",27491:"0,1,9,1ff01001009009e0900900901ff",27493:"0,1,9,01009e0901ff01009013300c0f0",27599:"0,1,9,0800ff10007e0521ff08a0ff004",27604:"0,1,9,0880880890ea08c0880890b91cf",27668:"0,1,9,0800ff1001fe0001fe002001001",27744:"0,1,9,10409401711d0b501405009111f",27809:"0,1,9,11e09201212308003e01208c133",27979:"0,1,9,13d0a50251250ad02d009095125",28040:"0,1,9,1040a50161040bf02103f0a1123",28155:"0,1,9,13e08800817f09202904a12915a",28201:"0,1,9,13e0a203e1220be00007f0d517f",28287:"0,1,9,13f0a103f1210bf01403509417f",28385:"0,1,9,1120bf01213f08803f0a913b12d",29256:"0,1,9,15f1501501df1111e914a146159",29366:"0,1,9,0451450ff0440440440ca151061",29575:"0,1,9,0101ff0920200ba1111ff010010",29616:"0,1,9,01f1d10950951d509508a1ca033",30005:"0,1,9,0201fe1221fe1221221fe02101f",30334:"0,1,9,1ff0200fe0820820fe0820820fe",30340:"0,1,9,04808f1f11211291e51211211e6",30410:"0,1,9,0440281ff0440821ff0aa0aa1ff",30446:"1,1,7,7f41417f417f41417f",30465:"0,1,9,01009213500803e1c207e04207e",30475:"0,1,9,1ff0100fe0201ff0420fe14207e",30701:"0,1,9,11f1e015f0511f105f04a0aa11f",30721:"0,1,9,1de0821121d215f14117d1c1006",30828:"0,1,9,1df08411f1d515f15515f1c8037",30830:"0,1,9,1ce0b209f1151df15515f1551e5",31034:"0,1,9,0fe0000001ff010010092111030",31163:"0,1,9,0101ff0280920aa1ff121149175",31186:"0,1,9,0341c40551f50440cc161046058",31216:"0,1,9,0281cf0511e40440d60d516504c",31354:"0,1,9,0101ff1010441830fe0100101ff",31532:"0,1,9,0880ef1520fe0900ff031051196",31561:"0,1,9,0880ef1520100fe0041ff04402c",31665:"0,1,9,0880ef15205f1f105f0d117105f",31867:"0,1,9,0920541ff0540920101ff0281c7",32047:"0,1,9,0fe0920fe0920fe0521fd0541b3",32416:"0,1,9,0510911111d109f1111c10011c1",32428:"0,1,9,0480bf1081bf08813f1c900b1c8",32447:"0,1,9,04a09f1081df08810a1c400d1d3",32456:"0,1,9,04808f1311ca08c1331c40181c7",32463:"0,1,9,05f0821041ca09111f1c40041df",32473:"0,1,9,04e0911201df08011f1d10111df",32479:"0,1,9,0880bf1081d20bf1d40140551a7",32487:"0,1,9,0b50ae1241ff0a412e1f50241ff",32493:"0,1,9,08409f1041df0891d403f04a1b1",32593:"0,1,9,1ff1011ab1451451ab1ab101103",32622:"0,1,9,0fe0aa1ff0100fe0820fe0821ff",32791:"0,1,9,0431fc0441e705c1e705c0e5147",32852:"0,1,9,1e90aa0ff0a40ff0a40ea1aa031",33267:"0,1,9,1ff0200440fa0100fe0100101ff",34920:"0,1,9,0101ff0100fe0101ff05218c0e3",34987:"0,1,9,0840bf1e502407f0a91a90860b9",35201:"0,1,9,1ff0280fe0aa0fe0201ff0240de",35282:"0,1,9,07e0841ff0910ff0910ff101103",35745:"0,1,9,1040840041bf0840840a40c4084",35753:"0,1,9,08804800818e0880880c80880bf",35774:"0,1,9,09e0520121930800be0920cc0b3",35810:"0,1,9,11009f0211bd09509d0950dd082",35823:"0,1,9,09f05101f18009f0840bf0ca0b1",35831:"0,1,9,10409f0041bf09109f0910df091",35835:"0,1,9,10409f0041bf0890940bf0ca0b1",35937:"0,1,9,0780881fe0920fe0290da02c1db",36134:"0,1,9,1e912a12c12817f16a04a0a913d",36317:"0,1,9,1ef12812f1e904907f1481481ff",36335:"0,1,9,1ef13112a1e604917014f1491ff",36339:"0,1,9,1d41551761d40561751541551e7",36719:"0,1,9,0481ef0911451e404406a1ca051",36820:"0,1,9,11f09011f09101518609914013f",36824:"0,1,9,13f08410c09602518408414013f",36825:"0,1,9,1080bf00201219208c0b308017f",36830:"0,1,9,1040bf00801419f0840bf14413f",36865:"0,1,9,11209413f08403f18a09114013f",36895:"0,1,9,1080be00803e1aa0be0980aa17f",36965:"0,1,9,13f09500203f1840a50bf14013f",37027:"0,1,9,1ef0a91ea0ac0aa1e90a912e168",37096:"0,1,9,0471fd0950961fd0051f51161f4",37324:"0,1,9,0fe0920fe0920fe0100fe0101ff",37325:"0,1,9,0fe0101ff0920fe0920fe0101ff",37327:"0,1,9,0fe0821ff0920fe0920fe0101ff",38169:"0,1,9,08a0df10a1ca0bf1d109f0910df",38271:"0,1,9,08208c0b00801ff0900880a40c3",38376:"0,1,9,13f081001101101101101101103",38386:"0,1,9,13f08101117d111139155111103",38388:"0,1,9,13f08107d14517d14514517d103",38431:"0,1,9,1e412414418414412412a1ca111",38477:"0,1,9,1cf17114a18c17315e19213f102",38480:"0,1,9,1df15115f19115f154195112119",38500:"0,1,9,1ce1511601bf14417f18412514d",38544:"0,1,9,1ce15215f18115f1411bf12a14d",38646:"0,1,9,0fe0101ff15513d0420ff112016",38745:"0,1,9,09e1e209f1e509f1e513f1e412c",38750:"0,1,9,0281ef0281ef0281e802f048188",38899:"0,1,9,0100fe0440441ff0820fe0820fe",39029:"0,1,9,1ff0100fe0820920920aa044183",39057:"0,1,9,05f16815f1f10551750d506a191",39564:"0,1,9,1ce05114015f1c00551d50420ff",39640:"0,1,9,0101ff04407c0001ff14517d103",39740:"0,1,9,0200fe0920fe0920fe02a04918f"};
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var W = 128, H = 64;
+
+  /* ── 字模 ─────────────────────────────────────────────────────────── */
+  var FONTS = { 12: G12, 10: G10 };
+  var ADV   = { 12: { n: 6, w: 12 }, 10: { n: 5, w: 10 } };
+  function isWide(cp) { return cp >= 0x2E80; }
+
+  var INK = 'black', PAPER = 'white';
+  function readTokens() {
+    var cs = getComputedStyle(document.documentElement);
+    INK   = cs.getPropertyValue('--lcd-ink').trim()   || INK;
+    PAPER = cs.getPropertyValue('--lcd-paper').trim() || PAPER;
+  }
+
+  /* 逐字落在整数像素列上；k = 整数放大倍数 */
+  function glyph(c, cp, gx, gy, tier, fill, k) {
+    var g = FONTS[tier][cp];
+    if (!g) return;
+    var p = g.split(',');
+    var ox = +p[0], oy = +p[1], gw = +p[2], hex = p[3];
+    if (!gw) return;
+    var hp = (gw + 3) >> 2, rows = hex.length / hp;
+    c.fillStyle = fill;
+    for (var r = 0; r < rows; r++) {
+      var v = parseInt(hex.substr(r * hp, hp), 16);
+      if (!v) continue;
+      for (var b = 0; b < gw; b++) {
+        if (v & (1 << (gw - 1 - b))) c.fillRect(gx + (ox + b) * k, gy + (oy + r) * k, k, k);
+      }
+    }
+  }
+  function text(c, str, x, y, tier, fill, k) {
+    var a = ADV[tier], cur = x;
+    for (var i = 0; i < str.length; i++) {
+      var cp = str.charCodeAt(i);
+      if (cp === 32) { cur += a.n * k; continue; }
+      glyph(c, cp, cur, y, tier, fill, k);
+      cur += (isWide(cp) ? a.w : a.n) * k;
+    }
+  }
+  function tw(str, tier) {
+    var a = ADV[tier], t = 0;
+    for (var i = 0; i < str.length; i++) {
+      var cp = str.charCodeAt(i);
+      t += cp === 32 ? a.n : (isWide(cp) ? a.w : a.n);
+    }
+    return t;
+  }
+  function cx(str, tier, x0, x1, k) {
+    return x0 + Math.floor((x1 - x0 + 1 - tw(str, tier) * (k || 1)) / 2);
+  }
+
+  /* ── 报文样本（设备只收不发，这些都是"发给本机"的）────────────────── */
+  var MSGS = [
+    { from: 'BG5BLB-12', body: ['有内鬼', '停止交易'], time: '10:01:16', path: 'WIDE1-1,WIDE2-1', rssi: '-92', snr: '12', crc: 'FIX' },
+    { from: 'BG5BLH-7',  body: ['中继信号', '正常'],    time: '10:04:22', path: 'WIDE2-1',        rssi: '-88', snr: '18', crc: 'OK' },
+    { from: 'N0CALL-9',  body: ['位置已存', '电量低'],  time: '10:07:05', path: 'WIDE1-1',        rssi: '-95', snr: '9',  crc: 'FIX2' }
+  ];
+
+  /* ── 三个态的版面：每态是一组磁贴 + 若干 1 像素分隔线 ──────────────── */
+  var LAYOUT = {
+    idle: {
+      tiles: [
+        { r: [0, 0, 64, 64] },
+        { r: [64, 0, 64, 32] },
+        { r: [64, 32, 32, 32] },
+        { r: [96, 32, 32, 32] }
+      ],
+      lines: [[64, 0, 1, 64], [64, 32, 64, 1], [96, 32, 1, 32]],
+      names: ['大格', '上格', '左下', '右下']
+    },
+    unread: {
+      tiles: [
+        { r: [0, 0, 64, 64] },
+        { r: [64, 0, 64, 32] },
+        { r: [64, 32, 32, 32] },
+        { r: [96, 32, 32, 32] }
+      ],
+      lines: [[64, 0, 1, 64], [64, 32, 64, 1], [96, 32, 1, 32]],
+      names: ['大格', '上格', '左下', '右下']
+    },
+    inbox: {
+      tiles: [
+        { r: [0, 0, 128, 12] },
+        { r: [0, 12, 128, 28] },
+        { r: [0, 40, 128, 24] }
+      ],
+      lines: [],
+      names: ['顶栏', '正文', '元信息']
+    }
+  };
+
+  /* ── 每态每块格的内容 ─────────────────────────────────────────────── */
+  function opsFor(view, i, st) {
+    var T = function (s, x, y, f, k) { return { s: s, x: x, y: y, f: f, k: k || 1 }; };
+
+    if (view === 'idle') {
+      if (i === 0) return [T('14:26', cx('14:26', 12, 0, 63, 2), 11, 12, 2),
+                           T('周三 9/16', cx('周三 9/16', 12, 0, 63), 41, 12)];
+      if (i === 1) return [T('本机', cx('本机', 10, 65, 127), 2, 10),
+                           T('BG5BLH', cx('BG5BLH', 12, 65, 127), 18, 12)];
+      if (i === 2) return [T('电量', cx('电量', 10, 65, 95), 34, 10),
+                           T(BATT, cx(BATT, 12, 65, 95), 50, 12)];
+      return [T('未读', cx('未读', 10, 97, 127), 34, 10),
+              T(String(st.unread), cx(String(st.unread), 12, 97, 127), 50, 12)];
+    }
+
+    if (view === 'unread') {
+      var m = MSGS[Math.max(0, st.unread - 1)];
+      if (i === 0) return [T(m.from, cx(m.from, 12, 0, 63), 2, 12),
+                           T(m.body[0], cx(m.body[0], 12, 0, 63), 18, 12),
+                           T(m.body[1], cx(m.body[1], 12, 0, 63), 34, 12),
+                           T(m.time, cx(m.time, 12, 0, 63), 50, 12)];
+      if (i === 1) return [T('2301.50N', cx('2301.50N', 12, 65, 127), 2, 12),
+                           T('11325.30E', cx('11325.30E', 12, 65, 127), 18, 12)];
+      if (i === 2) return [T('RSSI', cx('RSSI', 10, 65, 95), 34, 10),
+                           T(m.rssi, cx(m.rssi, 12, 65, 95), 50, 12)];
+      return [T('SNR', cx('SNR', 10, 97, 127), 34, 10),
+              T(m.snr, cx(m.snr, 12, 97, 127), 50, 12)];
+    }
+
+    /* inbox */
+    var q = MSGS[st.idx];
+    var n = st.idx + 1;
+    if (i === 0) return [T(q.from, 4, 0, 12),
+                         T(n + ' / ' + MSGS.length, 94, 0, 12)];
+    if (i === 1) return [T(q.body[0] + ' ' + q.body[1], cx(q.body[0] + ' ' + q.body[1], 12, 0, 127), 16, 12)];
+    return [T(q.time, 4, 40, 12),
+            T('RSSI ' + q.rssi, 76, 40, 12),
+            T(q.path, 4, 52, 12),
+            T(q.crc, 106, 52, 12)];
+  }
+
+  /* ── 画一屏 ───────────────────────────────────────────────────────── */
+  function draw(cv, view, focus, st, displayScale) {
+    cv.width = W; cv.height = H;
+    var c = cv.getContext('2d');
+    c.fillStyle = PAPER;
+    c.fillRect(0, 0, W, H);
+
+    var L = LAYOUT[view];
+    for (var i = 0; i < L.tiles.length; i++) {
+      var t = L.tiles[i], on = (i === focus);
+      c.fillStyle = on ? INK : PAPER;
+      c.fillRect(t.r[0], t.r[1], t.r[2], t.r[3]);
+      var ops = opsFor(view, i, st);
+      for (var j = 0; j < ops.length; j++) {
+        text(c, ops[j].s, ops[j].x, ops[j].y, ops[j].f, on ? PAPER : INK, ops[j].k);
+      }
+    }
+    c.fillStyle = INK;
+    for (var k = 0; k < L.lines.length; k++) {
+      var q = L.lines[k];
+      c.fillRect(q[0], q[1], q[2], q[3]);
+    }
+
+    /* 整数倍放大：像素不会被插值拉出灰边 */
+    if (displayScale) {
+      /* 量的是 .scr-hold 而不是直接父级：.scr-frame 会收缩包裹画布，
+         量它会得到画布自身宽度，整数倍率永远算成 1 */
+      var host = cv.closest('.scr-hold') || cv.parentElement;
+      var box = host.clientWidth;
+      var kk = Math.max(1, Math.floor(box / W));
+      cv.style.width = (W * kk) + 'px';
+      cv.style.height = (H * kk) + 'px';
+      var dw = document.getElementById('dim-w');
+      if (dw) dw.style.width = (W * kk) + 'px';
+      var note = document.getElementById('scale-note');
+      if (note && cv.id === 'cv-main') {
+        note.textContent = '1 LCD 像素 = ' + kk + ' × ' + kk + ' 屏幕像素（' + (W * kk) + ' × ' + (H * kk) + '，最近邻放大，无插值）';
+      }
+    }
+    return c;
+  }
+
+  /* ── 设备状态 ─────────────────────────────────────────────────────── */
+  var st = { view: 'idle', focus: 0, idx: 0, unread: 0 };
+  /* 电量只给三挡：1-bit 屏画不出百分比，标了也是假精度 */
+  var BATT = '高';
+
+  function viewName() { return { idle: '待机', unread: '有未读', inbox: '收件箱' }[st.view]; }
+  function focusName() { return LAYOUT[st.view].names[st.focus]; }
+
+  function say(msg) { document.getElementById('ro-log').textContent = msg; }
+
+  function sync(extra) {
+    var cv = document.getElementById('cv-main');
+    draw(cv, st.view, st.focus, st, true);
+    cv.setAttribute('aria-label',
+      '设备屏幕，当前' + viewName() + '态，焦点在' + focusName() +
+      (st.view === 'idle' ? '，未读 ' + st.unread + ' 条' :
+       st.view === 'unread' ? '，预览 ' + MSGS[st.unread - 1].from :
+       '，第 ' + (st.idx + 1) + ' 条，共 ' + MSGS.length + ' 条'));
+    document.getElementById('ro-view').textContent = viewName();
+    document.getElementById('ro-focus').textContent = focusName();
+    document.getElementById('ro-unread').textContent = String(st.unread);
+    if (extra) say(extra);
+  }
+
+  /* ── 状态机 ───────────────────────────────────────────────────────── */
+  function press(key) {
+    if (st.view === 'inbox') {
+      if (key === 'up')   { st.idx = (st.idx + MSGS.length - 1) % MSGS.length; sync('▲ 上一条 · 第 ' + (st.idx + 1) + ' / ' + MSGS.length + ' 条'); return; }
+      if (key === 'down') { st.idx = (st.idx + 1) % MSGS.length; sync('▼ 下一条 · 第 ' + (st.idx + 1) + ' / ' + MSGS.length + ' 条'); return; }
+      if (key === 'ok') {
+        st.unread = Math.max(0, st.unread - 1);
+        if (st.unread === 0) { st.view = 'idle'; st.focus = 0; st.idx = 0; sync('● 标记已读 · 未读清零，回到待机'); }
+        else { st.idx = (st.idx + 1) % MSGS.length; sync('● 标记已读 · 还剩 ' + st.unread + ' 条未读'); }
+        return;
+      }
+      if (key === 'long') { st.view = st.unread ? 'unread' : 'idle'; st.focus = 0; sync('长按 ● · 退出收件箱'); return; }
+    }
+
+    /* 待机与有未读：反显恒在大格，▲▼ 是死键——这两个态没有可移动的焦点 */
+    if (key === 'up' || key === 'down') {
+      sync((key === 'up' ? '▲' : '▼') + ' ' + viewName() + '态无动作 —— 反显恒在大格，没有可移动的焦点');
+      return;
+    }
+    if (key === 'ok') {
+      st.view = 'inbox'; st.idx = 0;
+      /* 待机态未读为 0，进去看到的是已存消息，不是新消息——这层区别要说清 */
+      sync(st.unread === 0
+        ? '● 进入收件箱 · 未读 0，翻看已存消息'
+        : '● 进入收件箱 · 第 1 / ' + MSGS.length + ' 条');
+      return;
+    }
+    if (key === 'long') { sync('长按 ● · 前两态是最外层，没有上级可退'); }
+  }
+
+  /* 空中指示灯：只报"空中有没有在来包"，不报数量——数量是「未读」那一栏的职责。
+     元素全程复用、不用 innerHTML 重建，否则定时器会攥着已被丢弃的旧节点，
+     状态永远复位不了。 */
+  var airTimer = null;
+  function air(active) {
+    var led = document.getElementById('led');
+    var txt = document.getElementById('ro-air');
+    if (airTimer) { clearTimeout(airTimer); airTimer = null; }
+    if (!active) { led.className = 'led dim'; txt.textContent = '空闲'; return; }
+    led.className = 'led live';
+    txt.textContent = '收包';
+    airTimer = setTimeout(function () { air(false); }, 2400);
+  }
+
+  function inject() {
+    if (st.unread >= MSGS.length) { say('空中已投满 ' + MSGS.length + ' 条，先读掉一些'); return; }
+    st.unread += 1;
+    if (st.view !== 'inbox') { st.view = 'unread'; st.focus = 0; }
+    air(true);
+    sync('空中投来一包 · ' + MSGS[st.unread - 1].from);
+  }
+
+  /* ── 按键绑定（含长按）────────────────────────────────────────────── */
+  function bindKeys() {
+    var keys = document.querySelectorAll('.key');
+    for (var i = 0; i < keys.length; i++) {
+      (function (el) {
+        var k = el.getAttribute('data-key'), timer = null, long = false;
+        function down(e) {
+          e.preventDefault();
+          el.classList.add('is-down');
+          long = false;
+          timer = setTimeout(function () { long = true; press('long'); }, 620);
+        }
+        function up() {
+          el.classList.remove('is-down');
+          if (timer) { clearTimeout(timer); timer = null; }
+          if (!long) press(k);
+        }
+        el.addEventListener('pointerdown', down);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointerleave', function () {
+          el.classList.remove('is-down');
+          if (timer) { clearTimeout(timer); timer = null; }
+        });
+        el.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!e.repeat) down(e); }
+        });
+        el.addEventListener('keyup', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') up();
+        });
+      })(keys[i]);
+    }
+    document.getElementById('btn-inject').addEventListener('click', inject);
+
+    var tbtns = document.querySelectorAll('.themes button');
+    for (var t = 0; t < tbtns.length; t++) {
+      tbtns[t].addEventListener('click', function () {
+        applyTheme(this.getAttribute('data-screen'));
+      });
+    }
+  }
+
+  /* ── 静帧 ─────────────────────────────────────────────────────────── */
+  function stills() {
+    draw(document.getElementById('cv-s1'), 'idle', 0, { unread: 0 }, false);
+    draw(document.getElementById('cv-s2'), 'unread', 0, { unread: 1 }, false);
+    /* focus 必须与演示一致：进收件箱时焦点落在顶栏（0），不是正文 */
+    draw(document.getElementById('cv-s3'), 'inbox', 0, { idx: 0, unread: 3 }, false);
+  }
+
+  /* 切主题：换两色令牌 → 重读 → 重画设备与三张静帧。
+     页面本身的配色不动，只有屏幕变——这是"屏幕是主角"的应有之义。 */
+  function applyTheme(name) {
+    document.documentElement.setAttribute('data-screen', name);
+    var btns = document.querySelectorAll('.themes button');
+    for (var i = 0; i < btns.length; i++) {
+      var on = btns[i].getAttribute('data-screen') === name;
+      btns[i].classList.toggle('on', on);
+      btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    readTokens();
+    stills();
+    sync('屏幕主题 → ' + (name === 'lcd' ? 'LCD（灰底、暗蓝墨、可见点阵间隙）' : 'OLED（纯黑纯白、无间隙）'));
+  }
+
+  function boot() {
+    readTokens();
+    bindKeys();
+    stills();
+    sync(null);
+    /* 自动演示一次"来包"，之后交还控制权 */
+    setTimeout(inject, 1500);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+
+  window.addEventListener('resize', function () {
+    draw(document.getElementById('cv-main'), st.view, st.focus, st, true);
+  });
+})();
+</script>
+
+</body>
+</html>

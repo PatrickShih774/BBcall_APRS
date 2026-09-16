@@ -5,23 +5,68 @@
 #include "bbcall_app.h"
 #include "bk4802.h"
 #include "lcd_st7567.h"
+#include "ui_harness.h"
 #include "modem.h"
 #include "ax25.h"
 #include "aprs.h"
 #include <string.h>
 
-#ifndef BBCALL_LCD_ENABLED
-#define BBCALL_LCD_ENABLED 0u   /* LCD 未焊接前：纯串口调试 */
-#endif
-
 #if BBCALL_LCD_ENABLED
-static void lcd_u8(uint8_t x, uint8_t y, uint8_t v)
+/* ---------------- 三键扫描与背光（design.md §9：只有 ▲ ▼ ●） ----------------
+ * 按键上拉输入、按下为低。消抖：10ms 采样、连续 3 次一致才采信。
+ * ▲▼：按下沿触发一次，按住 0.6s 后 0.18s/次自动重复（收件箱翻条）；
+ * ● ：松开时按按住时长区分短按 / 长按（≥620ms = 退出），与模拟器 lcd_sim 翻译规则一致。 */
+static uint32_t s_bl_off_at;   /* 背光熄灭时刻（0 = 已灭） */
+
+static void ui_key_event(void)
 {
-  lcd_draw_char8x16(x, y, (uint8_t)('0' + v / 100), 1);
-  lcd_draw_char8x16(x + 8, y, (uint8_t)('0' + (v / 10) % 10), 1);
-  lcd_draw_char8x16(x + 16, y, (uint8_t)('0' + v % 10), 1);
+  lcd_backlight(1u);
+  s_bl_off_at = HAL_GetTick() + 15000u;   /* 任意按键后背光亮 15s */
 }
-#endif
+
+static void ui_keys_poll(void)
+{
+  static const struct { GPIO_TypeDef *g; uint16_t p; } K[3] = {
+    { KEY_UP_GPIO, KEY_UP_PIN },
+    { KEY_DOWN_GPIO, KEY_DOWN_PIN },
+    { KEY_OK_GPIO, KEY_OK_PIN },
+  };
+  static uint8_t  lvl[3] = { 1u, 1u, 1u };  /* 稳定电平，1 = 未按（上拉） */
+  static uint8_t  raw[3] = { 1u, 1u, 1u };
+  static uint8_t  cnt[3];
+  static uint32_t down_ms[3], rep_ms[3], t_scan;
+  uint32_t now = HAL_GetTick();
+  uint8_t i;
+
+  if ((uint32_t)(now - t_scan) < 10u) return;
+  t_scan = now;
+
+  for (i = 0u; i < 3u; i++) {
+    uint8_t r = (HAL_GPIO_ReadPin(K[i].g, K[i].p) == GPIO_PIN_RESET) ? 0u : 1u;
+    if (r == raw[i]) { if (cnt[i] < 3u) cnt[i]++; }
+    else             { raw[i] = r; cnt[i] = 0u; }
+    if (cnt[i] < 3u || r == lvl[i]) continue;
+    lvl[i] = r;
+    if (r == 0u) {                            /* 按下沿 */
+      down_ms[i] = now;
+      rep_ms[i]  = now;
+      if (i < 2u) { ui_handle_key(i == 0u ? SIM_KEY_UP : SIM_KEY_DOWN); ui_key_event(); }
+    } else if (i == 2u) {                     /* ● 松开沿：短按/长按互斥 */
+      ui_handle_key(((uint32_t)(now - down_ms[i]) >= 620u) ? SIM_KEY_OK_LONG : SIM_KEY_OK);
+      ui_key_event();
+    }
+  }
+  /* ▲▼ 长按自动重复 */
+  for (i = 0u; i < 2u; i++) {
+    if (lvl[i] == 0u && (uint32_t)(now - down_ms[i]) >= 600u &&
+        (uint32_t)(now - rep_ms[i]) >= 180u) {
+      rep_ms[i] = now;
+      ui_handle_key(i == 0u ? SIM_KEY_UP : SIM_KEY_DOWN);
+      ui_key_event();
+    }
+  }
+}
+#endif /* BBCALL_LCD_ENABLED */
 
 void bbcall_app_init(void)
 {
@@ -79,11 +124,14 @@ void bbcall_app_init(void)
   hw_console_puts("\r\n");
 
 #if BBCALL_LCD_ENABLED
-  lcd_init();
-  lcd_clear(0);
-  lcd_draw_string8x16(0, 0, "BBCALL APRS RX", 1);
-  lcd_draw_string8x16(0, 16, "144.640 MHz", 1);
-  lcd_flush();
+  /* 三态 UI（design.md v2.0）：ui_init 内含 lcd_init()，模拟器与真机同一份代码 */
+  ui_init();
+  ui_set_mycall(BBCALL_MYCALL);
+  ui_set_rx_freq_khz((uint32_t)(BBCALL_DEF_FREQ_MHZ * 1000.0 + 0.5));
+  ui_show(UI_SCREEN_IDLE);
+  lcd_backlight(1u);
+  s_bl_off_at = HAL_GetTick() + 15000u;
+  hw_console_puts("[LCD] UI v2.0 three-state (design.md), keys: UP/DOWN/OK, long-press 620ms\r\n");
 #else
   hw_console_puts("[LCD] disabled (not soldered yet), console mode\r\n");
 #endif
@@ -97,7 +145,8 @@ void bbcall_app_init(void)
   HAL_GPIO_WritePin(LED_GPIO, LED_PIN, GPIO_PIN_SET);
 }
 
-#if BBCALL_LCD_ENABLED
+#if 0
+/* v1 调试期辅助：旧 LCD 直接画消息两行；UI v2.0 起由 ui_harness.c 三态界面接管 */
 static void show_message_line(uint8_t y, const uint8_t *s, uint8_t max)
 {
   char tmp[17];
@@ -173,6 +222,13 @@ void bbcall_app_loop(void)
 #endif
     static ax25_decoded_t d;
     if (ax25_decode(fr.frame, fr.len, &d)) {
+#if BBCALL_LCD_ENABLED
+      /* 三态 UI 入箱（自带 60s 去重 / ackNNN 分流，design.md §6.4）；
+       * RSSI/SNR 无标定采样，不注入（design.md §12.2，收件箱显示 --） */
+      ui_feed_ax25(fr.frame, fr.len, now_ms,
+                   modem_frame_was_fixed() ? 1u : 0u,
+                   modem_frame_was_repeat() ? 1u : 0u);
+#endif
       hw_console_puts("\r\n[FRAME] src=");
       hw_console_puts(d.src);
       hw_console_puts(" dest=");
@@ -228,15 +284,6 @@ void bbcall_app_loop(void)
         hw_console_puts(" msg=");
         for (uint8_t i = 0; i < m.body_len; i++) hw_console_putc((char)m.body[i]);
         hw_console_puts("\r\n");
-#if BBCALL_LCD_ENABLED
-        lcd_clear(0);
-        lcd_draw_string8x16(0, 0, "FROM ", 1);
-        lcd_draw_string8x16(40, 0, d.src, 1);
-        lcd_draw_string8x16(0, 16, "--------------------", 1);
-        show_message_line(24, m.body, m.body_len);
-        show_message_line(40, m.body + 16, m.body_len > 16 ? (uint8_t)(m.body_len - 16) : 0);
-        lcd_flush();
-#endif
       }
     }
     }
@@ -319,12 +366,22 @@ void bbcall_app_loop(void)
     hw_console_puts(" P=");
     hw_console_u16(modem_last_period());
     hw_console_puts("\r\n");
-#if BBCALL_LCD_ENABLED
-    lcd_draw_string8x16(0, 48, "S=", 1);
-    lcd_u8(16, 48, bk4802_get_smeter());
-    lcd_flush();
-#endif
   }
+
+#if BBCALL_LCD_ENABLED
+  /* 三态 UI：推进设备时钟（态 1/2 冒号闪烁 0.5s 触发重绘）+ 扫描按键 + 背光超时熄灭 */
+  {
+    static uint32_t t_ui_last = 0;
+    uint32_t t_ui_now = HAL_GetTick();
+    ui_tick(t_ui_now - t_ui_last);
+    t_ui_last = t_ui_now;
+  }
+  ui_keys_poll();
+  if (s_bl_off_at && (int32_t)(HAL_GetTick() - s_bl_off_at) >= 0) {
+    lcd_backlight(0u);
+    s_bl_off_at = 0u;
+  }
+#endif
 
   hw_watchdog_feed();
 #if BBCALL_SW_SQUELCH
