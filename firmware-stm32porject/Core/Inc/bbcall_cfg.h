@@ -51,6 +51,14 @@
 #define CN_FONT_ENABLED   0
 #endif
 
+/* ---------- S-meter（BK4802 寄存器 24）采样周期 ----------
+ * 锁屏/收件箱显示的 RSSI/SNR 来自这里：周期采样 + 取接收窗口峰值。
+ * 置 0 表示完全不采样（界面上 RSSI/SNR 显示 --）——用于排查
+ * "I2C 读取是否干扰了解码"这类问题（读失败会触发总线恢复脉冲）。 */
+#ifndef BBCALL_SMETER_POLL_MS
+#define BBCALL_SMETER_POLL_MS 100u
+#endif
+
 /* ---------- 锁屏页默认墙钟（无 RTC 时用） ----------
  * 开机即从这一刻走：大格显示 HH:MM，下一行显示 周W M/D。
  * 置 BBCALL_WALLCLOCK_ENABLE 0 则退回"开机时长 UP HH:MM"（design.md 的原始留白做法）。

@@ -23,7 +23,7 @@ static uint32_t s_bl_off_at;   /* 背光熄灭时刻（0 = 已灭） */
  * 单次读还有失败概率（bk4802_read_reg 内部已重试 3 次 + 总线恢复）。
  * 改成每 100ms 采一次，记录最近 1 秒内的峰值：解出帧时用"接收窗口内的峰值"，
  * 既是这包的真实强度，也不怕单次读失败。 */
-#define RF_POLL_MS      100u
+#define RF_POLL_MS      BBCALL_SMETER_POLL_MS   /* 0 = 不采样（见 bbcall_cfg.h） */
 #define RF_PEAK_WIN_MS  1000u
 #define RF_PEAK_USE_MS  1500u
 static uint8_t  s_rf_rssi, s_rf_snr;        /* 最近一次有效读数 */
@@ -38,7 +38,11 @@ static uint16_t s_rf_ok_cnt, s_rf_fail_cnt, s_rf_last_raw = 0xFFFFu;
 static void rf_smeter_poll(void)
 {
   uint32_t now = HAL_GetTick();
+#if RF_POLL_MS == 0
+  return;                                  /* 采样已关闭：只保留"最近有效值"的兜底逻辑 */
+#else
   if ((uint32_t)(now - s_rf_last_ms) < RF_POLL_MS) return;
+#endif
   s_rf_last_ms = now;
   uint16_t r24 = bk4802_read_reg(24);
   s_rf_last_raw = r24;
