@@ -68,15 +68,20 @@
 
 ## 3. 软件结构
 
+架构总览（含 STM32F103C8T6 引脚分配，渲染脚本 `tools/render_architecture.py`）：
+
+![BBcall_APRS 架构总览](docs/architecture.png)
+
 | 文件 | 作用 |
 |---|---|
 | `Core/Src/bbcall_hw.c` | 时钟(72MHz)/延时/GPIO/寄存器级 USART3/ADC1/TIM3 |
 | `Core/Src/bk4802.c` | BK4802 位敲 I2C、RX 配置、频率字、增益、静噪 |
 | `Core/Src/modem.c` | ADC 采样 → 1200/2200Hz 定点相关判频 → NRZI → 16 相位并行 HDLC + 跳变对齐位时钟 |
 | `Core/Src/ax25.c` | CRC-16/X.25、HDLC 去填充、AX.25 地址/控制/PID/信息解析 |
-| `Core/Src/aprs.c` | APRS 消息解析（信息域以 `:` 开头） |
-| `Core/Src/lcd_st7567.c` | ST7567 驱动 + 8x16 字体（未启用） |
-| `Core/Src/bbcall_app.c` | 初始化、主循环、串口诊断/解码输出 |
+| `Core/Src/aprs.c` | APRS 消息/位置/Mic-E 解析 |
+| `Core/Src/lcd_st7567.c` | ST7567 位敲 SPI 驱动 + 绘图原语（`BBCALL_LCD_ENABLED` 控制启用） |
+| `Core/Src/ui_harness.c` | 三态界面（待机/有未读/收件箱）与按键状态机；模拟器与真机单源共用 |
+| `Core/Src/bbcall_app.c` | 初始化、主循环、串口诊断/解码输出、UI 接线（按键/背光/喂帧） |
 
 信号链：
 
