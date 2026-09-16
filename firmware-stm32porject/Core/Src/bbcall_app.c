@@ -61,16 +61,39 @@ static void rf_smeter_poll(void)
   }
 }
 
-/* 解出一帧时把强度注入 UI：窗口内峰值优先，其次最近一次有效读数，都没有才 -- */
-static void rf_apply_for_frame(void)
+/* 解出一帧时决定这条消息显示的 RSSI/SNR（返回 1 = 用的是"解码当刻"直读值，0 = 用了兜底）：
+ *   1) 先直读一次寄存器 24（bk4802_read_reg 内部已重试 3 次 + 总线恢复）——这就是这包解出来时的读数；
+ *   2) 读失败（0xFFFF / RSSI>127）退回接收窗口（1s）峰值——包刚结束，S-meter 未必还停在原值上；
+ *   3) 峰值也过期就退回最近一次有效采样；一次有效采样都没有才 --。 */
+static uint8_t rf_apply_for_frame(void)
 {
   uint32_t now = HAL_GetTick();
-  if (s_rf_valid && ((uint32_t)(now - s_rf_pk_ms) <= RF_PEAK_USE_MS))
-    ui_set_radio_stats((int16_t)s_rf_pk_rssi, (int16_t)s_rf_pk_snr);
-  else if (s_rf_valid)
+  uint16_t r24 = bk4802_read_reg(24);
+  s_rf_last_raw = r24;
+  if ((r24 != 0xFFFFu) && ((uint8_t)(r24 & 0x00FFu) <= 127u)) {
+    s_rf_rssi = (uint8_t)(r24 & 0x00FFu);
+    s_rf_snr  = (uint8_t)((r24 & 0x3F00u) >> 8);
+    s_rf_valid = 1u;
+    if (s_rf_ok_cnt < 0xFFFFu) s_rf_ok_cnt++;
+    if (((uint32_t)(now - s_rf_pk_ms) > RF_PEAK_WIN_MS) || (s_rf_rssi >= s_rf_pk_rssi)) {
+      s_rf_pk_rssi = s_rf_rssi;
+      s_rf_pk_snr  = s_rf_snr;
+      s_rf_pk_ms   = now;
+    }
     ui_set_radio_stats((int16_t)s_rf_rssi, (int16_t)s_rf_snr);
-  else
-    ui_set_radio_stats((int16_t)-32768, (int16_t)-32768);
+    return 1u;
+  }
+  if (s_rf_fail_cnt < 0xFFFFu) s_rf_fail_cnt++;
+  if (s_rf_valid && ((uint32_t)(now - s_rf_pk_ms) <= RF_PEAK_USE_MS)) {
+    ui_set_radio_stats((int16_t)s_rf_pk_rssi, (int16_t)s_rf_pk_snr);
+    return 0u;
+  }
+  if (s_rf_valid) {
+    ui_set_radio_stats((int16_t)s_rf_rssi, (int16_t)s_rf_snr);
+    return 0u;
+  }
+  ui_set_radio_stats((int16_t)-32768, (int16_t)-32768);
+  return 0u;
 }
 
 static void ui_backlight_wake(void)
@@ -302,11 +325,8 @@ void bbcall_app_loop(void)
     static ax25_decoded_t d;
     if (ax25_decode(fr.frame, fr.len, &d)) {
 #if BBCALL_LCD_ENABLED
-      /* 解码当刻读 S-meter（BK4802 寄存器 24）：低 8 位 RSSI(0..127)、bit13:8 SNR(0..63)，
-       * 与串口那行 R19= 同源。这是芯片原始读数，不是标定过的 dBm。
-       * 读失败（0xFFFF / RSSI>127）先重试 3 次，仍失败就退回 2s 轮询缓存的最近一次有效值；
-       * 一次有效采样都没有时才注入"无采样"，界面显示 --。 */
-      rf_apply_for_frame();        /* 用接收窗口内的 S-meter 峰值，见上面说明 */
+      /* 解码当刻取这条消息的 RSSI/SNR：先直读寄存器 24，读失败才用采样窗口兜底（见函数说明） */
+      uint8_t rf_fresh = rf_apply_for_frame();
       if (ui_feed_ax25(fr.frame, fr.len, BBCALL_WALLCLOCK_BASE_MS + now_ms,   /* 与锁屏同一基准 */
                        modem_frame_was_fixed() ? 1u : 0u,
                        modem_frame_was_repeat() ? 1u : 0u)) {
@@ -337,6 +357,7 @@ void bbcall_app_loop(void)
       if (s_rf_valid) {
         hw_console_puts(" RSSI="); hw_console_u8(s_rf_rssi);
         hw_console_puts(" SNR=");  hw_console_u8(s_rf_snr);
+        hw_console_puts(rf_fresh ? " (decode-now)" : " (peak-fallback)");
       } else {
         hw_console_puts(" RSSI=-- SNR=--");
       }
