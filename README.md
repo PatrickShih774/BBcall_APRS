@@ -354,7 +354,15 @@ UI 与数据侧：
 - **位置帧正文改为注释优先**：经纬度在「有未读」页右上有专用格子，正文再抄一遍会把真正的消息文字挤进滚动区；有注释就只放注释，纯信标才回退成「经纬度 + 类型 + 速度/航向」。
 - **无串口时的观测手段**：`s_rf_ok_cnt / s_rf_fail_cnt / s_rf_last_raw`（S-meter 采样成功/失败次数与最近原始值）可以用 ST-Link 的 Live Expressions 直接看，变量名在 GDB 里写 `文件.c::变量名`；`ui_harness.c::s_box[0]` 能看到屏上那条消息的全部字段。**SWO 用不了**：SWO 是 PB3，已经被 LCD 当 SCLK 占用。
 
-内存：v2.0 UI 接进来后 RAM 吃紧，`UI_INBOX_MAX 24→16`、`UI_BODY_MAX 96→64`、`_Min_Stack_Size 0x800→0x600`（详见 design.md §6.3）。当天收尾时 `text=56888 / data=132 / bss=20212`。
+内存：v2.0 UI 接进来后 RAM 吃紧，`UI_INBOX_MAX 24→16`、`UI_BODY_MAX 96→64`、`_Min_Stack_Size 0x800→0x600`（详见 design.md §6.3）。
+
+**当天收尾的实机验证**：`text=57056 / data=132 / bss=20220` 这一版在实机上**解码正常**（连续收包成功）。
+这条结论顺带排除了一个怀疑：每 100ms 读一次 BK4802 寄存器 24（S-meter）连同读失败时的总线恢复脉冲，
+都不会干扰 RF → 音频 → ADC → 解调 这条链路，因此 RSSI/SNR 的采样方案保留。
+漏包的主要瓶颈仍在射频前端（天线直连 BK4802、无匹配无滤波），见第 9 节。
+
+> 排查过程中还留了一个对照固件：`Debug/BBCall_APRS_nosmeter.hex`（`BBCALL_SMETER_POLL_MS=0`，完全不采样 S-meter），
+> 以后再怀疑 I2C 影响解码时可以拿它做 A/B。
 
 ---
 
