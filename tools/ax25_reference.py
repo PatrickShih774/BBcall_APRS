@@ -76,6 +76,28 @@ def bitstuff_bytes(data: bytes) -> bytearray:
     return out
 
 
+def bitstuff_bits(data: bytes):
+    """位填充，返回**比特列表**（不按字节补齐）。
+
+    为什么需要它：bitstuff_bytes() 把填充后的比特流按整字节打包，当填充后
+    的位数不是 8 的整数倍时，收尾 flag 前会多出 0~7 个 0 位，接收端会把这
+    些位当成帧内容 -> 帧长度错、CRC 校验失败。发音频必须用本函数逐位输出。
+    """
+    out = []
+    ones = 0
+    for b in data:
+        for i in range(8):                    # AX.25 发送顺序：LSB first
+            bit = (b >> i) & 1
+            out.append(bit)
+            if bit:
+                ones += 1
+                if ones == 5:                 # 连续 5 个 1 后插 0
+                    out.append(0)
+                    ones = 0
+            else:
+                ones = 0
+    return out
+
 def de_stuff(bits) -> bytes:
     """去填充：连续 5 个 1 后的 0 丢弃（LSB-first）"""
     data = bytearray()
