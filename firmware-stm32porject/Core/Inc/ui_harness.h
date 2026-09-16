@@ -12,8 +12,12 @@
 #define UI_SCREEN_INBOX   3
 #define UI_SCREEN_PATTERN 5
 
-#define UI_INBOX_MAX 24
-#define UI_BODY_MAX  96   /* UTF-8 字节；APRS 信息域上限 67 字符，中文按 3 字节计有余量 */
+/* 收件箱容量与正文字节上限由 RAM 预算定，不是设计常量（design.md 第 9 节明确不锁死容量）。
+ * STM32F103C8T6 只有 20KB RAM，而 modem 的 16 相位 + 9 跳变对齐要占 9.8KB：
+ * 24 条 x 184 字节的条目会让链接脚本报 region RAM overflowed by 2400 bytes。
+ * 16 条 x 144 字节后可链接通过，并留出约 0.3KB 余量。 */
+#define UI_INBOX_MAX 16
+#define UI_BODY_MAX  64   /* UTF-8 字节；收件箱每行 21 格、最多 4 行，64 字节刚好够两次换行 */
 
 /* design.md §9：设备只有 ▲ ▼ ● 三个键；● 长按(620ms)与短按互斥。
  * 键码定义在设备层（ui_harness），模拟器 lcd_sim 负责把 SDL 事件翻译过来。 */
@@ -39,6 +43,8 @@ void     ui_set_radio_stats(int16_t rssi_dbm, int16_t snr);
 
 /* 注入一帧 CRC 正确的 AX.25 帧（modem 解调或串口日志回放）。
  * 入箱时捕获当前 RSSI/SNR；ackNNN 送达确认只计数、不进收件箱。
+ * 入箱成功会立即切到"有未读"页并重绘（design.md 第 9 节：待机 -> 收包 -> 有未读），
+ * 不等 ui_tick 的冒号闪烁；已经在收件箱里则不抢焦点。
  * 返回 1 = 入箱，0 = 丢弃（CRC 失败由调用方保证不发生；重复/ack 返回 0）。 */
 uint8_t  ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
                       uint8_t fixed, uint8_t repeat);
@@ -47,5 +53,6 @@ uint16_t ui_inbox_count(void);
 uint16_t ui_unread_count(void);
 uint16_t ui_rx_total(void);
 uint16_t ui_dup_total(void);
+uint8_t  ui_current_screen(void); /* 状态机当前页：UI_SCREEN_IDLE/UNREAD/INBOX */
 uint32_t ui_clock_ms(void);        /* 当前设备时钟（demo 数据按它回推接收时刻） */
 #endif
