@@ -495,12 +495,12 @@ void ui_handle_key(int key)
       if (key == SIM_KEY_UP || key == SIM_KEY_DOWN) {
         /* 死键：这两态没有可移动的焦点，屏幕不做任何反应（design.md §9） */
       } else if (key == SIM_KEY_OK) {
-        if (s_count > 0u) {
-          s_view = UI_SCREEN_INBOX;
-          s_idx = 0u;               /* 焦点落在第一条（最新在上） */
-          s_vscroll = 0u;
-          redraw();
-        }
+        /* design.md §9：待机/有未读 ● 短按就进收件箱，空箱也要进（显示"无消息 0 / 0"），
+         * 否则用户按下去只有背光会亮、屏幕上没有任何反馈。 */
+        s_view = UI_SCREEN_INBOX;
+        s_idx = 0u;                 /* 焦点落在第一条（最新在上） */
+        s_vscroll = 0u;
+        redraw();
       } else if (key == SIM_KEY_OK_LONG) {
         /* 已是最外层：设备上无反应（原型里的提示在演示读数条，不是屏幕内容） */
       }

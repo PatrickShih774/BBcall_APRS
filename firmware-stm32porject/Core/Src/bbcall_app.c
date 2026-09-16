@@ -75,6 +75,15 @@ static void ui_backlight_wake(void)
   s_bl_off_at = HAL_GetTick() + 15000u;   /* 任意按键后背光亮 15s */
 }
 
+/* 按键诊断（没有串口时用 ST-Link 的 Live Expressions 看）：
+ *   s_key_up_cnt / s_key_down_cnt   ▲▼ 触发次数
+ *   s_key_ok_cnt / s_key_oklong_cnt ● 短按 / 长按次数
+ *   s_key_last_ms                   最近一次 ● 的按住时长（ms）——判断是否被误判成长按
+ *   s_key_last_raw                  最近一次 ● 松开时读到的原始电平（1=未按） */
+static uint16_t s_key_up_cnt, s_key_down_cnt, s_key_ok_cnt, s_key_oklong_cnt;
+static uint16_t s_key_last_ms;
+static uint8_t  s_key_last_raw = 1u;
+
 static void ui_keys_poll(void)
 {
   static const struct { GPIO_TypeDef *g; uint16_t p; } K[3] = {
@@ -101,9 +110,19 @@ static void ui_keys_poll(void)
     if (r == 0u) {                            /* 按下沿 */
       down_ms[i] = now;
       rep_ms[i]  = now;
-      if (i < 2u) { ui_handle_key(i == 0u ? SIM_KEY_UP : SIM_KEY_DOWN); ui_backlight_wake(); }
+      if (i < 2u) {
+        if (i == 0u) { if (s_key_up_cnt   < 0xFFFFu) s_key_up_cnt++;   }
+        else         { if (s_key_down_cnt < 0xFFFFu) s_key_down_cnt++; }
+        ui_handle_key(i == 0u ? SIM_KEY_UP : SIM_KEY_DOWN);
+        ui_backlight_wake();
+      }
     } else if (i == 2u) {                     /* ● 松开沿：短按/长按互斥 */
-      ui_handle_key(((uint32_t)(now - down_ms[i]) >= 620u) ? SIM_KEY_OK_LONG : SIM_KEY_OK);
+      uint32_t held = (uint32_t)(now - down_ms[i]);
+      s_key_last_ms  = (held > 0xFFFFu) ? 0xFFFFu : (uint16_t)held;
+      s_key_last_raw = r;
+      if (held >= 620u) { if (s_key_oklong_cnt < 0xFFFFu) s_key_oklong_cnt++; }
+      else              { if (s_key_ok_cnt     < 0xFFFFu) s_key_ok_cnt++;     }
+      ui_handle_key((held >= 620u) ? SIM_KEY_OK_LONG : SIM_KEY_OK);
       ui_backlight_wake();
     }
   }
