@@ -154,6 +154,8 @@ int main(int argc, char **argv)
       if (*q == ',') q++;
     }
     printf("\n");
+    /* 按键之后再报一次当前页，便于自检断言按键结果（1=待机 2=有未读 3=收件箱） */
+    printf("[sim] 按键后状态机当前页 = %u\n", (unsigned)ui_current_screen());
   }
   lcd_sim_render();
 
