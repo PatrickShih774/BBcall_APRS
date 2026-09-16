@@ -329,6 +329,33 @@ APRS 消息类型（信息域以 `:` 开头）会多一行：
  msg=Hello APRS 144.640
 ```
 
+### 4.11 实机联调：LCD 点亮 → 三态 UI → 帧级 RSSI/SNR（2026-09-16）
+
+屏焊上之后逐条排障，这一节是当天的完整记录（现象 → 原因 → 改法）。
+
+| 现象 | 原因 | 改法 |
+|---|---|---|
+| **背光亮、屏上一个字都没有** | 初始化只发了 `0x2C`：电源控制 `0x28|VC<<2|VR<<1|VF` 只开了电压转换 VC，稳压 VR 与电压跟随 VF 都是关的，V0 建立不起来 | 按 `0x2C → 0x2E → 0x2F` 逐级打开（每级留 2ms），`0x2F` 之后 V0 才到位 |
+| **屏全黑（连全白都没有）** | PB3/PB4 复位后是 JTAG 的 JTDO/NJTRST，工程里没关 JTAG，这两个脚不受 GPIO 控制 | `HAL_MspInit()` 里加 `__HAL_AFIO_REMAP_SWJ_NOJTAG()`（关 JTAG-DP、保留 SW-DP，ST-Link 烧录调试不受影响） |
+| **文字左右镜像** | 本机模组 SEG 走线是反的 | `lcd_init()` 发 `0xA1`（正装）/ `0xA0`（180° 安装） |
+| **画面整体左偏 4 像素** | 模组是 132 列驱动 + 128 列面板，可见 SEG 从芯片内部第 4 列开始 | `lcd_flush()` 列起点 = `bbcall_cfg.h` 的 `LCD_COL_OFFSET`（正装 4，180° 安装 0） |
+| **面板要 180° 安装** | 180° = 上下 + 左右一起翻 | `LCD_MOUNT_180=1`：SEG 与 COM 同时反向，列偏移自动换到另一端 |
+| 对比度偏浓 | 初始 0x24 偏大 | 改 0x12（`0x81` 后的字节，范围 0x00~0x3F） |
+| 焊好后想快速判断屏通不通 | 没有自检手段 | `LCD_BOOT_FLASH=1`：上电全屏点亮 300ms 再清屏；只有硬件侧（PSB/CS/RST/V0/对比度）有问题才看不到这一下 |
+
+UI 与数据侧：
+
+- **收包立即切页**：`ui_feed_ax25()` 入箱后立刻把待机/有未读态切成「有未读」页并重绘（design.md §9 的状态机），不再等 `ui_tick` 的冒号闪烁；正在收件箱里则不抢焦点，只把光标后移一位（新条插队首，看的还是原来那条）。实测：解码一帧后的画面与强制 `--screen unread` **逐字节一致**。
+- **新消息点亮背光**：入箱成功（非重复包、非 ackNNN）点亮 15s，否则背光超时后新消息刷了也看不见；`ui_key_event()` 因此改名 `ui_backlight_wake()`。
+- **锁屏默认墙钟**：`bbcall_cfg.h` 的 `BBCALL_WALLCLOCK_*`（出厂 20:45 / 周三 9/16），开机即从这一刻走；帧时间戳用同一基准（`BBCALL_WALLCLOCK_BASE_MS + now_ms`），收件箱时间戳才对得上。`BBCALL_WALLCLOCK_ENABLE 0` 退回 `UP HH:MM` 开机时长。
+- **呼号带 SSID**：解出 `BG5BLB-12` 时屏幕与串口都写 `BG5BLB-12`（`src[12]`）。
+- **帧级 RSSI/SNR**：解码当刻取 BK4802 寄存器 24（低 8 位 RSSI 0..127、bit13:8 SNR 0..63，与串口 `R19=` 同源）随这条消息入箱。**是芯片原始读数，不是标定 dBm**。单次 I2C 读会随机失败（日志里的 `R19=65535` 就是读回 0xFFFF），所以改成每 100ms 采样 + 取接收窗口（1s）峰值：某次读失败只计数、不影响取值，窗口内成功一次就够。
+- **UTF-8 截断 bug**：`utf8_clip_tail()` 前几版会把结尾一个**完整**汉字也删掉（位置帧注释末尾丢字），已改成按「尾部这一串字节数够不够一个完整字符」判断。
+- **位置帧正文改为注释优先**：经纬度在「有未读」页右上有专用格子，正文再抄一遍会把真正的消息文字挤进滚动区；有注释就只放注释，纯信标才回退成「经纬度 + 类型 + 速度/航向」。
+- **无串口时的观测手段**：`s_rf_ok_cnt / s_rf_fail_cnt / s_rf_last_raw`（S-meter 采样成功/失败次数与最近原始值）可以用 ST-Link 的 Live Expressions 直接看，变量名在 GDB 里写 `文件.c::变量名`；`ui_harness.c::s_box[0]` 能看到屏上那条消息的全部字段。**SWO 用不了**：SWO 是 PB3，已经被 LCD 当 SCLK 占用。
+
+内存：v2.0 UI 接进来后 RAM 吃紧，`UI_INBOX_MAX 24→16`、`UI_BODY_MAX 96→64`、`_Min_Stack_Size 0x800→0x600`（详见 design.md §6.3）。当天收尾时 `text=56888 / data=132 / bss=20212`。
+
 ---
 
 ## 5. 串口诊断字段说明
@@ -401,9 +428,28 @@ python tools/gen_afsk_wav.py tools/test_aprs_144.wav
 
 # 生成带 VOX 触发的版本（150ms 触发音 + 150ms 保持音 + 数据）
 python tools/gen_afsk_wav.py --vox tools/test_aprs_144_vox.wav
+
+# 指定呼号(可带 SSID) + APRS 消息（屏幕上显示成 呼号 + 正文）
+python tools/gen_afsk_wav.py --src BG5BLB-12 --addressee BG5BLH ^
+    --msg "有内鬼 停止交易" -o tools/test_bg5blb12_msg.wav
+
+# 位置帧：随机经纬度 + 注释文字（未读页会显示经纬度）
+python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 ^
+    --comment "有内鬼 停止交易" -o tools/test_bg5blb12_pos.wav
 ```
 
-`tools/test_aprs_144.wav` 的内容是 `APRS → BG5BLH` 的 APRS 消息：
+`tools/test_aprs_144.wav` 的内容是 `APRS → BG5BLH` 的 APRS 消息。实机测试用的是**标准位置帧**：
+`tools/test_bg5blb12.wav`（一条包同时带呼号 `BG5BLB-12`、经纬度 `3952.49N/12028.55E`、注释「有内鬼 停止交易」）；
+另有两个变体：`test_bg5blb12_msg.wav`（`:` 消息帧，只有正文、不带位置）、`test_bg5blb12_pos.wav`（同位置帧），
+都各有一份 `_vox` 版本（前面加 150ms 触发音 + 150ms 保持音）。
+
+> **修过的坑**：`bitstuff_bytes()` 把填充后的比特流按整字节打包，当填充后比特数不是 8 的倍数时，
+> 收尾 flag 前会多出 0~7 个 0 位，接收端把它们当成帧内容 -> 帧长错、CRC 失败（位置帧最容易命中，
+> 现象是"怎么都解不出"）。已新增位级填充 `bitstuff_bits()` 并改用它；原先那条 `Hello APRS 144.640` 
+> 恰好字节对齐，所以这个 bug 一直没暴露。
+
+主机侧用仓库里的 `tools/verify_ui.py` 可以逐像素核对屏幕内容（呼号/经纬度/正文/RSSI/SNR）；
+模拟器加了 `--rf R,S`，复现真机"解码当刻取到 RSSI/SNR"的那条路径。
 
 ```
 :BG5BLH   :Hello APRS 144.640
@@ -443,11 +489,11 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 
 ### 8.2 审计修复
 
-- 栈安全：`bbcall_app_loop` 栈 1120→80B，`modem_adc_sample` 416→88B，大缓冲改静态；`_Min_Stack_Size=0x800`；
+- 栈安全：`bbcall_app_loop` 栈 1120→80B，`modem_adc_sample` 416→88B，大缓冲改静态；`_Min_Stack_Size=0x600`（v2.0 UI 实测最大单帧 576→320B）；
 - 采样计数器 Q8 时间改为 32 位回绕安全比较，避免约 14.6 分钟后溢出；
 - AX.25 解码增加 `idx+4 > len` 边界检查，避免 `info_len` 下溢越界；
 - ADC 中断等待加 2000 次超时，超时丢弃本次采样，避免死等；
-- `AX25_MAX_FRAME 330→256`，RAM 余量约 4.3KB，为 LCD 留空间；
+- `AX25_MAX_FRAME 330→256`；LCD 三态界面接进来之后 RAM 已经吃满（见下方 v2.0 条目），收件箱容量按 RAM 反推为 16 条；
 - 启用 IWDG 2 秒看门狗（调试暂停时冻结）；
 - I2C 增加 ACK 校验、3 次重试、9 脉冲总线恢复与 `I2CE` 计数；
 - 参考帧恢复阈值 8→4 bit，降低误恢复风险；
@@ -614,8 +660,19 @@ powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # �
 `--selftest` 写出 BMP（默认 512×256，即 4 倍放大）。实测图案页正确显示 4×4 棋盘、两条对角线，
 以及反白文字 `ST7567 SIM` / `128x64 LCD`；详情页与 `draw_detail()` 的期望绘制**逐像素差异为 0**。
 
-**已修复：屏幕水平翻转。** 固件 `lcd_init()` 原先发送 `0xA1`（SEG/ADC 段反向），配合 `0xC0`（COM 正常）
-会让整屏左右镜像，文字全部反着显示。现改为 `0xA0` + `0xC0`，画面正常。模拟器按状态机忠实复现，实测：
+**列偏移：本机模组要右移 4 像素。**
+**安装方向：本机面板是 180° 安装。** 180° = 上下 + 左右一起翻，所以 SEG 与 COM 同时反向：
+`lcd_init()` 发 `0xA0` + `0xC8`（正装是 `0xA1` + `0xC0`），列起点也随 ADC 方向换到另一端
+（`LCD_COL_OFFSET` 变成 0）。开关是 `bbcall_cfg.h` 里的 `LCD_MOUNT_180`（1 = 180° 安装）。
+模拟器按同一安装方向建模，预览就是用户实际看到的方向。
+
+**列偏移：本机模组 132 列驱动 / 128 列面板。** 模组是 132 列驱动 + 128 列面板，可见 SEG 从芯片内部第 4 列开始，
+按常规从第 0 列写会让画面整体左偏 4 像素。`lcd_flush()` 现在从 `LCD_COL_OFFSET`（`bbcall_cfg.h`，默认 4）
+指定的列开始写，模拟器按同一块屏建模（列地址 0..131，可见列 = 芯片列 - 偏移），所以预览画面不变。
+
+**屏幕方向：实板结论是 SEG 反向。** 本机 LCD 模组的 SEG 走线是反的：发 `0xA0`+`0xC0` 时实板整屏
+左右镜像，改成 **`0xA1` + `0xC0`** 后实板正常（屏焊上后实测）。模拟器按同一块屏建模
+（`lcd_sim.c` 的 `s_panel_flip = 1`），两边相消后预览与实机一致，`--selftest` 的期望画面不变：
 
 ```text
 y0   |BBCALL APRS RX  |      y0   |MSG BG5BLH      |
@@ -625,7 +682,8 @@ y48  |BD4BE  POS      |      y48  |1/1             |
 ```
 
 常见 ST7567 模板是 `0xA1`+`0xC8`（两者成对反向）或 `0xA0`+`0xC0`（都正常）；
-`0xA1`+`0xC0` 这种混搭正好只剩左右镜像。模拟器里按 `F3` 仍可切换对比两种朝向。
+`0xA1`+`0xC0` 只剩左右镜像，正好抵消这块模组的反接。对比度是 `lcd_init()` 里的 `0x81` 参数
+（当前 0x12，范围 0x00~0x3F）。模拟器里按 `F3` 可切换对比两种朝向。
 
 ### 13.4 三种数据源（S2 + S3）
 
@@ -757,8 +815,9 @@ python tools\gen_font.py --bdf tools\bdf\7x13.bdf --w 8 --h 16 `
   生成 `firmware-stm32porject/Core/Inc/fusion_font.h`；与旧 `gen_font.py` ASCII 字模混用不允许（design.md §3）。
 - 界面状态机在 `firmware-stm32porject/Core/Src/ui_harness.c`（三态，模拟器与真机单源共用）；绘图原语（`lcd_fill_rect` / `lcd_hline` /
   `lcd_vline` / 反显填充 / Fusion Pixel 字模绘制）在固件 `lcd_st7567.c`，**真机与模拟器同一份代码**。
-- 数据全部诚实显示、无采样就留白（design.md §12）：无 RTC 时日期行显示开机时长（`UP HH:MM`）；
-  本板无电池采样电路，电量位显示 `--`；RSSI/SNR 只在有注入时显示，日志回放的未标定
+- 数据全部诚实显示、无采样就留白（design.md §12）；锁屏默认墙钟由 `bbcall_cfg.h` 的 `BBCALL_WALLCLOCK_*` 给出
+  （出厂值 **20:45 / 周三 9/16**，`BBCALL_WALLCLOCK_ENABLE 0` 则退回 `UP HH:MM` 开机时长）；
+  本板无电池采样电路，电量位显示 `--`；真机 RSSI/SNR 取解码当刻的 BK4802 寄存器 24 原始读数（低 8 位 RSSI、bit13:8 SNR，与串口 `R19=` 同源），随帧存进条目一起显示，读失败显示 `--`（原始读数，非 dBm）；模拟器只在 `--demo` 里注入已标定样例值，日志回放的未标定
   原始寄存器值不注入，显示 `--`。
 
 消息界面的数据规则（最新在上、`NOW`/`12m`/`3h` 年龄列、未读 `*`、60s 重复包抑制）参考
