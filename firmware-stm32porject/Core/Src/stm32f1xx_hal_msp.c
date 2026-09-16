@@ -74,6 +74,10 @@ void HAL_MspInit(void)
 
   /* USER CODE BEGIN MspInit 1 */
 
+  /* LCD 的 SCLK=PB3、A0=PB4 复位后默认是 JTAG 的 JTDO/NJTRST：不关 JTAG 这两个脚
+   * 就不受 GPIO 控制，屏幕会全黑/不刷新。这里关掉 JTAG-DP、保留 SW-DP（PA13/PA14），
+   * 所以 ST-LINK 用 SWD 烧录调试不受影响。CubeMX 里等价于 SYS -> Debug = Serial Wire。 */
+  __HAL_AFIO_REMAP_SWJ_NOJTAG();
   /* USER CODE END MspInit 1 */
 }
 

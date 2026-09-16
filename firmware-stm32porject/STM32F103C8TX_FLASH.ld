@@ -39,7 +39,7 @@ ENTRY(Reset_Handler)
 _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
 
 _Min_Heap_Size = 0x200; /* required amount of heap */
-_Min_Stack_Size = 0x800; /* required amount of stack */
+_Min_Stack_Size = 0x600; /* required amount of stack：实测最大单帧 576B（UI 换行缓存），链路 main->loop->key->draw 约 0.9KB */
 
 /* Memories definition */
 MEMORY
