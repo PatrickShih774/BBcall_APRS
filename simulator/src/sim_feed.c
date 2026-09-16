@@ -39,12 +39,22 @@ static int32_t adc_from_s16(int32_t v)
   return a;
 }
 
+/* 真机在解码当刻读 BK4802 寄存器 24 再入箱；这里用 --rf 复现同一条路径 */
+static int s_rf_rssi = -1, s_rf_snr = -1;
+
+void sim_feed_set_rf(int rssi, int snr)
+{
+  s_rf_rssi = rssi;
+  s_rf_snr  = snr;
+}
+
 static int drain_frames(uint32_t t_ms, int *count)
 {
   ax25_frame_t fr;
   while (modem_get_frame(&fr)) {
     uint8_t fixed = modem_frame_was_fixed();
     uint8_t rep   = modem_frame_was_repeat();
+    if (s_rf_rssi >= 0) ui_set_radio_stats((int16_t)s_rf_rssi, (int16_t)s_rf_snr);
     if (ui_feed_ax25(fr.frame, fr.len, t_ms, fixed, rep)) (*count)++;
   }
   return *count;
