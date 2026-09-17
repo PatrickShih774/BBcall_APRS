@@ -1,33 +1,42 @@
-# BBcall_APRS
-
-> **应用参考 / Application Reference**
->
-> 本项目的参考项目与工程底座是 **[MM-Radio](https://github.com/doublehan07/MM-Radio)**
-> （BSD 2-Clause License，Copyright (c) 2024 Han Zhang）。
-> 工程结构、BK4802 驱动思路和部分寄存器初始化参考/移植自 MM-Radio；
-> 依据 BSD-2-Clause 保留原作者版权与许可声明，详见「许可与合规」。
-> 本项目自身以 **GPL-3.0** 发布（见根目录 `LICENSE`）。
-> 许可证兼容性：**BSD-2-Clause → GPL-3.0 兼容**，不冲突。
-
-### 快速导航
-
-- [硬件/引脚](#2-引脚分配)
-- [调试全过程（含所有踩坑记录）](#4-调试过程记录)
-- [串口输出说明](#5-串口诊断字段说明)
-- [硬件改进方案](#9-硬件改进方案提升解码率)
-- [BB 机功能规划](PLAN.md)
-- [PC LCD 模拟器](#13-pc-端-lcd-模拟器sdl2)
-- [UI 设计规范 design.md](design.md)
-- [许可与合规](#11-许可与合规)
+﻿# BBcall_APRS
 
 用 **BK4802P（玩具对讲 FM 收发芯片）+ STM32F103C8T6 + ST7567 12864 LCD**
 复刻一台 APRS 寻呼机（BB 机）。仅接收（RX-only），默认频率 **144.640MHz**，
 目标是把空中收到的 APRS 数据包解出来并显示在 LCD 上。
 
-当前状态：**RF → 音频 → ADC → 判频 → NRZI → HDLC → AX.25 → APRS 全链路已打通**；v0.3 起支持 Mic-E/普通位置解析、1/2-bit CRC 纠错、重复包辅助恢复、解码时间戳、看门狗与 I2C 健壮性，
-已用实机收到并解析真实 APRS 数据包（见下文「成功解码记录」）；经解码算法优化（幅度门限 20000→500、16 相位、跳变对齐位时钟）后成功率大幅提升。LCD 尚未焊接，
-当前通过 USART3（PB10/PB11，115200）输出调试信息。硬件前端目前是"天线直接接 BK4802 ANT 脚、无滤波/匹配"，这是当前弱信号解码率的主要瓶颈，改进方案见第 9 节。
+**当前状态**：RF → 音频 → ADC → 判频 → NRZI → HDLC → AX.25 → APRS 全链路已打通；
+实机可解真实 APRS 数据包（见 [§4.10](#410-成功解码记录)）；LCD 已点亮、三态 UI 真机联调通过；
+解码优化（幅度门限 20000→500、16 相位、跳变对齐位时钟）后成功率大幅提升；
+射频前端无滤波/匹配是当前弱信号解码率的主要瓶颈（改进方案见 [第 9 节](#9-硬件改进方案提升解码率)）。
 
+---
+
+## 目录
+
+| # | 章节 | 内容 |
+|---|---|---|
+| 1 | [关键决策](#1-关键决策原开放问题已确定) | MCU / 射频芯片 / 频率 / 收发 / 显示 / 调试口 |
+| 2 | [引脚分配](#2-引脚分配) | BK4802 / LCD / 按键 / 串口 / ADC 全引脚表 |
+| 3 | [软件结构](#3-软件结构) | 文件表 / 架构图 / 信号链 |
+| 4 | [调试过程记录](#4-调试过程记录) | **全流程踩坑**：频率字 / RSSI / I2C / 音频 / AFSK 解码 / LCD 实机联调 |
+| 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出格式 |
+| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频生成 / UI 校验 |
+| 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
+| 8 | [固件功能与审计修复（v0.3）](#8-固件功能与审计修复v03) | 解码功能清单 / 审计修复 / 实测数据 |
+| 9 | [硬件改进方案](#9-硬件改进方案提升解码率) | RF 前端 / 音频链路 / 电源 / 晶振 / 发射端 |
+| 10 | [待办 / 下一步](#10-待办--下一步) | v0.4 → v1.0 路线图 |
+| 11 | [许可与合规](#11-许可与合规) | GPL-3.0 / 第三方许可兼容性 / 合规要点 |
+| 12 | [参考项目](#12-参考项目) | MM-Radio / BG5ESN / VP-Digi 等 |
+| 13 | [PC 端 LCD 模拟器（SDL2）](#13-pc-端-lcd-模拟器sdl2) | 编译 / 数据源 / UI 验收 |
+
+**相关文档**：
+
+| 文件 | 说明 |
+|---|---|
+| [PLAN.md](PLAN.md) | BB 机功能规划（按版本推进，唯一路线图） |
+| [design.md](design.md) | UI 设计规范（唯一权威规范，坐标/字模/按键全锁死） |
+| [simulator/README.md](simulator/README.md) | 模拟器详细文档（命令行参数 / 按键 / 数据源 / 构建坑） |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方组件与许可声明 |
 
 ---
 
@@ -417,7 +426,6 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
  RSSI=073 SNR=019 (peak-fallback)   # 当刻读失败，用了 1s 接收窗口峰值
  RSSI=-- SNR=--                     # 连采样都没有（界面同样显示 --）
 ```
-'| `P` | 最近一次 ADC 原始值（旧版是捕获周期，已改） |
 
 解码事件（`[T=...ms]` 为本次上电后的毫秒时间戳）：
 
@@ -436,7 +444,7 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 - `[DUP]`：60s 内重复帧（短行）；`[FIX]`/`[FIX2]`/`[REP]`：纠错或参考恢复的帧；
 - 时间戳来自 `HAL_GetTick()`，复位后从 0 开始，便于把解码事件与手工发射时刻一一对应。
 
----'
+---
 
 ## 6. 主机验证工具
 
@@ -530,6 +538,8 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 - 解码时 RSSI 89–90 / SNR 38–39 / EXN 27–31，`FIX/FIX2/REP=0`、`I2CE=0`、`G=6`（18dB）；
 - 唯一疑似漏解出现在第 3、4 次之间（间隔 3.3s，其他为 1.7–2.1s），属发射侧 MOX 时序/音频问题，不是接收灵敏度；
 - 对比：VOX 直发只有 4/10，手动 MOX 9/10，说明 VOX 时序是主要瓶颈；VOX 测试音频已增强为 150ms 触发 + 150ms 保持。
+---
+
 ## 9. 硬件改进方案（提升解码率）
 
 当前硬件：天线直接短接到 BK4802 的 ANT 脚，**没有隔直、滤波和 50Ω 匹配**。这会导致灵敏度下降、FM 广播/409MHz 玩具机等强带外信号阻塞前端、底噪升高（EXN 偏大），是当前弱信号解码率的主要瓶颈。按收益排序如下。
@@ -581,6 +591,8 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 - NanoVNA：调天线/BPF/匹配（S11<-10dB，插损<2dB）；
 - SDR/频谱仪：看 2m 附近是否有强带外信号（FM 广播、寻呼、409MHz 玩具机）；
 - 步进衰减器：测灵敏度与解码率，记录 `RSSI/EXN/RX/U/DUP/G/OT` 对比改动前后。
+---
+
 ## 10. 待办 / 下一步
 
 BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
@@ -637,6 +649,8 @@ BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
 3. **不要直接复制 BG7QKU 仓库的代码**：该仓库未声明 LICENSE，默认保留所有权利。
 4. `BK4802P.pdf` 作为 BK4802P 参考数据手册保留在仓库中；版权归 Beken 所有，仅供学习与开发参考。
 5. 本项目只做接收（RX-only）。
+---
+
 ## 12. 参考项目
 
 - [MM-Radio](https://github.com/doublehan07/MM-Radio)
@@ -646,70 +660,24 @@ BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
 
 ## 13. PC 端 LCD 模拟器（SDL2）
 
-用 SDL2 在 PC 上模拟 ST7567 128×64 单色点阵，直接编译固件里的 `lcd_st7567.c` 绘图代码，无需烧录即可看屏幕效果。
+用 SDL2 在 PC 上模拟 ST7567 128×64 单色点阵，**直接编译固件里的代码**（`lcd_st7567.c`、`ui_harness.c`、`ax25.c`、`aprs.c`、`modem.c`），无需烧录即可看屏幕效果和验证解码链路。
 
-- 代码目录：`simulator/`（CMake + `src/lcd_sim.c` + `src/ui_harness.c` + `src/main.c`）；
-- 复用固件代码：`lcd_st7567.c`、`font8x16.h`（`LCD_SIM` 条件分支），绘图逻辑与真机一致；
-- 按键：↑/↓ 上下、Enter 确定、Backspace 返回、T 测试图案、M 消息、S 待机、I 反显、B 背光、F12 截图、Esc 退出；
-- 无窗口自检：`bbcall_sim --selftest`，生成 `sim_selftest.bmp`。
+> **完整文档**：[simulator/README.md](simulator/README.md)（命令行参数 / 按键映射 / 导航模型 / 构建坑 / SEG 方向与列偏移）。
+> **UI 规范**：[design.md](design.md)（唯一权威规范：骨架 / 三态 / 硬规则 / 验证）。
 
-### 13.1 免安装构建（Windows，已在本机跑通）
-
-本机没有任何 x86 编译器 / CMake / MSYS2，因此模拟器改用**仓库自带的 TinyCC + 内置 SDL2** 构建，不需要额外安装任何东西：
+### 13.1 快速构建
 
 ```powershell
+# Windows 免安装（TinyCC + 内置 SDL2，不需要 MSVC / MinGW / CMake）
 powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1            # 只编译
-powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Selftest  # 编译 + 无窗口自检
+powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Selftest  # 编译 + 无窗口自检（写 BMP）
 powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # 编译 + 打开窗口
+
+# 其它构建方式（需自备工具链）：CMake / Makefile，命令见 simulator/README.md
+cmake -B build -S simulator && cmake --build build && ./build/bbcall_sim --scale 4
 ```
 
-- TinyCC：`third_party/tcc/`（本地免安装工具链，`.gitignore` 已排除）；
-- SDL2 2.32.10（x86_64-w64-mingw32）：`third_party/sdl2/`，含 `include/SDL2`、`bin/SDL2.dll`、`lib/libSDL2.dll.a` 与 zlib 许可 `LICENSE.txt`；
-- 产物：`simulator/build-win/bbcall_sim.exe`（脚本会把 `SDL2.dll` 一并拷到该目录）。
-
-构建过程中踩到并已解决的两个坑（脚本里已处理）：
-
-| 现象 | 原因 | 处理 |
-|---|---|---|
-| `SDL_platform.h:265: error: ';' expected (got "SDL_GetPlatform")` | TCC(x86_64) 把 `__cdecl` 当普通标识符；SDL `begin_code.h` 在 `__WIN32__ && !__GNUC__` 时把 `SDLCALL` 展开成 `__cdecl` | 编译时加 `-D__cdecl=` |
-| `libSDL2.dll.a: error: invalid object file` | TCC 的链接器解析不了新版 MinGW 生成的 GNU 导入库 | 直接链接 `bin/SDL2.dll`（TCC 会读 DLL 导出表） |
-| `could not write 'bbcall_sim.exe': Permission denied` | Windows 会锁定正在运行的 exe | 先退出模拟器窗口（Esc）再重新构建 |
-
-### 13.2 其它构建方式
-
-`simulator/CMakeLists.txt` 与 `simulator/Makefile` 仍然保留，供已装 MSYS2 / vcpkg / w64devkit 的机器使用，命令见 `simulator/README.md`。
-
-### 13.3 渲染验收
-
-`--selftest` 写出 BMP（默认 512×256，即 4 倍放大）。实测图案页正确显示 4×4 棋盘、两条对角线，
-以及反白文字 `ST7567 SIM` / `128x64 LCD`；详情页与 `draw_detail()` 的期望绘制**逐像素差异为 0**。
-
-**列偏移：本机模组要右移 4 像素。**
-**安装方向：本机面板是 180° 安装。** 180° = 上下 + 左右一起翻，所以 SEG 与 COM 同时反向：
-`lcd_init()` 发 `0xA0` + `0xC8`（正装是 `0xA1` + `0xC0`），列起点也随 ADC 方向换到另一端
-（`LCD_COL_OFFSET` 变成 0）。开关是 `bbcall_cfg.h` 里的 `LCD_MOUNT_180`（1 = 180° 安装）。
-模拟器按同一安装方向建模，预览就是用户实际看到的方向。
-
-**列偏移：本机模组 132 列驱动 / 128 列面板。** 模组是 132 列驱动 + 128 列面板，可见 SEG 从芯片内部第 4 列开始，
-按常规从第 0 列写会让画面整体左偏 4 像素。`lcd_flush()` 现在从 `LCD_COL_OFFSET`（`bbcall_cfg.h`，默认 4）
-指定的列开始写，模拟器按同一块屏建模（列地址 0..131，可见列 = 芯片列 - 偏移），所以预览画面不变。
-
-**屏幕方向：实板结论是 SEG 反向。** 本机 LCD 模组的 SEG 走线是反的：发 `0xA0`+`0xC0` 时实板整屏
-左右镜像，改成 **`0xA1` + `0xC0`** 后实板正常（屏焊上后实测）。模拟器按同一块屏建模
-（`lcd_sim.c` 的 `s_panel_flip = 1`），两边相消后预览与实机一致，`--selftest` 的期望画面不变：
-
-```text
-y0   |BBCALL APRS RX  |      y0   |MSG BG5BLH      |
-y16  |144.640 MHz     |      y16  |Hello APRS      |
-y32  |RX=13 MSG=13    |      y32  |144.640         |
-y48  |BD4BE  POS      |      y48  |1/1             |
-```
-
-常见 ST7567 模板是 `0xA1`+`0xC8`（两者成对反向）或 `0xA0`+`0xC0`（都正常）；
-`0xA1`+`0xC0` 只剩左右镜像，正好抵消这块模组的反接。对比度是 `lcd_init()` 里的 `0x81` 参数
-（当前 0x12，范围 0x00~0x3F）。模拟器里按 `F3` 可切换对比两种朝向。
-
-### 13.4 三种数据源（S2 + S3）
+### 13.2 三种数据源
 
 | 来源 | 命令 | 经过的固件代码 |
 |---|---|---|
@@ -717,148 +685,18 @@ y48  |BD4BE  POS      |      y48  |1/1             |
 | 串口日志回放 | `--replay tools\sample_aprs_log.txt` | `[RAW] hex=` → `ax25.c` + `aprs.c` |
 | WAV 音频解调 | `--wav tools\test_aprs_144.wav` | `modem.c` → `ax25.c` → `aprs.c` |
 
-WAV 路径就是**完整的固件解码链路**：48kHz/16bit PCM 经 5 点滑动平均降到 9600Hz，映射成 12bit ADC 码值
-（中心 2048、幅度 ±800）后逐点喂给固件入口 `modem_adc_sample()`，再用 `modem_get_frame()` 取帧——
-相当于把 STM32 的 ADC 中断源换成音频文件。实测 `test_aprs_144.wav` 解出 1 帧（另有 15 次重复抑制，
-来自 16 路并行相位走廊各解一遍，与固件 `bbcall_app.c` 的去重行为一致）。
+WAV 路径就是**完整的固件解码链路**：48kHz PCM 降采样到 9600Hz 后逐点喂给 `modem_adc_sample()`，再用 `modem_get_frame()` 取帧。实测 `test_aprs_144.wav` 解出 1 帧（另有 15 次重复抑制，来自 16 路并行相位各解一遍）；`--replay` 13 帧真实日志全部入箱，呼号/类型与 `tools/ax25_reference.py` 独立解码一致。
 
-收件箱数据模型：`M` 消息 / `P` 位置 / `C` Mic-E / `X` 其它，支持上下选择、Enter 打开、Delete 删除、
-详情分页，右下角标注 `FIX`/`REP`/`RELAY`。用真实 5km 接收日志回放，13 个帧全部入箱，
-呼号、类型与 `tools/ax25_reference.py` 独立解码结果完全一致：
+### 13.3 验收
 
-```text
-y0   |INBOX 13/13     |
-y16  | BH4FSK C#11    |
-y32  | BD4SDX P#12    |
-y48  |>BD4BE  C#13    |
---- 详情（Mic-E）---
-y0   |POS BD4BE       |
-y16  |3111.28N        |
-y32  |12125.77E M0:   |
-y48  |1/2    RELAY    |
-```
+- `tools/verify_ui.py`：对 `idle / unread / inbox / inbox2` 四张截图做**逐像素校验**（反显底填充、挖字极性、坐标、分隔线），全部通过、差异为 0；
+- `--keymap`：键盘映射自检 6 项全过；
+- `build_win.ps1 -Selftest`：编译 + 固定参数自检通过。
 
-### 13.4.1 中文字库（16x16 子集）
+### 13.4 字模工具速查
 
-> **已被取代（2026-09-16）**：UI v2.0 重设计后，中文显示改用 **Fusion Pixel 12px/10px 字模**
-> （`tools/gen_fusion_font.py` 生成 `firmware-stm32porject/Core/Inc/fusion_font.h`，374 字形，规格见
-> [design.md](design.md) §3.5）。下面的 GNU Unifont 16x16 子集方案与 `cn_font_data.h` /
-> `CN_FONT_ENABLED` 链路保留作历史记录，新 UI（`ui_harness.c`）不再编译 `cn_font.c`，
-> `build_win.ps1` 也不再自动检测该头文件。
-
-> **阶段说明（重要）**：本轮只做到「**字库链路**」为止——生成器、查找、绘制、自检样张都已就绪并验证。
-> **界面文案的汉化（把 HOME/MENU/INBOX 等换成中文）明确排到后续阶段执行**，不在当前范围内；
-> 后续阶段的排期与验收见 [PLAN.md](PLAN.md) 第 6 节 v0.7 与第 8.5 节。
-> 这样分步是因为：字库是基础设施（要提前验证体积与许可），而文案替换要等界面结构稳定后再做，
-> 否则每改一次版面就要重排一次中文行宽。
-
-界面文案目前是 ASCII。中文字库链路已打通，方案参考
-[EthanYan6/Dondji](https://github.com/EthanYan6/Dondji)（Apache-2.0：菜单汉化 + 中文输入法 + 中文信道名）：
-
-- **布局沿用它的形状**：`[位图][Unicode 索引 4B/项 升序][拼音表][版本字节]`。
-  Dondji 把字库放**外部 SPI Flash**、固件只留布局常量；我们暂时只做**片上子集**，
-  保持同一形状是为了将来接外部 Flash、加拼音表时读取逻辑不用改。
-- **字源换成 GNU Unifont**：Dondji 用 WenQuanYi Bitmap Song，而它是 **GPL v2 only + 字体嵌入例外**，
-  与本项目 GPL-3.0 不兼容；Unifont 自 2013 起是 **GPLv2+ / OFL-1.1 双许可**，且本身就是 16x16 点阵。
-- **预算**：每字 36 字节（位图 32 + 索引 4）。当前子集 107 字，目标平台实测占 **4,028 字节** Flash；
-  片上约可放 1055 字；全 GB2312（6763 字）需约 243KB，必须外置 SPI Flash。
-- 工具：`tools/gen_cn_font.py`（字符清单 `tools/cn_chars.txt`）；`CN_FONT_ENABLED` 控制启用，
-  模拟器检测到 `cn_font_data.h` 会自动打开；`--screen cnfont` 可逐页检查字形，
-  About 页显示 `CN FONT <字数>`。
-
-```powershell
-python tools\gen_cn_font.py --unifont <unifont.hex> --chars-file tools\cn_chars.txt `
-    --out-header firmware-stm32porject\Core\Inc\cn_font_data.h --out-bin tools\cn_font.bin
-```
-
-> 重新生成字库后**必须同步布局常量**。Dondji 文档记录过这个坑：只刷新字库 bin 而没改拼音表偏移，
-> 结果是"任意拼音候选错乱、大量音节失败"，不是个别字问题而是整表错位。
-
-### 13.4.2 ASCII 字模：等间距、点阵源与生成方式
-
-> **现状（2026-09-16）**：UI v2.0 的三态界面**只用 Fusion Pixel 字模**（见 design.md §3.5），
-> 下列 `gen_font.py` 8×16/6×8 字模不再参与新界面渲染；按 design.md §3 规定，与 Fusion Pixel
-> 混用**不允许**，`gen_font.py` 仅保留作纯 ASCII 兜底字模的生成工具。本小节其余内容作历史记录保留。
-
-两套 ASCII 字模都由 `tools/gen_font.py` 生成，**是等间距的**：
-
-- 渲染器不管字形宽窄，一律固定步进：`lcd_draw_string8x16()` 每字 +8px、`lcd_draw_string6x8()` 每字 +6px，
-  所以屏幕上必然是等间距网格；
-- 字模本身来自**等宽的像素点阵字体**（见下表）。
-
-| 用途 | 源 | 单元格 | 说明 |
-|---|---|---|---|
-| 小字号 | `tools/bdf/6x9.bdf` | 6x8 | 字形用满 6 列；基线取 6，大写落在行 1..6 |
-| 大字号 | `tools/bdf/7x13.bdf` | 8x16 | 7 列字形 + 8px 步进，留 1px 字距 |
-
-两者都是 **X11 misc-fixed** 家族，BDF 内自带 `COPYRIGHT "Public domain font. Share and enjoy."`，
-**公有领域**，可自由分发（见 `THIRD_PARTY_NOTICES.md` 与 `tools/bdf/README.md`）。
-
-```powershell
-python tools\gen_font.py --bdf tools\bdf\6x9.bdf  --w 6 --h 8  --baseline 6 `
-    --name font6x8  --macro FONT6X8_H  --out firmware-stm32porject\Core\Inc\font6x8.h
-python tools\gen_font.py --bdf tools\bdf\7x13.bdf --w 8 --h 16 `
-    --name font8x16 --macro FONT8X16_H --out firmware-stm32porject\Core\Inc\font8x16.h
-```
-
-**为什么不再用 TrueType 栅格化**：小尺寸笔画常落在半个像素上，阈值一卡就整条竖笔消失。
-实测 Consolas 9px 的 `M` 两条竖线灰度只有 135/141 与 163/**121**，阈值 128 时右侧那条被吃掉，
-同一批里 `H` 只剩一竖、`K` 几乎空白。改用公有领域点阵 BDF 后，`M W H K N L` 都是标准形状。
-
-参考做法来自 [joaquimorg/UV-KX](https://github.com/joaquimorg/UV-KX)（BDF + u8g2 的 bdfconv 转紧凑数组）。
-注意该仓库**未声明许可**，所以只借鉴做法，未使用其代码或其字源（Pixies / Uni0553 版权归个人）。
-
-> 生成器会报告缺字与空白字形，并在整字落到单元格外时退化为贴底放置（下划线 `_` 即属此类）。
-> 改字体或尺寸后必须重跑并抽查 `M W H K N L` 与降部 `g j p q y`。
-### 13.5 UI 重设计：复古寻呼机（BB 机）风格
-
-**导航结构（v2.0，2026-09-16）**：整个 UI 只有**三个屏幕态**——待机 / 有未读 / 收件箱，
-坐标、字模、按键状态机全部锁死在 [design.md](design.md)（§5 骨架 / §6 三态 / §8 硬规则），
-该文件是唯一权威规范（原 `UISkill.md` 已并入其中，文件本体已删除，历史版本见 git）。
-
-```text
-无未读 → 待机态     大格恒反显：时钟(2x) + 日期/开机时长；右半三小格：本机 / 电量 / 未读
-有未读 → 有未读态   大格恒反显：最新未读的发件人+正文前两行+时刻；右半：APRS / - / RSSI / SNR
-● 短按 → 收件箱态   顶栏反显（发件人 + n/N）；正文两行；元信息两行（时刻 RSSI / 路径 CRC）
-▲▼ 滚动（先滚正文再翻条）；● 短按标已读并前进；● 长按 620ms 退出；未读清零自动回待机
-```
-
-按键只有 ▲ ▼ ● 三个（● 长按 620ms = 退出/返回最外层），与真机一致。
-
-**历史沿革**：v2.0（2026-09-14）曾把 HEARD 台站列表与 MESSAGES 消息列表并存，
-实测让用户困惑（两套收件箱），合并为统一收件箱；ackNNN 送达确认只计数不进收件箱。
-磁贴方案的墨量分层、层级可辨等原则
-以规则形式并入 design.md §4/§5，版面本身废弃。再早的 boot/home/menu/detail/radio/about
-七屏 chrome 系统（反显状态栏 + 6 行 6x8 网格）已被三态模型整体取代，仅作历史记录保留。
-
-- **Design Read**：90 年代末点阵寻呼机（Motorola Advisor 一类）视觉语言；
-  `DESIGN_VARIANCE 6 / MOTION_INTENSITY 2 / VISUAL_DENSITY 7`
-  （密度 7 -> 用 1px 细线分隔数据、不用卡片盒；运动 2 -> 只保留大时钟冒号闪烁）。
-- **字体**：**Fusion Pixel 12px（正文/数值）+ 10px（标签）**，374 字形（95 ASCII + 279 汉字），
-  由 `tools/gen_fusion_font.py` 从原型 `bbcall-aprs-screen-states.html` 内嵌字表提取，
-  生成 `firmware-stm32porject/Core/Inc/fusion_font.h`；与旧 `gen_font.py` ASCII 字模混用不允许（design.md §3）。
-- 界面状态机在 `firmware-stm32porject/Core/Src/ui_harness.c`（三态，模拟器与真机单源共用）；绘图原语（`lcd_fill_rect` / `lcd_hline` /
-  `lcd_vline` / 反显填充 / Fusion Pixel 字模绘制）在固件 `lcd_st7567.c`，**真机与模拟器同一份代码**。
-- 数据全部诚实显示、无采样就留白（design.md §12）；锁屏默认墙钟由 `bbcall_cfg.h` 的 `BBCALL_WALLCLOCK_*` 给出
-  （出厂值 **20:45 / 周三 9/16**，`BBCALL_WALLCLOCK_ENABLE 0` 则退回 `UP HH:MM` 开机时长）；
-  本板无电池采样电路，电量位显示 `--`；真机 RSSI/SNR 取解码当刻的 BK4802 寄存器 24 原始读数（低 8 位 RSSI、bit13:8 SNR，与串口 `R19=` 同源），随帧存进条目一起显示，读失败显示 `--`（原始读数，非 dBm）；模拟器只在 `--demo` 里注入已标定样例值，日志回放的未标定
-  原始寄存器值不注入，显示 `--`。
-
-消息界面的数据规则（最新在上、`NOW`/`12m`/`3h` 年龄列、未读 `*`、60s 重复包抑制）参考
-[GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)
-（Apache-2.0，同样是 128x64 单色 LCD 的对讲机固件）。取舍逐条记在 [design.md](design.md) §11。
-当前屏幕：`idle`（待机）/ `unread`（有未读）/ `inbox`（收件箱）/ `pattern`（点阵样张）；
-设置与诊断类二级页本规范尚未覆盖（design.md §12 留白）。
-
-**验收**（三态模型，2026-09-16）：`tools/verify_ui.py` 对 `idle / unread / inbox / inbox2`
-四张截图做逐像素校验（反显底填充、挖字极性、坐标、分隔线），**全部通过、差异为 0**；
-`--keymap` 键盘映射自检 6 项全过；`build_win.ps1 -Selftest` 编译 + 固定参数自检通过；
-13 帧真实日志回放注入 13 条消息正常。截图：`simulator/build-win/v3_idle.png` /
-`v3_unread.png` / `v3_inbox.png`。
-
-> **固件移植（2026-09-16 已落地，待真机烧录验证）**：三态 UI 已移入固件
-> `Core/Src/ui_harness.c`（模拟器与真机**单源共用**，模拟器构建直接编译固件目录这份），
-> `bbcall_app.c` 完成接线（按键 PB12/13/14、背光 PB0 按 15s、喂帧、时钟），
-> 由 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED`（默认 1）与 `BBCALL_MYCALL` 控制。
-> 移植细节与三条实现补全见 [design.md](design.md) §12.4；
-> CubeIDE 里需 **F5 刷新工程**让新文件进构建。
+| 字模 | 生成工具 | 说明 |
+|---|---|---|
+| **Fusion Pixel 12px/10px**（当前 UI 唯一字模） | `tools/gen_fusion_font.py` | 374 字形（95 ASCII + 279 汉字），从原型 `bbcall-aprs-screen-states.html` 内嵌字表提取，生成 `fusion_font.h`；详见 [design.md](design.md) §3.5 |
+| GNU Unifont 16×16 中文子集（**已被取代**） | `tools/gen_cn_font.py` | 字符清单 `tools/cn_chars.txt`；新 UI 不再编译 `cn_font.c`，保留作历史参考 |
+| X11 misc-fixed ASCII 8×16 / 6×8（**已被取代**） | `tools/gen_font.py` | BDF 源 `tools/bdf/`（公有领域）；仅保留作纯 ASCII 兜底字模的生成工具 |
