@@ -439,11 +439,18 @@ void bbcall_app_loop(void)
     uint8_t can_adjust = rssi_ok && ((HAL_GetTick() - last_frame_tick) > 1000u);
     static uint8_t if_code = BK4802_IF_GAIN_CODE;
     uint8_t new_code = if_code;
+#if BBCALL_IF_AGC
+    /* 范围 + 双阈值（带滞回）：RSSI 太低就升档、太高就降档，档位夹在 [MIN, MAX]。
+     * 换档范围与阈值都在 bbcall_cfg.h，改那里即可（含"固定增益"开关）。 */
     if (can_adjust) {
-      if (if_code >= 6u) { if (rssi_now >= 105u) new_code = 5u; }
-      else if (if_code == 5u) { if (rssi_now >= 115u) new_code = 4u; else if (rssi_now < 90u) new_code = 6u; }
-      else { if (rssi_now < 100u) new_code = 5u; }
+      if ((rssi_now < BK4802_AGC_UP_RSSI) && (if_code < BK4802_IF_GAIN_MAX))
+        new_code = (uint8_t)(if_code + 1u);
+      else if ((rssi_now > BK4802_AGC_DN_RSSI) && (if_code > BK4802_IF_GAIN_MIN))
+        new_code = (uint8_t)(if_code - 1u);
     }
+#else
+    (void)can_adjust;   /* 固定增益：不做任何自动调整 */
+#endif
     if (new_code != if_code) { if_code = new_code; bk4802_set_if_gain_code(if_code); }
     hw_console_puts("R19=");
     hw_console_u16(bk4802_read_reg(19));
