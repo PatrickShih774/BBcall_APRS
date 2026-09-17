@@ -14,6 +14,8 @@ uint8_t modem_tone_now(void);
 void modem_get_adc_range(uint16_t *min, uint16_t *max);
 /* 诊断：累计判频次数（mark=1200Hz, space=2200Hz, other=窗口外） */
 void modem_get_stats(uint16_t *mark, uint16_t *space, uint16_t *other);
+/* 诊断：16 相位路径 / 9 条跳变对齐(TR)路径 各自解出的帧数（含重复） */
+void modem_get_path_counts(uint16_t *phase, uint16_t *tr);
 /* 拿到解码后的整帧（0=无） */
 uint8_t modem_get_frame(ax25_frame_t *out);
 uint16_t modem_get_fix_count(void);

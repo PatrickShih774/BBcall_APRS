@@ -40,6 +40,8 @@ static volatile uint8_t s_q_head = 0, s_q_tail = 0;
 static ax25_frame_t s_bad_q[MODEM_BADN];
 static volatile uint8_t s_bad_head = 0, s_bad_tail = 0;
 static uint16_t s_fix_count = 0;
+/* 诊断：分别统计 16 相位自由运行路径与 9 条跳变对齐(TR)路径解出的帧数（含重复解出） */
+static uint16_t s_frames_phase = 0, s_frames_tr = 0;
 static uint16_t s_fix2_count = 0;
 static uint8_t s_last_fixed = 0;
 #define REF_N 4u
@@ -229,6 +231,7 @@ static void feed_bit(uint8_t idx, uint8_t tone)
 
   if (ax25_hdlc_feed_bit(&d->hdlc, bit, &s_isr_frame)) {
     if (ax25_check_frame(s_isr_frame.frame, s_isr_frame.len)) {
+      s_frames_phase++;
       modem_push_frame(&s_isr_frame);
     } else if (ax25_plausible(s_isr_frame.frame, s_isr_frame.len)) {
       modem_push_bad(&s_isr_frame);
@@ -319,6 +322,11 @@ void modem_adc_sample(uint16_t adc)
     uint32_t base_q8 = s_tr_ncross * 256u;
     for (uint8_t i = 0; i < TR_N; i++) {
       s_trd[i].next_q8 = base_q8 + (uint32_t)(s_trd[i].period_q8 / 2) + (uint32_t)tr_off_q8[i / 3u];
+      /* 重新对齐必须清累积窗：否则跳变后的第一个比特会把跳变前的旧音调能量一起积分，
+       * 该比特几乎必错（数据段平均每 2~3 比特一次跳变）。硬判决没有累积窗，所以只有软判决踩这个坑。 */
+#if BBCALL_MODEM_SOFT_DECISION
+      s_trd[i].acc = 0;
+#endif
       s_trd[i].have_next = 1;
     }
   }
@@ -331,6 +339,9 @@ void modem_adc_sample(uint16_t adc)
       if (diff < 0) continue;
       if (diff > (d->period_q8 * 8)) {   /* 落后太多：重新对准 */
         d->next_q8 = cur_q8 + (uint32_t)(d->period_q8 / 2);
+#if BBCALL_MODEM_SOFT_DECISION
+        d->acc = 0;                     /* 同上：重新对准即重开累积窗 */
+#endif
         continue;
       }
 #if BBCALL_MODEM_SOFT_DECISION
@@ -343,6 +354,7 @@ void modem_adc_sample(uint16_t adc)
         uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;
         if (ax25_hdlc_feed_bit(&d->hdlc, bit, &s_isr_frame)) {
           if (ax25_check_frame(s_isr_frame.frame, s_isr_frame.len)) {
+            s_frames_tr++;
             modem_push_frame(&s_isr_frame);
           } else if (ax25_plausible(s_isr_frame.frame, s_isr_frame.len)) {
             modem_push_bad(&s_isr_frame);
@@ -366,6 +378,12 @@ void modem_get_adc_range(uint16_t *min, uint16_t *max)
   if (max) *max = s_adc_max;
   s_adc_min = 0xFFFFu;
   s_adc_max = 0;
+}
+
+void modem_get_path_counts(uint16_t *phase, uint16_t *tr)
+{
+  if (phase) *phase = s_frames_phase;
+  if (tr)    *tr    = s_frames_tr;
 }
 
 void modem_get_stats(uint16_t *mark, uint16_t *space, uint16_t *other)

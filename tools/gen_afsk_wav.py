@@ -109,7 +109,10 @@ def main(out_path: str, args):
     bits = tx_bits(frame)
     tones = nrz_i_encode(bits)
 
-    samples_per_bit = RATE // BAUD
+    # 波特率偏差：把"发射端时钟"整体缩放（比特周期与音调一起变），
+    # 这样接收端固定按 1200 baud / 1200+2200Hz 解调时就会看到真实的时钟不同步。
+    clk = 1.0 + (args.baud_bias / 100.0)
+    samples_per_bit = (RATE / BAUD) * clk      # 可以是小数，用浮点比特边界输出
     phase = 0.0
     pcm = bytearray()
 
@@ -119,21 +122,27 @@ def main(out_path: str, args):
         # 保持音：等 PTT 完全稳定，同时确保 VOX 不掉（0.15 幅度足够稳）
         phase = append_tone(pcm, phase, MARK_HZ, VOX_DELAY_MS, 0.15)
 
+    emitted = 0
+    bit_end = 0.0
     for byte in tones:
         for i in range(8):
             tone = (byte >> (7 - i)) & 1
-            freq = SPACE_HZ if tone else MARK_HZ
-            for _ in range(samples_per_bit):
-                phase += 2.0 * math.pi * freq / RATE
+            freq = (SPACE_HZ if tone else MARK_HZ) * clk
+            bit_end += samples_per_bit
+            n_bit = int(bit_end + 1e-9) - emitted
+            step = 2.0 * math.pi * freq / RATE
+            for _ in range(n_bit):
+                phase += step
                 v = int(0.45 * 32767 * math.sin(phase))
                 pcm += v.to_bytes(2, "little", signed=True)
+            emitted += n_bit
 
     with wave.open(out_path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(RATE)
         w.writeframes(bytes(pcm))
-    print("wrote %s  %.3f s  vox=%s" % (out_path, len(pcm) / 2 / RATE, args.vox))
+    print("wrote %s  %.3f s  vox=%s  baud-bias=%+.2f%%" % (out_path, len(pcm) / 2 / RATE, args.vox, args.baud_bias))
     print("  源 %s-%d -> 目标 %s-%d  %s" % (s_call, s_ssid, d_call, d_ssid, desc))
     print("  信息域 %d 字节: %s" % (len(info), info.decode("utf-8", "replace")))
 
@@ -153,6 +162,8 @@ if __name__ == "__main__":
     ap.add_argument("--lon", type=float, help="经度（十进制度，正值东经）")
     ap.add_argument("--random-pos", action="store_true", help="随机生成经纬度（中国境内）")
     ap.add_argument("--seed", type=int, help="随机数种子（复现同一条测试帧）")
+    ap.add_argument("--baud-bias", type=float, default=0.0,
+                    help="发射端时钟偏差（百分比）：+2 = 比特周期长 2%%、音调也高 2%%（模拟收发时钟不同步）")
     args = ap.parse_args()
     out = args.out or args.out_pos or "tools/test_aprs_144.wav"
     main(out, args)

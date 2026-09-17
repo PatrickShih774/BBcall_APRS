@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
     uint32_t rate, dlen, frames, p;
     const uint8_t *data;
     uint32_t i, k;
-    uint16_t mk, sp, ot;
+    uint16_t mk, sp, ot, path_ph = 0, path_tr = 0;
     int count = 0;
 
     if (argc != 2) { fprintf(stderr, "usage: %s file.wav\n", argv[0]); return 2; }
@@ -110,7 +110,9 @@ int main(int argc, char **argv) {
     }
     free(buf);
     modem_get_stats(&mk, &sp, &ot);
-    printf("STAT mark=%u space=%u other=%u FIX=%u FIX2=%u REP=%u frames=%d\n",
-        mk, sp, ot, modem_get_fix_count(), modem_get_fix2_count(), modem_get_rep_count(), count);
+    modem_get_path_counts(&path_ph, &path_tr);
+    printf("STAT mark=%u space=%u other=%u FIX=%u FIX2=%u REP=%u frames=%d PATH phase=%u tr=%u\n",
+        mk, sp, ot, modem_get_fix_count(), modem_get_fix2_count(), modem_get_rep_count(), count,
+        path_ph, path_tr);
     return 0;
 }
