@@ -247,18 +247,6 @@ void bbcall_app_init(void)
   HAL_GPIO_WritePin(LED_GPIO, LED_PIN, GPIO_PIN_SET);
 }
 
-#if 0
-/* v1 调试期辅助：旧 LCD 直接画消息两行；UI v2.0 起由 ui_harness.c 三态界面接管 */
-static void show_message_line(uint8_t y, const uint8_t *s, uint8_t max)
-{
-  char tmp[17];
-  uint8_t n = 0;
-  while (n < max && n < 16u && s[n]) { tmp[n] = (char)s[n]; n++; }
-  tmp[n] = 0;
-  lcd_draw_string8x16(0, y, tmp, 1);
-}
-#endif
-
 void bbcall_app_loop(void)
 {
   static uint32_t t_beat = 0;

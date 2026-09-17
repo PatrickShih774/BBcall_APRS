@@ -1,6 +1,6 @@
 /*
  * ST7567 128x64 LCD 驱动（GPIO 位敲 SPI：CS/CLK/MOSI + A0 + RST）
- * 帧缓冲 1024 字节（8 页 x 128 列），配合 font8x16.h（ASCII 8x16）。
+ * 帧缓冲 1024 字节（8 页 x 128 列），UI 通过绘图原语和 fusion_font.h 渲染。
  *
  * PC 模拟器：定义 LCD_SIM 时，命令/数据改走 lcd_sim_*（SDL2 后端），
  * 绘图逻辑、fb、字体完全复用；真机仍走 HAL GPIO。
@@ -14,11 +14,6 @@
 #include "bbcall_cfg.h"
 #include "bbcall_hw.h"
 #include "lcd_st7567.h"
-#include "font8x16.h"
-#include "font6x8.h"
-#if CN_FONT_ENABLED
-#include "cn_font.h"
-#endif
 
 static uint8_t fb[LCD_FB_BYTES];
 
@@ -172,26 +167,6 @@ void lcd_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on)
   }
 }
 
-void lcd_draw_char8x16(uint8_t x, uint8_t y, uint8_t ch, uint8_t on)
-{
-  if (ch < 0x20) ch = 0x20;
-  if (ch > 0x7F) ch = 0x20;
-  const uint8_t *g = font8x16[ch - 0x20];
-  for (int r = 0; r < 16; r++)
-    for (int c = 0; c < 8; c++)
-      if (g[r] & (0x80u >> c)) lcd_pixel((uint8_t)(x + c), (uint8_t)(y + r), on);
-}
-
-void lcd_draw_string8x16(uint8_t x, uint8_t y, const char *s, uint8_t on)
-{
-  uint8_t cx = x;
-  while (*s && (cx + 8) <= LCD_W) {
-    lcd_draw_char8x16(cx, y, (uint8_t)*s, on);
-    cx += 8;
-    s++;
-  }
-}
-
 void lcd_hline(uint8_t x0, uint8_t x1, uint8_t y, uint8_t on)
 {
   uint8_t x, t;
@@ -218,35 +193,6 @@ void lcd_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on)
   lcd_vline(x1, y0, y1, on);
 }
 
-void lcd_draw_char8x16_scaled(uint8_t x, uint8_t y, uint8_t ch, uint8_t on, uint8_t scale)
-{
-  const uint8_t *g;
-  int r, c, sy, sx;
-  if (scale < 1u) scale = 1u;
-  if (ch < 0x20u) ch = 0x20u;
-  if (ch > 0x7Fu) ch = 0x20u;
-  g = font8x16[ch - 0x20u];
-  for (r = 0; r < 16; r++) {
-    for (c = 0; c < 8; c++) {
-      if (!(g[r] & (0x80u >> c))) continue;
-      for (sy = 0; sy < scale; sy++)
-        for (sx = 0; sx < scale; sx++)
-          lcd_pixel((uint8_t)(x + c * scale + sx), (uint8_t)(y + r * scale + sy), on);
-    }
-  }
-}
-
-void lcd_draw_string8x16_scaled(uint8_t x, uint8_t y, const char *s, uint8_t on, uint8_t scale)
-{
-  uint8_t cx = x;
-  if (scale < 1u) scale = 1u;
-  while (*s && (uint16_t)cx + 8u * scale <= LCD_W) {
-    lcd_draw_char8x16_scaled(cx, y, (uint8_t)*s, on, scale);
-    cx = (uint8_t)(cx + 8u * scale);
-    s++;
-  }
-}
-
 void lcd_fill_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on)
 {
   uint8_t x, y, t;
@@ -257,46 +203,6 @@ void lcd_fill_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on)
   for (y = y0; y <= y1; y++)
     for (x = x0; x <= x1; x++) lcd_pixel(x, y, on);
 }
-
-void lcd_draw_char6x8(uint8_t x, uint8_t y, uint8_t ch, uint8_t on)
-{
-  const uint8_t *g;
-  int r, c;
-  if (ch < 0x20u) ch = 0x20u;
-  if (ch > 0x7Fu) ch = 0x20u;
-  g = font6x8[ch - 0x20u];
-  for (r = 0; r < 8; r++)
-    for (c = 0; c < 6; c++)
-      if (g[r] & (0x80u >> c)) lcd_pixel((uint8_t)(x + c), (uint8_t)(y + r), on);
-}
-
-void lcd_draw_string6x8(uint8_t x, uint8_t y, const char *s, uint8_t on)
-{
-  uint8_t cx = x;
-  while (*s && (uint8_t)(cx + 6u) <= LCD_W) {
-    lcd_draw_char6x8(cx, y, (uint8_t)*s, on);
-    cx = (uint8_t)(cx + 6u);
-    s++;
-  }
-}
-
-#if CN_FONT_ENABLED
-/* 16x16 中文字形：每行一个 uint16_t，MSB = 最左像素 */
-void lcd_draw_cn16(uint8_t x, uint8_t y, uint32_t ucs, uint8_t on)
-{
-  const uint16_t *g = cn_font_lookup(ucs);
-  int r, c;
-  if (!g) return;
-  for (r = 0; r < 16; r++) {
-    uint16_t bits = g[r];
-    for (c = 0; c < 16; c++)
-      if (bits & (0x8000u >> c)) lcd_pixel((uint8_t)(x + c), (uint8_t)(y + r), on);
-  }
-}
-#else
-void lcd_draw_cn16(uint8_t x, uint8_t y, uint32_t ucs, uint8_t on)
-{ (void)x; (void)y; (void)ucs; (void)on; }
-#endif
 
 void lcd_flush(void)
 {

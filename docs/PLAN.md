@@ -1,10 +1,10 @@
-﻿# BBcall_APRS 计划（BK4802P + STM32F103C8T6 + ST7567，APRS 寻呼机）
+# BBcall_APRS 计划（BK4802P + STM32F103C8T6 + ST7567，APRS 寻呼机）
 
 > 项目名（暂定）：**BBcall_APRS** —— 用 APRS（AX.25 / 1200 baud Bell202 AFSK）技术路线复刻 BB 机（无线寻呼机）。
 >
-> 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 README 第 11 节与 `../licenses/THIRD_PARTY_NOTICES.md`。
+> 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 [README §10](../README.md#10-许可与合规) 与 [`../licenses/THIRD_PARTY_LICENSES.md`](../licenses/THIRD_PARTY_LICENSES.md)。
 >
-> 本文件以 **2026-09-11** 的实际实现为准；历史 bring-up 过程见 README 第 4 节「调试过程记录」。
+> 本文件以 **2026-09-11** 的实际实现为准；历史 bring-up 过程见 [docs/DEBUG_LOG.md](DEBUG_LOG.md)。
 
 ## 1. 当前状态
 
@@ -12,11 +12,11 @@
 - 射频：BK4802P，21.25MHz 晶振，仅接收（RX-only），默认 **144.640MHz**；
 - 显示：ST7567 12864 **已焊接并点亮**（2026-09-16），三态界面（待机 / 有未读 / 收件箱）在实机可用；
 - 音频输入：BK4802 EAROP → 2.2k+22nF RC → 1µF 耦合 → 10k/10k 偏置 → PA1（ADC1_IN1，TIM3 9600Hz）；
-- 按键：UP/DOWN/OK = PB12/PB13/PB14（上拉输入、按下为低），驱动与状态机已完成（详见 README 4.11）；
+- 按键：UP/DOWN/OK = PB12/PB13/PB14（上拉输入、按下为低），驱动与状态机已完成（详见 [DEBUG_LOG §11](DEBUG_LOG.md#11-实机联调lcd-点亮--三态-ui--帧级-rssisnr2026-09-16)）；
 - 解码：**已完成**，实机可解真实 APRS 包（含 Mic-E / 普通位置 / 消息）；v0.5 实机连续收包正常；
 - 最新固件：**v0.5**（2026-09-16 发布，`text=57324 / data=132 / bss=20220`）；此前 v0.4 于同日发布；
 - 实测：SunSDR2 DX 手动 MOX 低功率可稳定解出；但**连续发射仍会漏包**，做不到"发一条看到一条"；
-- 硬件前端目前是 **天线直接接 BK4802 ANT 脚、无滤波/匹配**，是漏包的主要瓶颈，改进见 README 第 9 节与本文第 10 节；
+- 硬件前端目前是 **天线直接接 BK4802 ANT 脚、无滤波/匹配**，是漏包的主要瓶颈，改进见本文 [§10](#10-下一步方案把漏包率降下来v05-之后) / [§11](#11-硬件改进方案提升解码率)；
 - RSSI/SNR 取解码当刻直读的 BK4802 寄存器 24 **原始码值（非标定 dBm）**，单次 I2C 读会随机失败，已用采样兜底。
 
 ## 2. 硬件与引脚（以实机为准）
@@ -125,7 +125,7 @@ BK4802P FM 接收 → EAROP 音频（D 类 PWM）
 ## 6. 版本路线与验收
 
 > **版本号说明**：下表的 v0.4 / v0.5 是早期按功能划分的设想，实际发布内容与此不同
-> （见第 4 节与 README 4.11）。后续按"先收得到、再存得住、再扩协议"推进，功能项保留、版本号不再强绑定。
+> （见第 4 节与 [DEBUG_LOG §11](DEBUG_LOG.md#11-实机联调lcd-点亮--三态-ui--帧级-rssisnr2026-09-16)）。后续按"先收得到、再存得住、再扩协议"推进，功能项保留、版本号不再强绑定。
 > 当前真正要解决的问题是**漏包率**，方案见第 10 节。
 
 ### v0.4（MVP：能当 BB 机用）
@@ -163,24 +163,22 @@ BK4802P FM 接收 → EAROP 音频（D 类 PWM）
 
 ### v0.7（界面文案汉化，延后执行）
 
-> **本轮不执行**。字库链路已在 v0.4 阶段就绪（见 8.5），但界面文案替换刻意留到界面结构稳定之后再动，
-> 否则每改一次版面就要按汉字行宽重排一次。
+> **本轮不执行**。当前三态 UI 已使用 Fusion Pixel 字模；界面结构稳定后再做文案替换，
+> 避免每次调整版面都重新按汉字行宽排版。
 
-- 先把字库子集从 107 字扩到约 500 字（覆盖常用人名/地名），或接外置 SPI Flash 放全 GB2312；
-- 逐个界面替换文案，按 [docs/design.md](design.md) §11 的文案规则（唯一权威规范）；
-  旧「每行 8 汉字、内容区 3 行、ASCII 画在 y+5」等参数是按 8×16 字模定的，
-  执行时须按 Fusion Pixel 12px 实际行宽重定（design.md §8）；
-- 扩展 `tools/cn_chars.txt` 后必须重新生成并**同步布局常量**（坑见 8.5）；
+- 按 [docs/design.md](design.md) §11 的文案规则（唯一权威规范）逐个界面替换文案；
+  行宽、换行与缺字检查按 Fusion Pixel 12px 实际渲染结果执行（design.md §8）；
+- 如需要更大中文字集或外置字库，先重新确定字源、布局和许可，再新增对应生成工具；
 - 不做拼音输入法（本项目没有键盘）。
-- **验收**：主菜单 / 收件箱 / 阅读 / 状态页全中文显示，无缺字，且与现有 ASCII 屏的版面规范一致。
+- **验收**：主菜单 / 收件箱 / 阅读 / 状态页全中文显示，无缺字，且与现有版面规范一致。
 
 ## 7. 风险与对策
 
 | 风险 | 对策 |
 |---|---|
 | RAM/Flash 紧张 | 外置 W25Q64/AT24C512；字库子集化；`AX25_MAX_FRAME` 已降到 256 |
-| 中文显示 | 字库链路**已落地**；UI v2.0 起三态界面改用 **Fusion Pixel 12px/10px**（design.md §3.5，历史方案见 8.5）；全量 GB2312 需外置 SPI Flash |
-| 弱信号解码率 | 射频前端（BPF/匹配/LNA）、音频整形、重复包合并；见 README 第 9 节 |
+| 中文显示 | 当前三态 UI 已使用 **Fusion Pixel 12px/10px**（design.md §3.5）；全量中文字集需另行评估字源、布局、Flash 容量和许可 |
+| 弱信号解码率 | 射频前端（BPF/匹配/LNA）、音频整形、重复包合并；见本文 [§11](#11-硬件改进方案提升解码率) |
 | VOX/PTT 时序 | 用 150ms VOX 测试音频或手动 MOX；发射端关闭 ALC/压缩 |
 | 静噪影响解码 | 解码时保持音频通路常开；软件静噪默认关闭 |
 | 双向发射合规 | v1.0 前评估执照与发射滤波/天线切换 |
@@ -192,7 +190,7 @@ BK4802P FM 接收 → EAROP 音频（D 类 PWM）
 ### 8.1 架构
 
 ```text
-固件代码（复用）: lcd_st7567.c / font8x16.h / ax25.c / aprs.c / modem.c
+固件代码（复用）: lcd_st7567.c / fusion_font.h / ax25.c / aprs.c / modem.c
         │ LCD_SIM 分支
         ▼
 PC 后端: simulator/src/lcd_sim.c（SDL2 + ST7567 命令状态机）
@@ -280,77 +278,9 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
   **已完成（2026-09-16）**：三态 UI 移入 `Core/Src/ui_harness.c`（模拟器/真机单源共用），
   `bbcall_app.c` 接线完成；移植记录与已知补全见 [docs/design.md](design.md) §12.4，
   待 LCD 焊上后真机烧录验证。
-## 8.5 中文显示方案（参考 Dondji）
-
-> **已被取代（2026-09-16）**：UI v2.0 三态界面改用 **Fusion Pixel 12px/10px 字模**
-> （`tools/gen_fusion_font.py` 从原型内嵌字表生成 `firmware-stm32porject/Core/Inc/fusion_font.h`，374 字形），
-> 规范见 [docs/design.md](design.md) §3.5。下面的 GNU Unifont 16x16 子集 / `CN_FONT_ENABLED` 链路
-> 保留作历史记录，新 UI 不再编译 `cn_font.c`，`build_win.ps1` 也不再自动检测 `cn_font_data.h`。
-
-**现状**：ASCII 字模（`font8x16.h` / `font6x8.h`）已就绪；中文字库链路已打通（见下），
-**界面文案汉化延后到 v0.7**。
-
-**参考**：[EthanYan6/Dondji](https://github.com/EthanYan6/Dondji)（Apache-2.0，101★，泉盛 UV-K1/UV-K5 V3）
-是目前中文做得最完整的同类固件：菜单汉化 + 中文输入法 + 中文信道名。它的字库方案值得照搬：
-
-| 项 | Dondji |
-|---|---|
-| 字模 | 12x12，每字 12 行 x uint16_t = 24 字节 |
-| 存放 | **外部 SPI Flash**（基址 0x024000），固件只留 `CN_FONT_*` 布局常量 |
-| 布局 | `[位图][Unicode 索引 4B/项 升序][拼音表][版本字节]`，6766 字共 205,367 B |
-| 字源 | WenQuanYi Bitmap Song 9pt |
-
-**我们采用**：同一套**布局形状**（位图 + 4 字节 Unicode 升序索引 + 版本字节），
-将来接外部 SPI Flash、再加拼音表时，读取逻辑一行不用改。
-
-**我们不采用**：
-
-- **字源不能用 WQY Bitmap Song**：GPL v2（仅此一版）+ 字体嵌入例外，与本项目 GPL-3.0
-  **不兼容**（GPLv2-only 无法并入 GPLv3）。改用 **GNU Unifont**
-  （2013 起 GPLv2+ 或 OFL-1.1 双许可，且本身就是 16x16 点阵）；见 `../licenses/THIRD_PARTY_NOTICES.md`。
-- **暂不做拼音输入法**：本项目没有键盘，信道名也暂不支持中文输入。
-
-**片上预算**（STM32F103C8T6，64KB Flash；当前 text 24,160 B，可用约 38KB）：
-每字 `16x16 位图 32B + 索引 4B = 36B`。
-
-| 字数 | 占用 | 说明 |
-|---|---|---|
-| 107 | 3.9 KB | 当前子集（菜单/状态用词 + 常用字），**实测编译后 4,028 B** |
-| 500 | 18 KB | 可覆盖常见人名地名 |
-| 约 1055 | 38 KB | 片上极限，不留余量 |
-
-全 GB2312（6763 字）需约 243KB，**必须外置 SPI Flash**（第 7 节风险对策里的 W25Q64）。
-
-**工具链**
-
-```bash
-python tools/gen_cn_font.py --unifont <unifont.hex> --chars-file tools/cn_chars.txt \
-    --out-header firmware-stm32porject/Core/Inc/cn_font_data.h --out-bin tools/cn_font.bin
-```
-
-`CN_FONT_ENABLED=1` 时启用（`bbcall_cfg.h`，默认 0）；模拟器 `build_win.ps1` 检测到
-`cn_font_data.h` 会自动打开。字符清单在 `tools/cn_chars.txt`，`tools/cn_font.bin` 是生成的裸字库
-（`.gitignore` 已排除，可随时重新生成）。
-
-> 真机启用时注意：`Core/Src/cn_font.c` 需要**在 STM32CubeIDE 里刷新工程**才会进入构建
-> （命令行 `make` 用的是已有 makefile，不会自动收录新文件）。
-
-**踩坑提醒（来自 Dondji 文档）**：重新生成字库后**必须同步固件的布局常量**。
-它那边的现象是只刷了新字库 bin 却忘了改 `CN_FONT_PY_OFFSET`，固件按旧偏移去扫拼音区，
-结果是「任意拼音候选错乱、大量音节匹配失败」，不是个别字的问题而是整表错位。
-我们同理：位图长度一变，索引区起始地址就变。
-
-**模拟器自检**：`--screen cnfont` 逐页显示字库全部字形；About 页显示 `CN FONT <字数>`
-（未启用时显示 `CN FONT OFF`），便于真机核对刷入的字库版本。
-
-**阶段边界**：本节只覆盖「字库」本身。**界面文案的汉化不在本轮范围**，排期见第 6 节 v0.7。
 ## 9. 参考项目与许可
 
-- MM-Radio（BSD-2-Clause，主参考/工程底座）；
-- BG5ESN FMO（MIT，频率字参考）；
-- VP-Digi（GPL-3.0，AFSK/AX.25 参考）；
-- BG7QKU 仓库未声明 License，仅作资料参考，不复制代码。
-- 本项目 GPL-3.0；详见 README 第 11 节、`../licenses/THIRD_PARTY_NOTICES.md` 与 `../licenses/`。
+完整参考项目、字体、SDK、数据手册和许可合规清单由 README §10 维护，此处不再重复。
 
 ## 10. 下一步方案：把漏包率降下来（v0.5 之后）
 
@@ -374,10 +304,8 @@ python tools/gen_cn_font.py --unifont <unifont.hex> --chars-file tools/cn_chars.
 
 ### 10.2 P2 射频前端（硬件，收益最大）
 
-- 天线到 BK4802 ANT 之间加 π 型或 L 型匹配（串 L + 两端并 C），必要时加 144MHz 带通 / SAW；
-- 无 VNA 时的调法：弱信号源 + 观察 RSSI/SNR 最大、EXN 最小（README 第 9.1 节）；
-- **验收**：同样发射条件下 P1 的漏包率明显下降；弱信号 RSSI 提升 6dB 以上；
-  强信号不再把前端压死（配衰减器验证）。
+- 优先补 144–146MHz 带通 / 匹配 / ESD 与隔直；可选 LNA 放在 BPF 后。
+- 详细实施清单与器件方向见 [§11 硬件改进方案（提升解码率）](#11-硬件改进方案提升解码率)。
 
 ### 10.3 P3 软件解码增强（不动硬件）
 
@@ -403,3 +331,57 @@ python tools/gen_cn_font.py --unifont <unifont.hex> --chars-file tools/cn_chars.
 - 发射 / 中继（digipeater）、压缩位置、对象 / 状态 / 遥测 / 第三方包解析（属第 6 节 v0.6 计划）；
 - 存储与 RTC（第 6 节"存储与菜单"档）：先把"收得到"做扎实，再谈"存得住"；
 - 界面文案汉化（第 6 节 v0.7，已延后）。
+
+---
+
+## 11. 硬件改进方案（提升解码率）
+
+当前硬件：天线直接短接到 BK4802 的 ANT 脚，**没有隔直、滤波和 50Ω 匹配**。这会导致灵敏度下降、FM 广播/409MHz 玩具机等强带外信号阻塞前端、底噪升高（EXN 偏大），是当前弱信号解码率的主要瓶颈。按收益排序如下。
+
+### 11.1 射频前端（收益最大）
+
+目标结构：
+
+```text
+天线(50Ω) → ESD保护 → 100pF隔直 → 144–146MHz带通 → [可选LNA] → π/L匹配 → 100pF隔直 → BK4802 ANT
+```
+
+- **隔直/保护**：ANT 脚串 100pF C0G（数据手册典型 C1=100pF）；天线端加 ESD 二极管/阵列（BAT54S/BAV99 等）；RF 走线按 50Ω 设计，短而直，两侧打地过孔。
+- **2m 带通**：优先从坏掉的 2m 手台/接收机拆前端带通或螺旋滤波器，或购买 144–146MHz 带通模块；要求插损 ≤2–3dB，对 88–108MHz、409MHz 抑制 ≥30dB。自建 LC 带通：中心 144.64MHz、带宽 3–5MHz、3 阶；并联谐振起始值约 L=82–100nH、C=12–15pF，耦合 2–5pF，用 NanoVNA 调到 S11<-10dB、插损<2dB。
+- **与 BK4802 匹配**：BPF 与 ANT 脚之间加 π 型或 L 型匹配（串 L + 两端并 C）；无 VNA 时用弱信号源调 L/C，使 RSSI/SNR 最大、EXN 最小，目标弱信号 RSSI 提升 6dB 以上。
+- **可选 LNA**：BPF 之后加 PGA-103+ / SPF5189Z（NF≈0.5dB）；强信号环境在 LNA 前加 3–6dB 衰减器或 BAP64-02 PIN 限幅器，避免 LNA 饱和。
+
+### 11.2 音频链路（EAROP → PA1）
+
+- 单级 RC 升级为两级 RC 或 LC 低通，彻底滤掉 D 类 ~100kHz 载波，同时保留 1200/2200Hz；
+- 加比较器整形（LM393/TLV3501，阈值 1.65V + 迟滞）或轨到轨运放带通（MCP6002/TL072，中心约 1.7kHz、增益 5–10 倍）；
+- 音频线用屏蔽线/双绞线，尽量短、远离 RF 和数字线；PA1 对地并 100pF 抑制 RF；
+- 耦合 1µF、偏置 100k/100k，静态 1.65V，摆幅 0.7–1.5Vpp，避免削顶。
+
+### 11.3 电源、接地与屏蔽
+
+- MCU 与 BK4802 用低噪声 LDO（TPS7A4700/LT3045，或 AMS1117 + 100µF+10µF+100nF），优先电池/线性电源，少用 USB 供电；
+- BK4802 的 VCCRF/VCCIF/VCCAUD/VDDVCO 分别去耦，VSSAUD 单独星型接地；
+- 电源线串磁珠/共模扼流圈；数字地与射频地在电源入口单点相连；
+- 射频部分加金属屏蔽罩，天线座就近接地，MCU/晶振/串口线远离 RF 前端。
+
+### 11.4 晶振与频率精度
+
+- 21.25MHz 晶振换 ±10ppm 以内 TCXO/高精度晶振，负载电容按手册；走线短、包地；
+- 保持 AFC 开启（当前 reg20 默认开），弱信号下频偏会吃掉解码余量。
+
+### 11.5 强信号与衰减
+
+- 近场/强台：加 3/6/10dB 衰减器或步进衰减器，避免 BK4802 前端/中频饱和；
+- 弱台：BPF + LNA；LNA 必须在 BPF 之后，并加限幅保护。
+
+### 11.6 发射端（SunSDR2 DX）
+
+- 音频线或手动 MOX，避免 VOX 时序丢前导；FM 频偏约 3kHz，关闭 ALC/压缩/EQ，音频峰值约 -6dB；
+- 发射天线/馈线调好 SWR；近场测试用假负载+衰减器，别让接收端过载。
+
+### 11.7 验证与测量
+
+- NanoVNA：调天线/BPF/匹配（S11<-10dB，插损<2dB）；
+- SDR/频谱仪：看 2m 附近是否有强带外信号（FM 广播、寻呼、409MHz 玩具机）；
+- 步进衰减器：测灵敏度与解码率，记录 `RSSI/EXN/RX/U/DUP/G/OT` 对比改动前后。

@@ -43,14 +43,6 @@
 #define LCD_BL_GPIO        GPIOB
 #define LCD_BL_PIN         GPIO_PIN_0
 
-/* 中文字库：1 = 启用（需要 Core/Inc/cn_font_data.h，由 tools/gen_cn_font.py 生成）。
- * 16x16 点阵，每字 36 字节（位图 32 + 索引 4）；STM32F103C8T6 只有 64KB Flash，
- * 所以只放子集（当前 107 字约 3.9KB），全字库需外置 SPI Flash（见 PLAN 中文显示一节）。
- * 注：UI v2.0 三态界面改用 Fusion Pixel 字模（fusion_font.h），不再走本链路。 */
-#ifndef CN_FONT_ENABLED
-#define CN_FONT_ENABLED   0
-#endif
-
 /* ---------- S-meter（BK4802 寄存器 24）采样周期 ----------
  * 锁屏/收件箱显示的 RSSI/SNR 来自这里：周期采样 + 取接收窗口峰值。
  * 置 0 表示完全不采样（界面上 RSSI/SNR 显示 --）——用于排查

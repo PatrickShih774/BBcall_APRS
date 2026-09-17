@@ -9,7 +9,7 @@
 | `Core/Inc/bbcall_cfg.h` | 引脚/参数配置（改接线只需改这里） |
 | `Core/Inc/bbcall_hw.h` + `Core/Src/bbcall_hw.c` | 时钟(72MHz 尝试)/DWT 延时/GPIO/寄存器级 USART1/寄存器级 TIM2+TIM3 |
 | `Core/Inc/bk4802.h` + `Core/Src/bk4802.c` | BK4802 位敲 I2C、RX 配置、频率字、S-meter 占位 |
-| `Core/Inc/lcd_st7567.h` + `Core/Src/lcd_st7567.c` + `Core/Inc/font8x16.h` | ST7567 位敲 SPI + 8x16 ASCII 字体 |
+| `Core/Inc/lcd_st7567.h` + `Core/Src/lcd_st7567.c` + `Core/Inc/fusion_font.h` | ST7567 位敲 SPI + 绘图原语；UI 字模由 `ui_harness.c` 使用 Fusion Pixel |
 | `Core/Inc/ax25.h` + `Core/Src/ax25.c` | CRC-16/X.25、HDLC、AX.25 解析（主机已验证） |
 | `Core/Inc/aprs.h` + `Core/Src/aprs.c` | APRS 消息解析（主机已验证） |
 | `Core/Inc/modem.h` + `Core/Src/modem.c` | AFSK 判频 + NRZI + HDLC 流式（骨架） |

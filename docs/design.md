@@ -137,8 +137,7 @@ x = x0 + floor((x1 - x0 + 1 - 宽(str, 档) × 倍率) / 2)
 3. Fusion Pixel 提供 **BDF 格式**，也就是每个字的原始点阵位图，可直接转成 C 数组写进 Flash，
    不需要在 MCU 上做任何字体光栅化——这与 1-bit 屏的工作方式完全一致。
 
-`gen_font.py` 仍然保留在仓库中，可继续生成纯 ASCII 兜底字模；与 Fusion Pixel 混用**不允许**，
-一屏之内只出现一套字模家族。
+旧版纯 ASCII 兜底字模和生成工具已清理；一屏之内只出现一套字模家族。
 
 ### 3.5 Flash 预算
 
@@ -541,5 +540,4 @@ https://github.com/TakWolf/fusion-pixel-font
   `LICENSES/` 目录中含各上游字型的许可（ark-pixel / cubic-11 / galmuri 等），
   **一并保留，不得删除**。
 - 本项目只提取字形位图用于屏幕渲染，未修改字形本身。
-- 旧版 `gen_font.py` 使用的 X11 misc-fixed 系 BDF 为公有领域（`COPYRIGHT "Public domain font. Share and enjoy."`），
-  与 GPL-3.0 无冲突；作为兜底字模继续留在仓库中。
+- 旧版 8×16 / 6×8 ASCII 字模及其生成链路已删除；当前 UI 只保留 Fusion Pixel 字模。
