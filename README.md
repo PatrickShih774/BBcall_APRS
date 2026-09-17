@@ -827,7 +827,7 @@ python tools\gen_font.py --bdf tools\bdf\7x13.bdf --w 8 --h 16 `
 
 **历史沿革**：v2.0（2026-09-14）曾把 HEARD 台站列表与 MESSAGES 消息列表并存，
 实测让用户困惑（两套收件箱），合并为统一收件箱；ackNNN 送达确认只计数不进收件箱。
-磁贴方案（G 息屏 / G2c 收件箱，预览见 `ui_previews/G*.png`）的墨量分层、层级可辨等原则
+磁贴方案的墨量分层、层级可辨等原则
 以规则形式并入 design.md §4/§5，版面本身废弃。再早的 boot/home/menu/detail/radio/about
 七屏 chrome 系统（反显状态栏 + 6 行 6x8 网格）已被三态模型整体取代，仅作历史记录保留。
 

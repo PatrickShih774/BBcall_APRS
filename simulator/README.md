@@ -155,9 +155,7 @@ HEARD 台站列表与 MESSAGES 消息列表合并为一个统一收件箱——�
 - 最新在上；消息时刻按 `rx_ms` 显示 `HH:MM:SS`；未读 `*` 行首；
 - ackNNN 送达确认只计数、不进收件箱；
 - **本项目仅接收**：界面不提供任何发射入口（没有 SEND / REPLY / Resend）；
-- `simulator/src/msg_store.c` 数据模型（Inbox 16 / Sent 8 / Drafts 8，正文 36 字符，
-  按 `(from,id)` 去重，`ackNNN` 更新送达状态并记录 ACK 来源）保留给将来双向能力复用，
-  三态 UI 起不再编译该文件（分流逻辑已内联进 `ui_feed_ax25()`）。
+ackNNN 分流逻辑已内联进 `ui_feed_ax25()`（ACK 不污染收件箱）。
 
 RSSI/SNR 只在有标定注入时显示：用 `ui_set_radio_stats()` 在入箱前注入、随条目捕获；
 日志回放的 `R19=` 原始寄存器值未标定，不注入（design.md §12.2），收件箱元信息处显示 `--`。

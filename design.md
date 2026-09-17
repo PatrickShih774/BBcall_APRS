@@ -18,7 +18,6 @@
 | 实现位置 | 绘图原语 `firmware-stm32porject/Core/Src/lcd_st7567.c`；状态机 `firmware-stm32porject/Core/Src/ui_harness.c`（模拟器与真机单源共用，**已按本规范实现并逐像素校验**，见 §13） |
 | 字模来源 | Fusion Pixel Font（TakWolf，SIL OFL 1.1）12px / 10px 单宽版 |
 | 原型 | `bbcall-aprs-screen-states.html`（单文件，可点按演示，OLED/LCD 双主题） |
-| 效果预览 | `ui_previews/`（历史方案存档；当前基准是 HTML 原型三态） |
 
 **仲裁规则**：风格问题以本文件第 4 节的设计原则为准；工程正确性
 （刷新成本、时序、RAM/Flash、可读性、闪烁）以硬件约束为准。
@@ -517,7 +516,7 @@ x = x0 + floor((x1 - x0 + 1 - 宽(str, 档) × 倍率) / 2)
 |---|---|---|---|
 | UISkill v1 | — | 双收件箱（HEARD + Messenger）时代的设计原则 | 被 v2 取代 |
 | UISkill v2 | 2026-09-14 | 统一收件箱（行列表 + 状态栏 chrome） | 被 v3 取代 |
-| UISkill v3 | 2026-09-14 | 磁贴方案（G 息屏全屏贴 + G2c 收件箱方贴 + 二级页不动） | **被本规范取代**：预览见 `ui_previews/G*.png`，思路（墨量分层、层级可辨）并入 §4/§5，版面废弃 |
+| UISkill v3 | 2026-09-14 | 磁贴方案（G 息屏全屏贴 + G2c 收件箱方贴 + 二级页不动） | 已删除；思路（墨量分层、层级可辨）并入 §4/§5，版面废弃 |
 | design v1 | 2026-09-16 | 三态模型 + Fusion Pixel + 可点按原型 | 并入本版 |
 | design v2（本文件） | 2026-09-16 | 吸收 UISkill.md 全部设计原则与护栏，定为唯一权威规范 | — |
 | **固件移植** | 2026-09-16 | 三态 UI 移入 `Core/Src/ui_harness.c`（模拟器/真机单源共用），`bbcall_app.c` 接线完成，待真机烧录验证 | 验证后回写 §12.4 |
