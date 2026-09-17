@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 verify_ui.py -- design.md v2.0 三态界面逐像素读屏校验（design.md §13 的可执行版）
 
-方法：从 bbcall-aprs-screen-states.html 内嵌的 G12/G10 字模（与固件 fusion_font.h
+方法：从 docs/bbcall-aprs-screen-states.html 内嵌的 G12/G10 字模（与固件 fusion_font.h
 同一份数据）按字符格做模板匹配：正显 / 反显两种解释取总距离更小者，
 强制极性的区域（反显底挖字）直接指定。任一像素不匹配即 FAIL。
 
@@ -25,7 +25,7 @@ import sys
 import struct
 
 ROOT = __file__.rsplit("\\tools\\", 1)[0] if "\\tools\\" in __file__ else __file__.rsplit("/tools/", 1)[0]
-HTML = ROOT + "/bbcall-aprs-screen-states.html"
+HTML = ROOT + "/docs/bbcall-aprs-screen-states.html"
 
 # ---------------------------------------------------------------- 字模解析
 # G12/G10 条目："ox,oy,gw,hex"（每行 ceil(gw/4) 个十六进制字符，行数=len/hp；

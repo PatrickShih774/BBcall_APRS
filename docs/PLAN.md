@@ -2,7 +2,7 @@
 
 > 项目名（暂定）：**BBcall_APRS** —— 用 APRS（AX.25 / 1200 baud Bell202 AFSK）技术路线复刻 BB 机（无线寻呼机）。
 >
-> 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 README 第 11 节与 `licenses/THIRD_PARTY_NOTICES.md`。
+> 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 README 第 11 节与 `../licenses/THIRD_PARTY_NOTICES.md`。
 >
 > 本文件以 **2026-09-11** 的实际实现为准；历史 bring-up 过程见 README 第 4 节「调试过程记录」。
 
@@ -167,7 +167,7 @@ BK4802P FM 接收 → EAROP 音频（D 类 PWM）
 > 否则每改一次版面就要按汉字行宽重排一次。
 
 - 先把字库子集从 107 字扩到约 500 字（覆盖常用人名/地名），或接外置 SPI Flash 放全 GB2312；
-- 逐个界面替换文案，按 [design.md](design.md) §11 的文案规则（唯一权威规范）；
+- 逐个界面替换文案，按 [docs/design.md](design.md) §11 的文案规则（唯一权威规范）；
   旧「每行 8 汉字、内容区 3 行、ASCII 画在 y+5」等参数是按 8×16 字模定的，
   执行时须按 Fusion Pixel 12px 实际行宽重定（design.md §8）；
 - 扩展 `tools/cn_chars.txt` 后必须重新生成并**同步布局常量**（坑见 8.5）；
@@ -248,7 +248,7 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
   这个混搭会让整屏左右镜像；现改为 `0xA0` + `0xC0`。模拟器按状态机忠实复现，
   改后各界面文字立即正常（待机/收件箱/详情均已读屏验证）。
 
-- **UI 重设计：复古寻呼机（BB 机）风格**。唯一权威规范是仓库根目录 **[design.md](design.md) v2.0**
+- **UI 重设计：复古寻呼机（BB 机）风格**。唯一权威规范是**[docs/design.md](design.md) v2.0**
   （§4 设计原则 / §5 版面骨架 / §6 三态屏幕 / §8 硬规则 / §11 文案 / §12 留白与移植 / §13 验证；
   原 UISkill.md 已并入，文件本体已删除，历史版本见 git）。
   摘要：`Dials = 6 / 2 / 7`（密度 7 -> 1px 细线分隔、不用卡片盒）；三态 = 待机（大格恒反显时钟 +
@@ -265,7 +265,7 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
   - **砍掉** `COMPOSE`/`DRAFTS`（仅接收，只能存草稿＝假功能）、`SENT`（永远为空）、
     以及 Messenger 启动器本身（它的 HEARD 与主菜单 Heard 重复，去掉后少一层导航）。
   ``ackNNN`` 分流逻辑已内联进 `ui_feed_ax25()`（ACK 不污染收件箱）；msg_store.c 已删除。
-    取舍与偏离见 [design.md](design.md) §11。
+    取舍与偏离见 [docs/design.md](design.md) §11。
 ### 8.4 后续（S4 候选）
 
 已完成（原 S4 清单的一部分，已并入第 8.3 节）：删除二次确认、未读标记、详情分页、中继路径显示。
@@ -276,15 +276,15 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
 - 收件箱持久化到文件，模拟器退出/重启后保留；真机对应外部 Flash / EEPROM；
 - 把 `sim_feed.c` 的 WAV 解码包一层命令行批处理，做「批量音频回归测试」
   （喂一批 WAV，检查解出的呼号/正文是否与期望一致）；
-- ~~按 [design.md](design.md) §12.3 把 UI 状态机移植进固件~~
+- ~~按 [docs/design.md](design.md) §12.3 把 UI 状态机移植进固件~~
   **已完成（2026-09-16）**：三态 UI 移入 `Core/Src/ui_harness.c`（模拟器/真机单源共用），
-  `bbcall_app.c` 接线完成；移植记录与已知补全见 [design.md](design.md) §12.4，
+  `bbcall_app.c` 接线完成；移植记录与已知补全见 [docs/design.md](design.md) §12.4，
   待 LCD 焊上后真机烧录验证。
 ## 8.5 中文显示方案（参考 Dondji）
 
 > **已被取代（2026-09-16）**：UI v2.0 三态界面改用 **Fusion Pixel 12px/10px 字模**
 > （`tools/gen_fusion_font.py` 从原型内嵌字表生成 `firmware-stm32porject/Core/Inc/fusion_font.h`，374 字形），
-> 规范见 [design.md](design.md) §3.5。下面的 GNU Unifont 16x16 子集 / `CN_FONT_ENABLED` 链路
+> 规范见 [docs/design.md](design.md) §3.5。下面的 GNU Unifont 16x16 子集 / `CN_FONT_ENABLED` 链路
 > 保留作历史记录，新 UI 不再编译 `cn_font.c`，`build_win.ps1` 也不再自动检测 `cn_font_data.h`。
 
 **现状**：ASCII 字模（`font8x16.h` / `font6x8.h`）已就绪；中文字库链路已打通（见下），
@@ -307,7 +307,7 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
 
 - **字源不能用 WQY Bitmap Song**：GPL v2（仅此一版）+ 字体嵌入例外，与本项目 GPL-3.0
   **不兼容**（GPLv2-only 无法并入 GPLv3）。改用 **GNU Unifont**
-  （2013 起 GPLv2+ 或 OFL-1.1 双许可，且本身就是 16x16 点阵）；见 `licenses/THIRD_PARTY_NOTICES.md`。
+  （2013 起 GPLv2+ 或 OFL-1.1 双许可，且本身就是 16x16 点阵）；见 `../licenses/THIRD_PARTY_NOTICES.md`。
 - **暂不做拼音输入法**：本项目没有键盘，信道名也暂不支持中文输入。
 
 **片上预算**（STM32F103C8T6，64KB Flash；当前 text 24,160 B，可用约 38KB）：
@@ -350,7 +350,7 @@ python tools/gen_cn_font.py --unifont <unifont.hex> --chars-file tools/cn_chars.
 - BG5ESN FMO（MIT，频率字参考）；
 - VP-Digi（GPL-3.0，AFSK/AX.25 参考）；
 - BG7QKU 仓库未声明 License，仅作资料参考，不复制代码。
-- 本项目 GPL-3.0；详见 README 第 11 节、`licenses/THIRD_PARTY_NOTICES.md` 与 `licenses/`。
+- 本项目 GPL-3.0；详见 README 第 11 节、`../licenses/THIRD_PARTY_NOTICES.md` 与 `../licenses/`。
 
 ## 10. 下一步方案：把漏包率降下来（v0.5 之后）
 

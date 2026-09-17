@@ -1,4 +1,4 @@
-# BBcall_APRS PC LCD 模拟器（SDL2）
+﻿# BBcall_APRS PC LCD 模拟器（SDL2）
 
 用 SDL2 模拟 ST7567 128×64 单色点阵，**直接编译固件里的代码**：
 
@@ -70,7 +70,7 @@ cd simulator\build-win
 -h / --help      帮助
 ```
 
-屏幕坐标、字模、按键语义以仓库根目录 [design.md](../design.md) v2.0 为唯一权威规范
+屏幕坐标、字模、按键语义以[docs/design.md](../docs/design.md) v2.0 为唯一权威规范
 （§5 骨架 / §6 三态 / §8 硬规则 / §13 验证）。
 
 ### 按键
@@ -140,17 +140,17 @@ cd simulator\build-win
 **单源共用**：`ui_harness.c/h` 与 `fusion_font.h` 的真身都在固件
 `firmware-stm32porject/Core/` 下，模拟器构建（`build_win.ps1` / Makefile / CMake）
 直接编译固件那份，不再保留副本——模拟器看到的就是真机跑的代码。
-规范与许可见 [design.md](../design.md) §3.5；与旧 `gen_font.py` ASCII 字模混用不允许。
+规范与许可见 [docs/design.md](../docs/design.md) §3.5；与旧 `gen_font.py` ASCII 字模混用不允许。
 
 ### 统一收件箱（三态模型的主屏；数据规则参考 GOGUFW）
 
 UI v2.0（2026-09-16）把界面收敛为**三态**：待机 / 有未读 / 收件箱，收件箱是主功能屏
-（版面与数据规则见 [design.md](../design.md) §6）。更早的 v2.0（2026-09-14）曾把 v1 并存的
+（版面与数据规则见 [docs/design.md](../docs/design.md) §6）。更早的 v2.0（2026-09-14）曾把 v1 并存的
 HEARD 台站列表与 MESSAGES 消息列表合并为一个统一收件箱——消息 / 位置 / Mic-E / 其它帧同列，
 类型用 `M/P/C/X` 标注；该结构沿革保留作历史记录。数据规则参考
 [Gogu-Qs/GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)
 （Apache-2.0，UV-K1 / UV-K5 V3 定制固件，同样是 128x64 单色 LCD）。
-采用的规范与取舍都记在根目录 [design.md](../design.md) §11（唯一权威规范）。
+采用的规范与取舍都记在[docs/design.md](../docs/design.md) §11（唯一权威规范）。
 
 - 最新在上；消息时刻按 `rx_ms` 显示 `HH:MM:SS`；未读 `*` 行首；
 - ackNNN 送达确认只计数、不进收件箱；

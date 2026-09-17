@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """渲染 BBcall_APRS 架构总览图（风格参照 CH582 架构图：芯片居中 + 四象限 + 底部引脚总表）。
 
@@ -73,7 +73,7 @@ def trace(pts):
 # ---------------- 标题 ----------------
 ax.text(80, 96.5, "BBcall_APRS 架构总览", ha="center", va="center",
         fontsize=23, fontweight="bold", color=INK)
-ax.text(80, 92.8, "BK4802 APRS 寻呼机 · 仅接收 · 144.640 MHz · 规范见 design.md v2.0",
+ax.text(80, 92.8, "BK4802 APRS 寻呼机 · 仅接收 · 144.640 MHz · 规范见 docs/design.md v2.0",
         ha="center", va="center", fontsize=10.5, color="#5a6472")
 
 # ---------------- 中央芯片 ----------------
@@ -100,7 +100,7 @@ for i in range(7):
 
 # ---------------- 四象限模块（高 26，四行条目不溢出） ----------------
 module_box(6, 66, 56, 26, "应用层", [
-    ("界面（design.md v2.0）", ["ui_harness.c 三态界面", "待机 / 有未读 / 收件箱",
+    ("界面（docs/design.md v2.0）", ["ui_harness.c 三态界面", "待机 / 有未读 / 收件箱",
                                 "Fusion Pixel 12/10px", "▲▼● 长按 620ms 退出"]),
     ("主循环", ["bbcall_app.c", "喂帧 / 按键扫描 / 背光", "收件箱 24 条·最新在上",
                 "60s 去重 · ackNNN 分流"]),

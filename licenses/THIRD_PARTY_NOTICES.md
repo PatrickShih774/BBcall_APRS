@@ -1,4 +1,4 @@
-# 第三方组件与许可声明
+﻿# 第三方组件与许可声明
 
 本项目自身以 **GPL-3.0** 发布（见根目录 `LICENSE`）。以下是参考/使用的第三方项目与许可。
 
@@ -41,7 +41,7 @@
   `NOW`/`12m`/`3h` 年龄列、未读 `*`、送达 `+`/`x`/`-`、按 `(from,id)` 去重、`ackNNN` 送达确认、
   点状分隔线（1 实 3 空）、右对齐计数留安全边距、启动器选中项右侧大图标。
 - **未复制其代码**：本项目最初版的实现（`simulator/src/msg_store.c`、`ui_harness.c` 的 Messenger 段）
-  按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `design.md` §11
+  按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `../docs/design.md` §11
   （原 `UISkill.md` 第 11 节，已并入 design.md v2.0）。
 - 合规说明：Apache-2.0 与 GPL-3.0 兼容；本项目未纳入其源码，仅作设计参考并在文档中标注出处。
   如后续需要直接复用其代码，应保留 Apache-2.0 许可与 NOTICE 要求。
@@ -92,7 +92,7 @@
 - 仓库：https://github.com/EthanYan6/Dondji ，许可：**Apache-2.0**
 - 用途：中文显示方案的**设计参考**。其字库布局为
   `[位图][Unicode 索引 4B/项 升序][拼音表][版本字节]`，放在**外部 SPI Flash**，固件只保留布局常量；
-  本项目沿用同一形状（见 `tools/gen_cn_font.py` 与 `PLAN.md` 中文显示一节）。
+  本项目沿用同一形状（见 `tools/gen_cn_font.py` 与 `../docs/PLAN.md` 中文显示一节）。
 - **未复制其代码，也未使用其字模数据**（其字源为 WQY Bitmap Song，许可与本项目不兼容）。
 - 合规说明：Apache-2.0 与 GPL-3.0 兼容；仅作设计参考并在文档标注出处。
 ## STMicroelectronics STM32 HAL / CMSIS
@@ -101,8 +101,8 @@
 - 许可：随 STM32CubeIDE 工程生成，目录内附有 `LICENSE.txt`（STM32 HAL/CMSIS 的 BSD-3-Clause 等条款）。
 - 合规说明：保留 `Drivers/` 下的原始版权与许可文件，不修改许可声明。
 
-## BK4802P.pdf（参考数据手册）
+## docs/BK4802P.pdf（参考数据手册）
 
-- `BK4802P.pdf` 是 Beken 的 BK4802P 数据手册，作为本项目的硬件参考手册保留在仓库中。
+- `docs/BK4802P.pdf` 是 Beken 的 BK4802P 数据手册，作为本项目的硬件参考手册保留在仓库中。
 - 版权归 Beken 所有，仅供学习与开发参考；如需商用或再分发请遵循厂商授权。
 - 若权利人提出要求，可将其从仓库中移除。

@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 gen_fusion_font.py -- 从原型 HTML 内嵌字模生成 C 字模头文件
 
-字模来源：bbcall-aprs-screen-states.html 内嵌的 G12 / G10 两张字形表，
+字模来源：docs/bbcall-aprs-screen-states.html 内嵌的 G12 / G10 两张字形表，
 其上游是 Fusion Pixel Font（TakWolf, SIL OFL 1.1）12px / 10px 单宽版 BDF，
 提取范围 = 原型实际用到的 374 字形（95 ASCII + 279 汉字），与 design.md §3.5 一致。
 
@@ -20,7 +20,7 @@ gen_fusion_font.py -- 从原型 HTML 内嵌字模生成 C 字模头文件
 import re, sys, pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-HTML = ROOT / "bbcall-aprs-screen-states.html"
+HTML = ROOT / "docs" / "bbcall-aprs-screen-states.html"
 OUT = ROOT / "firmware-stm32porject" / "Core" / "Inc" / "fusion_font.h"
 
 
@@ -74,7 +74,7 @@ def main():
     out = []
     out.append("/* 本文件由 tools/gen_fusion_font.py 自动生成，勿手改。")
     out.append(" * 字模来源：Fusion Pixel Font（TakWolf, SIL OFL 1.1）12px/10px 单宽版，")
-    out.append(" * 经 bbcall-aprs-screen-states.html 内嵌字形表提取（374 字形：95 ASCII + 279 汉字）。")
+    out.append(" * 经 docs/bbcall-aprs-screen-states.html 内嵌字形表提取（374 字形：95 ASCII + 279 汉字）。")
     out.append(" * 行位图每行 ceil(gw/8) 字节，高位在左；渲染见 ui_harness.c 的 fp_glyph()。")
     out.append(" */")
     out.append("#ifndef FUSION_FONT_H")

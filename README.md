@@ -16,28 +16,29 @@
 | # | 章节 | 内容 |
 |---|---|---|
 | 1 | [关键决策](#1-关键决策原开放问题已确定) | MCU / 射频芯片 / 频率 / 收发 / 显示 / 调试口 |
-| 2 | [引脚分配](#2-引脚分配) | BK4802 / LCD / 按键 / 串口 / ADC 全引脚表 |
-| 3 | [软件结构](#3-软件结构) | 文件表 / 架构图 / 信号链 |
+| 2 | [引脚分配](#2-引脚分配) | → [docs/PLAN.md §2](docs/PLAN.md#2-硬件与引脚以实机为准) |
+| 3 | [软件结构](#3-软件结构) | 文件表 / 架构图；信号链 → [docs/PLAN.md §3](docs/PLAN.md#3-软件架构) |
 | 4 | [调试过程记录](#4-调试过程记录) | **全流程踩坑**：频率字 / RSSI / I2C / 音频 / AFSK 解码 / LCD 实机联调 |
 | 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出格式 |
 | 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频生成 / UI 校验 |
 | 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
 | 8 | [固件功能与审计修复（v0.3）](#8-固件功能与审计修复v03) | 解码功能清单 / 审计修复 / 实测数据 |
 | 9 | [硬件改进方案](#9-硬件改进方案提升解码率) | RF 前端 / 音频链路 / 电源 / 晶振 / 发射端 |
-| 10 | [待办 / 下一步](#10-待办--下一步) | → [PLAN.md](PLAN.md)（路线图 / 验收标准） |
-| 11 | [许可与合规](#11-许可与合规) | GPL-3.0 / 第三方许可兼容性 / 合规要点 |
-| 12 | [参考项目](#12-参考项目) | MM-Radio / BG5ESN / VP-Digi 等 |
-| 13 | [PC 端 LCD 模拟器（SDL2）](#13-pc-端-lcd-模拟器sdl2) | 概要 → [simulator/SIMULATOR.md](simulator/SIMULATOR.md) |
+| 10 | [待办 / 下一步](#10-待办--下一步) | → [docs/PLAN.md](docs/PLAN.md)（路线图 / 验收标准） |
+| 11 | [许可与合规](#11-许可与合规) | GPL-3.0 → 第三方声明与兼容性 |
+| 12 | [PC 端 LCD 模拟器（SDL2）](#12-pc-端-lcd-模拟器sdl2) | 概要 → [simulator/SIMULATOR.md](simulator/SIMULATOR.md) |
 
 **相关文档**：
 
 | 文件 | 说明 |
 |---|---|
-| [PLAN.md](PLAN.md) | BB 机功能规划（按版本推进，唯一路线图） |
-| [design.md](design.md) | UI 设计规范（唯一权威规范，坐标/字模/按键全锁死） |
+| [docs/PLAN.md](docs/PLAN.md) | BB 机功能规划、引脚与软件架构（唯一路线图） |
+| [docs/design.md](docs/design.md) | UI 设计规范（唯一权威规范，坐标/字模/按键全锁死） |
+| [docs/UI-3states.png](docs/UI-3states.png) | 三态 UI 预览 |
 | [simulator/SIMULATOR.md](simulator/SIMULATOR.md) | 模拟器详细文档（命令行参数 / 按键 / 数据源 / 构建坑） |
-| [THIRD_PARTY_NOTICES.md](licenses/THIRD_PARTY_NOTICES.md) | 第三方组件与许可声明 |
+| [licenses/THIRD_PARTY_NOTICES.md](licenses/THIRD_PARTY_NOTICES.md) | 第三方组件与许可声明 |
 
+---
 ---
 
 ## 1. 关键决策（原「开放问题」已确定）
@@ -48,7 +49,7 @@
 | 射频芯片 | **BK4802P**，21.25MHz 晶振，低中频 IF = 137kHz |
 | 接收频率 | **144.640MHz**（2m），默认频点 |
 | 收发 | **仅接收**，不做发射 |
-| 显示 | ST7567 12864（未焊接，代码里 `BBCALL_LCD_ENABLED=0`） |
+| 显示 | ST7567 12864，已焊接并点亮；未启用时可设 `BBCALL_LCD_ENABLED=0` |
 | 调试口 | USART3：PB10=TX、PB11=RX、115200 8N1 |
 | 工程底座 | 主框架参照 [MM-Radio](https://github.com/doublehan07/MM-Radio)，代码移植进 F103 CubeIDE 工程 |
 
@@ -56,23 +57,10 @@
 
 ## 2. 引脚分配
 
-定义文件：`firmware-stm32porject/Core/Inc/bbcall_cfg.h`
+完整引脚表与外设说明由 **[docs/PLAN.md §2](docs/PLAN.md#2-硬件与引脚以实机为准)** 维护，此处不再重复。
+固件定义文件：`firmware-stm32porject/Core/Inc/bbcall_cfg.h`。
 
-| 功能 | 引脚 | 说明 |
-|---|---|---|
-| BK4802 SCL | PA9 | GPIO 位敲 I2C（与 MM-Radio 一致） |
-| BK4802 SDA | PA10 | 写：推挽；读：切输入（与 MM-Radio 一致） |
-| BK4802 CE | PA0 | 输出高使能（与 MM-Radio 一致） |
-| BK4802 DIO1 | PA8 | 输出低（与 MM-Radio 一致） |
-| 对讲机侧 PWR / PTT | PA2 / PA4 | 与 MM-Radio 一致 |
-| 音频输入 | **PA1 = ADC1_IN1** | 现走 ADC 解调；同时是 TIM2_CH2 |
-| ST7567 CS/CLK/MOSI/A0/RST | PB6 / PB3 / PB5 / PB4 / PB7 | 位敲 SPI |
-| LCD 背光 | PB0 | 高电平点亮 |
-| 蜂鸣器 / 振动 | PA6 / PA7 | 输出 |
-| LED | PB15 | 500ms 翻转，用于判断程序是否活着 |
-| 按键 上/下/确定 | PB12 / PB13 / PB14 | 上拉输入 |
-| 调试串口 USART3 | PB10=TX / PB11=RX | 115200 8N1 |
-
+---
 ---
 
 ## 3. 软件结构
@@ -92,19 +80,7 @@
 | `Core/Src/ui_harness.c` | 三态界面（待机/有未读/收件箱）与按键状态机；模拟器与真机单源共用 |
 | `Core/Src/bbcall_app.c` | 初始化、主循环、串口诊断/解码输出、UI 接线（按键/背光/喂帧） |
 
-信号链：
-
-```
-BK4802P FM 接收 → EAROP 音频（D 类功放输出）
-  → 104 隔直 + RC 低通 + 10k/10k 偏置
-  → PA1(ADC1_IN1)
-  → TIM3 9600Hz 采样（1200 baud × 8）
-  → 最近 8 点对 1200/2200Hz 做定点相关
-  → 16 相位并行判决（含半采样插值）+ 跳变对齐位时钟
-  → NRZI（不变=1、跳变=0）
-  → HDLC（0x7E 标志、去位填充、CRC-16/X.25）
-  → AX.25 拆呼号 → APRS 解析 → USART3 / LCD
-```
+信号链与关键实现点由 **[docs/PLAN.md §3](docs/PLAN.md#3-软件架构)** 维护，此处不再重复。
 
 ---
 
@@ -347,6 +323,8 @@ APRS 消息类型（信息域以 `:` 开头）会多一行：
 
 屏焊上之后逐条排障，这一节是当天的完整记录（现象 → 原因 → 改法）。
 
+![三态 UI 预览](docs/UI-3states.png)
+
 | 现象 | 原因 | 改法 |
 |---|---|---|
 | **背光亮、屏上一个字都没有** | 初始化只发了 `0x2C`：电源控制 `0x28|VC<<2|VR<<1|VF` 只开了电压转换 VC，稳压 VR 与电压跟随 VF 都是关的，V0 建立不起来 | 按 `0x2C → 0x2E → 0x2F` 逐级打开（每级留 2ms），`0x2F` 之后 V0 才到位 |
@@ -357,13 +335,9 @@ APRS 消息类型（信息域以 `:` 开头）会多一行：
 | 对比度偏浓 | 初始 0x24 偏大 | 改 0x12（`0x81` 后的字节，范围 0x00~0x3F） |
 | 焊好后想快速判断屏通不通 | 没有自检手段 | `LCD_BOOT_FLASH=1`：上电全屏点亮 300ms 再清屏；只有硬件侧（PSB/CS/RST/V0/对比度）有问题才看不到这一下 |
 
-UI 与数据侧：状态机行为（收包切页 / 背光 / 墙钟 / 呼号 SSID / 帧级 RSSI/SNR 直读与兜底）已在 [design.md](design.md) §9（状态机与按键）与 §12.4（真机移植记录）中完整描述，此处不再重复。
+UI 与数据侧：状态机行为（收包切页 / 背光 / 墙钟 / 呼号 SSID / 帧级 RSSI/SNR 直读与兜底）已在 [docs/design.md](docs/design.md) §9（状态机与按键）与 §12.4（真机移植记录）中完整描述；位置帧正文规则与内存裁剪见 [docs/design.md §6.3](docs/design.md#63-态-3--收件箱骨架-52)；无串口时的 Live Expressions 观测变量见 [docs/PLAN.md §10.4](docs/PLAN.md#104-现有观测与回归工具直接用不必新建)。此处不再重复。
 
 - **UTF-8 截断 bug**：`utf8_clip_tail()` 前几版会把结尾一个**完整**汉字也删掉（位置帧注释末尾丢字），已改成按「尾部这一串字节数够不够一个完整字符」判断。
-- **位置帧正文改为注释优先**：经纬度在「有未读」页右上有专用格子，正文再抄一遍会把真正的消息文字挤进滚动区；有注释就只放注释，纯信标才回退成「经纬度 + 类型 + 速度/航向」。
-- **无串口时的观测手段**：`s_rf_ok_cnt / s_rf_fail_cnt / s_rf_last_raw`（S-meter 采样成功/失败次数与最近原始值）可以用 ST-Link 的 Live Expressions 直接看；`ui_harness.c::s_box[0]` 能看到屏上那条消息的全部字段。**SWO 用不了**：SWO 是 PB3，已经被 LCD 当 SCLK 占用。
-
-内存：v2.0 UI 接进来后 RAM 吃紧，`UI_INBOX_MAX 24→16`、`UI_BODY_MAX 96→64`、`_Min_Stack_Size 0x800→0x600`（详见 design.md §6.3）。
 
 **当天收尾的实机验证**：`text=57056 / data=132 / bss=20220` 这一版在实机上**解码正常**（连续收包成功）。
 这条结论顺带排除了一个怀疑：每 100ms 读一次 BK4802 寄存器 24（S-meter）连同读失败时的总线恢复脉冲，
@@ -587,51 +561,24 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 
 ## 10. 待办 / 下一步
 
-BB 机功能规划（v0.4 → v1.0）、版本路线、验收标准与当前优先级全部在 **[PLAN.md](PLAN.md)**，此处不再重复。
+BB 机功能规划（v0.4 → v1.0）、版本路线、验收标准与当前优先级全部在 **[docs/PLAN.md](docs/PLAN.md)**，此处不再重复。
 
-当前最高优先级：**量化漏包率 → 射频前端改进**（方案见 PLAN.md §10）。
+当前最高优先级：**量化漏包率 → 射频前端改进**（方案见 docs/PLAN.md §10）。
 
 ## 11. 许可与合规
 
-### 本项目
+- 本项目代码与文档如无特别说明，按 **GNU General Public License v3.0（GPL-3.0）** 分发，见根目录 [`LICENSE`](LICENSE)。
+- 参考项目、第三方字体 / SDK / 数据手册、许可证兼容性与分发合规要求，统一见 **[licenses/THIRD_PARTY_NOTICES.md](licenses/THIRD_PARTY_NOTICES.md)**，此处不再重复。
+- `docs/BK4802P.pdf` 仅作为 BK4802P 学习与开发参考；版权与再分发限制见第三方声明。
 
-- 许可证：**GNU General Public License v3.0（GPL-3.0）**，见根目录 `LICENSE`。
-- 代码与文档如无特别说明，均按 GPL-3.0 分发。
-
-### 参考项目许可证与兼容性
-
-| 项目 | 许可证 | 与本项目 GPL-3.0 是否兼容 | 说明 |
-|---|---|---|---|
-| [MM-Radio](https://github.com/doublehan07/MM-Radio) | **BSD-2-Clause** (c) 2024 Han Zhang | 兼容 | 主参考/工程底座；保留其版权与许可声明 |
-| [BG5ESN FMO-Radio-Module-BK4802-V2.00](https://github.com/BG5ESN/FMO-Radio-Module-BK4802-V2.00) | **MIT** (c) 2025 BG5ESN | 兼容 | 频率字计算参考 |
-| [VP-Digi](https://github.com/sq8vps/vp-digi) | **GPL-3.0** | 兼容 | AFSK/AX.25/APRS 资料参考 |
-| [BG7QKU STM32_SIMPLE_CONTROL_BK4802N](https://github.com/BG7QKU/STM32_SIMPLE_CONTROL_BK4802N) | **未声明 LICENSE**（默认保留所有权利） | 不可直接复制代码 | 仅作资料参考；引用代码需作者授权 |
-| STM32 HAL / CMSIS（`Drivers/`） | ST 工程自带许可（目录内 `LICENSE.txt`） | 兼容（保留声明） | CubeIDE 生成代码，勿删许可文件 |
-
-许可证原文放在 `licenses/`，第三方组件说明见 `licenses/THIRD_PARTY_NOTICES.md`。
-
-### 合规要点
-
-1. **BSD-2 / MIT 代码并入 GPL-3.0 是允许的**，但要保留原版权声明、许可全文和免责声明。
-2. 发布 HEX/BIN/Release 时，二进制分发同样需要附带 `LICENSE`、`licenses/` 与 `licenses/THIRD_PARTY_NOTICES.md`（或在 Release 说明中给出链接）。
-3. **不要直接复制 BG7QKU 仓库的代码**：该仓库未声明 LICENSE，默认保留所有权利。
-4. `BK4802P.pdf` 作为 BK4802P 参考数据手册保留在仓库中；版权归 Beken 所有，仅供学习与开发参考。
-5. 本项目只做接收（RX-only）。
 ---
 
-## 12. 参考项目
-
-- [MM-Radio](https://github.com/doublehan07/MM-Radio)
-- [BG7QKU STM32_SIMPLE_CONTROL_BK4802N](https://github.com/BG7QKU)
-- [BG5ESN FMO BK4802 V2.00](https://github.com/BG5ESN/FMO-Radio-Module-BK4802-V2.00)
-- [VP-Digi](https://github.com/sq8vps/vp-digi)
-
-## 13. PC 端 LCD 模拟器（SDL2）
+## 12. PC 端 LCD 模拟器（SDL2）
 
 用 SDL2 在 PC 上模拟 ST7567 128×64 单色点阵，**直接编译固件里的代码**（`lcd_st7567.c`、`ui_harness.c`、`ax25.c`、`aprs.c`、`modem.c`），无需烧录即可看屏幕效果和验证解码链路。
 
 > **完整文档**：[simulator/SIMULATOR.md](simulator/SIMULATOR.md)（命令行参数 / 按键映射 / 导航模型 / 构建坑 / SEG 方向与列偏移）。
-> **UI 规范**：[design.md](design.md)（唯一权威规范：骨架 / 三态 / 硬规则 / 验证）。
+> **UI 规范**：[docs/design.md](docs/design.md)（唯一权威规范：骨架 / 三态 / 硬规则 / 验证）。
 
 快速构建：
 
