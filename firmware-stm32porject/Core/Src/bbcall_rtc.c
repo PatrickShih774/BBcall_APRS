@@ -13,6 +13,7 @@
  * 掉电（无 VBAT 电池）后备份域一起丢，属于预期：重新上电用 tools/set_rtc_time.ps1 再对一次即可。
  */
 #include "main.h"
+#include "bbcall_cfg.h"
 #include "bbcall_rtc.h"
 
 #define RTC_MAGIC_VALID  0x5A5Au   /* BKP->DR1：时间已对过 */
@@ -158,6 +159,24 @@ void bbcall_rtc_set(const rtc_dt_t *dt)
   BKP->DR4 = (uint16_t)(((uint16_t)dt->mon << 8) | dt->day);
   BKP->DR1 = RTC_MAGIC_VALID;               /* 最后置有效标记：前三条写完才算对时成功 */
 }
+
+#if BBCALL_RTC_SEED_BUILD_TIME
+/* 没焊串口时的兜底：把编译时间戳（__DATE__ = "Sep 18 2026"，__TIME__ = "00:45:12"）写进 RTC，
+ * 值就是 CubeIDE 点 Build 的那一刻。接上串口后用 tools/set_rtc_time.ps1 可覆盖成精确时间。 */
+uint8_t bbcall_rtc_build_time(rtc_dt_t *dt)
+{
+  return rtc_parse_build_stamp(__DATE__, __TIME__, dt);
+}
+
+uint8_t bbcall_rtc_seed_build_time(void)
+{
+  rtc_dt_t dt;
+  if (s_src == RTC_SRC_NONE) return 0u;
+  if (!bbcall_rtc_build_time(&dt)) return 0u;
+  bbcall_rtc_set(&dt);
+  return bbcall_rtc_valid();
+}
+#endif /* BBCALL_RTC_SEED_BUILD_TIME */
 
 uint32_t bbcall_rtc_day_ms(void)
 {

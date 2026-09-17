@@ -305,6 +305,19 @@ void bbcall_app_init(void)
   bbcall_rtc_init();
   hw_console_puts("[RTC] src=");
   hw_console_puts(bbcall_rtc_clock_src_name());
+#if BBCALL_RTC_SEED_BUILD_TIME
+  /* 没焊串口也能有真实时间：RTC 还没对过时用编译时间戳兜底（= CubeIDE 点 Build 的那一刻）。
+   * 接上串口后可随时用 tools/set_rtc_time.ps1 覆盖成精确时间。 */
+  if (!bbcall_rtc_valid()) {
+    rtc_dt_t bdt;
+    if (bbcall_rtc_build_time(&bdt) && bbcall_rtc_seed_build_time()) {
+      char bbuf[20];
+      rtc_format_dt(&bdt, bbuf, (uint8_t)sizeof(bbuf));
+      hw_console_puts(" seeded=");
+      hw_console_puts(bbuf);
+    }
+  }
+#endif
   if (bbcall_rtc_valid()) {
     rtc_dt_t rdt;
     if (bbcall_rtc_get(&rdt)) {

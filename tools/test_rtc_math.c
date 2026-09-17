@@ -70,6 +70,15 @@ int main(void)
   ck(!rtc_parse_dt("TIME=2026-09-18 22:30:00", &dt), "reject with prefix (caller strips it)");
   ck(!rtc_parse_dt("1999-12-31 23:59:59", &dt), "reject year<2000");
 
+  /* 编译时间戳（__DATE__/__TIME__ -> dt）：含日号空格补齐、非法输入 */
+  ck(rtc_parse_build_stamp("Sep 18 2026", "00:45:12", &dt) && dt.year == 2026u && dt.mon == 9u &&
+     dt.day == 18u && dt.hour == 0u && dt.min == 45u && dt.sec == 12u && dt.wday == 5u, "build stamp normal");
+  ck(rtc_parse_build_stamp("Sep  8 2026", "23:59:59", &dt) && dt.day == 8u && dt.hour == 23u, "build stamp 1-digit day");
+  ck(rtc_parse_build_stamp("Jan  1 2000", "00:00:00", &dt) && dt.wday == 6u, "build stamp 2000-01-01 Sat");
+  ck(!rtc_parse_build_stamp("Xxx 18 2026", "00:00:00", &dt), "build stamp bad month");
+  ck(!rtc_parse_build_stamp("Sep 32 2026", "00:00:00", &dt), "build stamp bad day");
+  ck(!rtc_parse_build_stamp("Sep 18 2026", "24:00:00", &dt), "build stamp bad hour");
+  ck(rtc_parse_build_stamp(__DATE__, __TIME__, &dt), "build stamp real __DATE__/__TIME__");
   /* 格式化 */
   dt.year = 2026u; dt.mon = 9u; dt.day = 18u; dt.hour = 22u; dt.min = 30u; dt.sec = 5u; dt.wday = 5u;
   rtc_format_dt(&dt, buf, (uint8_t)sizeof(buf));

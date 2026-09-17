@@ -51,6 +51,13 @@
 #define BBCALL_SMETER_POLL_MS 100u
 #endif
 
+/* ---------- RTC：没焊串口时用编译时间戳兜底 ----------
+ * RTC 还没被对过时（首次上电/掉电后），用 __DATE__/__TIME__ 给 RTC 对时：
+ * 值 = CubeIDE 点 Build 的那一刻，烧录后屏幕就是真实时间，不需要串口或其它工具。
+ * 接上串口后可随时用 tools/set_rtc_time.ps1 覆盖成精确时间（之后这里不再生效）。
+ * 置 0 = 不自动对时（退回下面这组默认墙钟）。 */
+#define BBCALL_RTC_SEED_BUILD_TIME 1
+
 /* ---------- 锁屏页默认墙钟（无 RTC 时用） ----------
  * 开机即从这一刻走：大格显示 HH:MM，下一行显示 周W M/D。
  * 置 BBCALL_WALLCLOCK_ENABLE 0 则退回"开机时长 UP HH:MM"（design.md 的原始留白做法）。

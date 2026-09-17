@@ -19,4 +19,8 @@ uint8_t     bbcall_rtc_get(rtc_dt_t *dt);      /* 读当前时间；0 = 没走�
 void        bbcall_rtc_set(const rtc_dt_t *dt); /* 写时间并置"已对时"标记 */
 uint32_t    bbcall_rtc_day_ms(void);     /* 当日 0 点起的毫秒数（UI 时钟基准） */
 
+/* 编译时间戳兜底（BBCALL_RTC_SEED_BUILD_TIME=1 时用）：__DATE__/__TIME__ -> dt / 直接写 RTC */
+uint8_t     bbcall_rtc_build_time(rtc_dt_t *dt);
+uint8_t     bbcall_rtc_seed_build_time(void);
+
 #endif /* BBCALL_RTC_H */
