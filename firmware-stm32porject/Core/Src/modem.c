@@ -10,6 +10,15 @@
  * （原门限 20000 会丢掉大量有效比特，导致成功率很低）。
  */
 #include "modem.h"
+
+/* 软判决（逐位相关差积累）开关：
+ *   1 = 每个相位先把一个位窗口内的 m1-m2（半采样相位用插值）累加，到采样点再判 mark/space；
+ *   0 = 恢复单点硬判决（每 8 个采样直接判一次，2026-09-16 之前的做法）。
+ * 用途：docs/PLAN.md §10.3 的回退策略与 A/B 对比；也可用 -DBBCALL_MODEM_SOFT_DECISION=0 覆盖。
+ * 关掉可省 25 x 4 = 100 字节 RAM（20KB 机上这不算小）。 */
+#ifndef BBCALL_MODEM_SOFT_DECISION
+#define BBCALL_MODEM_SOFT_DECISION 1
+#endif
 #include <string.h>
 
 #define MODEM_NPHASE 16u
@@ -17,7 +26,9 @@
 typedef struct {
   uint8_t have;
   uint8_t prev_tone;
+#if BBCALL_MODEM_SOFT_DECISION
   int32_t acc;
+#endif
   ax25_hdlc_t hdlc;
 } modem_dec_t;
 
@@ -58,7 +69,9 @@ typedef struct {
   ax25_hdlc_t hdlc;
   uint32_t next_q8;
   int32_t period_q8;
+#if BBCALL_MODEM_SOFT_DECISION
   int32_t acc;
+#endif
   uint8_t prev_tone;
   uint8_t have_tone;
   uint8_t have_next;
@@ -162,7 +175,9 @@ static void dec_reset(modem_dec_t *d)
 {
   d->have = 0;
   d->prev_tone = 0;
+#if BBCALL_MODEM_SOFT_DECISION
   d->acc = 0;
+#endif
   ax25_hdlc_init(&d->hdlc);
 }
 
@@ -189,7 +204,9 @@ void modem_reset_sync(void)
   for (uint8_t i = 0; i < TR_N; i++) {
     ax25_hdlc_init(&s_trd[i].hdlc);
     s_trd[i].period_q8 = tr_period_q8[i % 3u];
+#if BBCALL_MODEM_SOFT_DECISION
     s_trd[i].acc = 0;
+#endif
     s_trd[i].next_q8 = 0;
     s_trd[i].prev_tone = 0;
     s_trd[i].have_tone = 0;
@@ -198,11 +215,10 @@ void modem_reset_sync(void)
   s_tr_last_sign = 0; s_tr_cand_sign = 0; s_tr_cand_cnt = 0; s_tr_ncross = 0; s_tr_have_sign = 0;
 }
 
-static void feed_dec(uint8_t idx)
+/* 用给定音调喂一路相位：NRZI + HDLC，CRC 正确就入好帧队列 */
+static void feed_bit(uint8_t idx, uint8_t tone)
 {
   modem_dec_t *d = &s_dec[idx & (MODEM_NPHASE - 1u)];
-  uint8_t tone = (d->acc >= 0) ? 0u : 1u;  /* 0=mark, 1=space */
-  d->acc = 0;
   if (!d->have) {
     d->have = 1;
     d->prev_tone = tone;
@@ -219,6 +235,23 @@ static void feed_dec(uint8_t idx)
     }
   }
 }
+
+#if BBCALL_MODEM_SOFT_DECISION
+/* 软判决：取该相位累积的相关差作判决，然后清零开始下一个位窗口 */
+static void feed_dec(uint8_t idx)
+{
+  modem_dec_t *d = &s_dec[idx & (MODEM_NPHASE - 1u)];
+  uint8_t tone = (d->acc >= 0) ? 0u : 1u;  /* 0=mark, 1=space */
+  d->acc = 0;
+  feed_bit(idx, tone);
+}
+#else
+/* 回退：单点硬判决，音调由调用方在采样点直接判好传进来 */
+static void feed_dec(uint8_t idx, uint8_t tone)
+{
+  feed_bit(idx, tone);
+}
+#endif
 
 void modem_adc_sample(uint16_t adc)
 {
@@ -250,16 +283,26 @@ void modem_adc_sample(uint16_t adc)
   int32_t v = m1 - m2;
   int32_t vh = (v + s_prev_v) / 2;                        /* 半采样插值 */
   s_prev_v = v;
+#if BBCALL_MODEM_SOFT_DECISION
   /* 每路相位先积累整段相关差，到采样点再判决：降低单点噪声影响。 */
   for (uint8_t i = 0; i < MODEM_NPHASE; i++)
     s_dec[i].acc += (i & 1u) ? vh : v;
   for (uint8_t i = 0; i < TR_N; i++)
     if (s_trd[i].have_next) s_trd[i].acc += v;
+#else
+  uint8_t tone_full = (v  >= 0) ? 0u : 1u;   /* 0=mark, 1=space */
+  uint8_t tone_half = (vh >= 0) ? 0u : 1u;
+#endif
 
   /* 16 相位：2n 用整采样相位，2n+1 用半采样相位，每个解码器每 8 个采样得到 1 bit */
   uint8_t base = (uint8_t)((2u * (s_nsamp - 1u)) & (MODEM_NPHASE - 1u));
+#if BBCALL_MODEM_SOFT_DECISION
   feed_dec(base);
   feed_dec((uint8_t)(base + 1u));
+#else
+  feed_dec(base, tone_full);
+  feed_dec((uint8_t)(base + 1u), tone_half);
+#endif
 
   /* --- 第 3 条路径：音调跳变重新对齐位时钟（抗 1200 baud/9600Hz 时钟漂移） ---
    * 相关窗中心比实际时间晚约 3.5 采样；检测到跳变后把采样点定在
@@ -290,8 +333,12 @@ void modem_adc_sample(uint16_t adc)
         d->next_q8 = cur_q8 + (uint32_t)(d->period_q8 / 2);
         continue;
       }
+#if BBCALL_MODEM_SOFT_DECISION
       uint8_t tone = (d->acc >= 0) ? 0u : 1u;
       d->acc = 0;
+#else
+      uint8_t tone = (v >= 0) ? 0u : 1u;
+#endif
       if (d->have_tone) {
         uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;
         if (ax25_hdlc_feed_bit(&d->hdlc, bit, &s_isr_frame)) {
