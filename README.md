@@ -35,7 +35,7 @@
 |---|---|
 | [PLAN.md](PLAN.md) | BB 机功能规划（按版本推进，唯一路线图） |
 | [design.md](design.md) | UI 设计规范（唯一权威规范，坐标/字模/按键全锁死） |
-| [simulator/README.md](simulator/README.md) | 模拟器详细文档（命令行参数 / 按键 / 数据源 / 构建坑） |
+| [simulator/SIMULATOR.md](simulator/SIMULATOR.md) | 模拟器详细文档（命令行参数 / 按键 / 数据源 / 构建坑） |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方组件与许可声明 |
 
 ---
@@ -662,7 +662,7 @@ BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
 
 用 SDL2 在 PC 上模拟 ST7567 128×64 单色点阵，**直接编译固件里的代码**（`lcd_st7567.c`、`ui_harness.c`、`ax25.c`、`aprs.c`、`modem.c`），无需烧录即可看屏幕效果和验证解码链路。
 
-> **完整文档**：[simulator/README.md](simulator/README.md)（命令行参数 / 按键映射 / 导航模型 / 构建坑 / SEG 方向与列偏移）。
+> **完整文档**：[simulator/SIMULATOR.md](simulator/SIMULATOR.md)（命令行参数 / 按键映射 / 导航模型 / 构建坑 / SEG 方向与列偏移）。
 > **UI 规范**：[design.md](design.md)（唯一权威规范：骨架 / 三态 / 硬规则 / 验证）。
 
 ### 13.1 快速构建
@@ -673,7 +673,7 @@ powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1            # �
 powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Selftest  # 编译 + 无窗口自检（写 BMP）
 powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # 编译 + 打开窗口
 
-# 其它构建方式（需自备工具链）：CMake / Makefile，命令见 simulator/README.md
+# 其它构建方式（需自备工具链）：CMake / Makefile，命令见 simulator/SIMULATOR.md
 cmake -B build -S simulator && cmake --build build && ./build/bbcall_sim --scale 4
 ```
 
