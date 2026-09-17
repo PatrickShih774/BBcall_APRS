@@ -17,6 +17,7 @@
 typedef struct {
   uint8_t have;
   uint8_t prev_tone;
+  int32_t acc;
   ax25_hdlc_t hdlc;
 } modem_dec_t;
 
@@ -57,6 +58,7 @@ typedef struct {
   ax25_hdlc_t hdlc;
   uint32_t next_q8;
   int32_t period_q8;
+  int32_t acc;
   uint8_t prev_tone;
   uint8_t have_tone;
   uint8_t have_next;
@@ -160,6 +162,7 @@ static void dec_reset(modem_dec_t *d)
 {
   d->have = 0;
   d->prev_tone = 0;
+  d->acc = 0;
   ax25_hdlc_init(&d->hdlc);
 }
 
@@ -186,6 +189,7 @@ void modem_reset_sync(void)
   for (uint8_t i = 0; i < TR_N; i++) {
     ax25_hdlc_init(&s_trd[i].hdlc);
     s_trd[i].period_q8 = tr_period_q8[i % 3u];
+    s_trd[i].acc = 0;
     s_trd[i].next_q8 = 0;
     s_trd[i].prev_tone = 0;
     s_trd[i].have_tone = 0;
@@ -194,9 +198,11 @@ void modem_reset_sync(void)
   s_tr_last_sign = 0; s_tr_cand_sign = 0; s_tr_cand_cnt = 0; s_tr_ncross = 0; s_tr_have_sign = 0;
 }
 
-static void feed_dec(uint8_t idx, uint8_t tone)
+static void feed_dec(uint8_t idx)
 {
   modem_dec_t *d = &s_dec[idx & (MODEM_NPHASE - 1u)];
+  uint8_t tone = (d->acc >= 0) ? 0u : 1u;  /* 0=mark, 1=space */
+  d->acc = 0;
   if (!d->have) {
     d->have = 1;
     d->prev_tone = tone;
@@ -242,15 +248,18 @@ void modem_adc_sample(uint16_t adc)
   if ((m1 + m2) < 500) { s_other_hits++; return; }   /* 只在极弱时才丢弃 */
 
   int32_t v = m1 - m2;
-  uint8_t tone_full = (v >= 0) ? 0u : 1u;                 /* 0=mark, 1=space */
   int32_t vh = (v + s_prev_v) / 2;                        /* 半采样插值 */
-  uint8_t tone_half = (vh >= 0) ? 0u : 1u;
   s_prev_v = v;
+  /* 每路相位先积累整段相关差，到采样点再判决：降低单点噪声影响。 */
+  for (uint8_t i = 0; i < MODEM_NPHASE; i++)
+    s_dec[i].acc += (i & 1u) ? vh : v;
+  for (uint8_t i = 0; i < TR_N; i++)
+    if (s_trd[i].have_next) s_trd[i].acc += v;
 
   /* 16 相位：2n 用整采样相位，2n+1 用半采样相位，每个解码器每 8 个采样得到 1 bit */
   uint8_t base = (uint8_t)((2u * (s_nsamp - 1u)) & (MODEM_NPHASE - 1u));
-  feed_dec(base, tone_full);
-  feed_dec((uint8_t)(base + 1u), tone_half);
+  feed_dec(base);
+  feed_dec((uint8_t)(base + 1u));
 
   /* --- 第 3 条路径：音调跳变重新对齐位时钟（抗 1200 baud/9600Hz 时钟漂移） ---
    * 相关窗中心比实际时间晚约 3.5 采样；检测到跳变后把采样点定在
@@ -281,7 +290,8 @@ void modem_adc_sample(uint16_t adc)
         d->next_q8 = cur_q8 + (uint32_t)(d->period_q8 / 2);
         continue;
       }
-      uint8_t tone = (v >= 0) ? 0u : 1u;
+      uint8_t tone = (d->acc >= 0) ? 0u : 1u;
+      d->acc = 0;
       if (d->have_tone) {
         uint8_t bit = (tone == d->prev_tone) ? 1u : 0u;
         if (ax25_hdlc_feed_bit(&d->hdlc, bit, &s_isr_frame)) {
@@ -296,8 +306,8 @@ void modem_adc_sample(uint16_t adc)
       d->have_tone = 1;
       d->next_q8 += (uint32_t)d->period_q8;
     }
-  }  s_last_tone = (uint8_t)(tone_full + 1u);
-  if (tone_full == 0u) s_mark_hits++; else s_space_hits++;
+  }  s_last_tone = (uint8_t)((v >= 0 ? 0u : 1u) + 1u);
+  if (v >= 0) s_mark_hits++; else s_space_hits++;
 }
 
 uint16_t modem_last_period(void) { return s_last_adc; }  /* 诊断：最近 ADC 原始值 */
