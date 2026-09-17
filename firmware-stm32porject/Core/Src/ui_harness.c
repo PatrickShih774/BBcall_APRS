@@ -28,6 +28,7 @@
 /* ------------------------------------------------------------------ */
 typedef struct {
   uint8_t  used;
+  uint16_t hash;       /* 整帧哈希：重复包靠它找到原条目刷新时间戳 */
   uint8_t  read;
   uint8_t  kind;        /* UI_KIND_*（详情元信息用；列表不再显示类型字母） */
   uint8_t  fixed;       /* CRC 级别：FIX（FIX2 回放路径无法区分，先并入 FIX） */
@@ -541,6 +542,36 @@ static void clip_str(char *dst, uint8_t cap, const char *src)
   utf8_clip_tail(dst);
 }
 
+/* 重复包（同源同内容，60s 内）：不再丢弃，而是把已入箱的那条刷新时间戳、提到队首、重新标为未读，
+ * 这样"重复信息"也会在屏上出现（时间戳是本次接收时刻）。用户 2026-09-18 要求的改动。
+ * 返回 1 = 屏上有更新（上层据此点亮背光）；0 = 收件箱里没有对应条目（例如 ackNNN 之类本就不入箱）。 */
+static uint8_t ui_bump_duplicate(uint16_t fh, uint32_t t_ms)
+{
+  uint8_t k;
+  for (k = 0u; k < s_count; k++) {
+    if (s_box[k].used && s_box[k].hash == fh) break;
+  }
+  if (k >= s_count) return 0u;
+
+  {
+    ui_item_t tmp = s_box[k];
+    tmp.rx_ms = t_ms;                    /* 关键：时间戳刷新为本次接收时刻 */
+    if (tmp.read) { tmp.read = 0u; s_unread++; }   /* 重新变未读，屏上才会显示 */
+    if (k > 0u) {
+      memmove(&s_box[1], &s_box[0], sizeof(ui_item_t) * (size_t)k);
+      if (s_view == UI_SCREEN_INBOX) {
+        if (s_idx == k)     s_idx = 0u;                       /* 光标就在这条上：跟着它到队首 */
+        else if (s_idx < k) s_idx = (uint8_t)(s_idx + 1u);     /* 前面插了一条，光标后移 */
+      }
+    }
+    s_box[0] = tmp;                      /* 提到队首（最新在上） */
+    s_vscroll = 0u;
+    if (s_view == UI_SCREEN_IDLE || s_view == UI_SCREEN_UNREAD) s_view = UI_SCREEN_UNREAD;
+    redraw();
+    return 1u;
+  }
+}
+
 uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
                      uint8_t fixed, uint8_t repeat)
 {
@@ -551,18 +582,19 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
   char mice_dest[8];
   ui_item_t *it;
   uint8_t i, n;
+  uint16_t fh = 0;
 
   if (!ax25_decode(frame, len, &d)) return 0u;
 
-  {   /* 60s 同源同内容去重（design.md §6.4） */
-    uint16_t fh = 0, k;
-    for (k = 0; k < len; k++) fh = (uint16_t)((fh << 5) ^ (fh >> 2) ^ frame[k]);
+  {   /* 整帧哈希：去重与"重复包刷新时间戳"都用它 */
+    for (uint16_t k = 0; k < len; k++) fh = (uint16_t)((fh << 5) ^ (fh >> 2) ^ frame[k]);
     for (i = 0; i < UI_DUP_N; i++) {
       if (s_dup_src[i][0] && s_dup_hash[i] == fh &&
           strcmp(s_dup_src[i], d.src) == 0 &&
           (uint32_t)(t_ms - s_dup_ms[i]) < 60000u) {
         s_dup_total++;
-        return 0u;
+        s_dup_ms[i] = t_ms;                 /* 去重窗口顺延到本次接收 */
+        return ui_bump_duplicate(fh, t_ms); /* 刷新原条目时间戳并提到队首，不再直接丢弃 */
       }
     }
     s_dup_hash[s_dup_pos] = fh;
@@ -595,6 +627,7 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
   it = &s_box[0];                          /* 新帧插队首：最新在上 */
   memset(it, 0, sizeof(*it));
   it->used = 1u;
+  it->hash = fh;
   it->fixed = fixed;
   it->repeat = repeat;
   it->rx_ms = t_ms;

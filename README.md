@@ -120,7 +120,7 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 | `RSSI/SNR/EXN` | 信号强度/信噪比/带外噪声 |
 | `AFC` | 剩余频偏 |
 | `G` | 自适应中频增益档位（4=12dB、5=15dB、6=18dB） |
-| `RX/U/DUP` | 累计接收帧数 / 独立台站数 / 重复帧数 |
+| `RX/U/DUP` | 累计接收帧数 / 独立台站数 / 重复帧数（重复帧刷新屏上该条时间戳，不新增条目） |
 | `FIX/FIX2` | 1-bit / 2-bit CRC 纠错成功帧数 |
 | `REP` | 参考帧辅助恢复（重复包）成功帧数 |
 | `I2CE` | I2C 错误/重试计数 |
@@ -149,8 +149,28 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 
 - `[FRAME]`：新解码帧；`[MICE]`/`[POS]`：Mic-E / 普通位置解析；
 - `path=...`：中继路径，带 `*` 表示该中继已转发；
-- `[DUP]`：60s 内重复帧（短行）；`[FIX]`/`[FIX2]`/`[REP]`：纠错或参考恢复的帧；
+- `[DUP]`：60s 内重复帧（短行）：屏上不新增条目，但会把收件箱里这条的时间戳刷新为本次接收时刻、提到队首并重新标为未读；`[FIX]`/`[FIX2]`/`[REP]`：纠错或参考恢复的帧；
 - 时间戳来自 `HAL_GetTick()`，复位后从 0 开始，便于把解码事件与手工发射时刻一一对应。
+
+### 5.1 对时：把 PC 系统时间写进片内 RTC
+
+上电后设备时钟默认是 `bbcall_cfg.h` 里的固定墙钟（20:45 / 周三 9/16）；插上串口跑一次对时脚本，
+设备就换成 PC 的真实时间，锁屏页时钟与消息时间戳都跟着走：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1          # 自动找串口并对时
+powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -Query   # 只回读设备时间
+powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -List    # 列出可用串口
+```
+
+设备侧命令（串口助手里手敲也一样）：`TIME=2026-09-18 22:30:00` 写入，`TIME?` 回读，
+回复形如 `[RTC] set 2026-09-18 22:30:00 Fri src=HSE/128`。
+
+- 时钟源优先级：**LSE 32.768kHz（板上焊了 32.768k 晶振才有）→ HSE/128 = 62.5kHz（借主板 8MHz 晶振，够准）→ LSI（F103 的 LSI 误差极大，只兜底）**；
+  上电串口会打印实际用的那档，例如 `[RTC] src=HSE/128 no-time (send TIME=YYYY-MM-DD HH:MM:SS)`；
+- 没有 VBAT 电池时**掉电会丢时间**，重新上电再跑一次脚本即可；普通复位/重新烧录不会丢；
+- 串口接收走 **DMA1_Channel3 环形缓冲**：不占 9600Hz 采样中断的时间预算，也不会因为主循环正在打印 `[RAW]` 而丢命令字节；
+- 对时后设备每秒跟 RTC 查一次（跨零点、手动改时间都会立刻反映到屏幕）。
 
 ---
 
@@ -202,7 +222,7 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 ## 7. STM32CubeIDE 编译与烧录
 
 1. 打开 `firmware-stm32porject/` 工程（用户手动建的 STM32F103C8Tx 工程）。
-2. 确认 `Core/Src`、`Core/Inc` 已加入构建；`main.c` 的 USER CODE 区已调用
+2. 确认 `Core/Src`、`Core/Inc` 已加入构建（**新增的 `bbcall_rtc.c`、`rtc_math.c` 也要在构建里**：CubeIDE 里按 F5 刷新工程即会自动扫描到，`Debug/` 是生成目录、不入库）；`main.c` 的 USER CODE 区已调用
    `hw_delay_init()/hw_clock_try_72mhz()`、`bbcall_app_init()`、`bbcall_app_loop()`。
 3. Build（0 错误即可）。
 4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出。

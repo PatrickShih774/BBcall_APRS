@@ -4,12 +4,92 @@
 #include "bbcall_hw.h"
 #include "bbcall_app.h"
 #include "bk4802.h"
+#include "bbcall_rtc.h"
 #include "lcd_st7567.h"
 #include "ui_harness.h"
+
 #include "modem.h"
 #include "ax25.h"
 #include "aprs.h"
 #include <string.h>
+
+/* ---------------- PC 对时（片内 RTC + 串口命令） ----------------
+ * 上位机 tools/set_rtc_time.ps1 发 "TIME=YYYY-MM-DD HH:MM:SS"，固件写 RTC 并把 UI 时钟
+ * 立刻切到新时间；"TIME?" 回读当前时间（脚本用它找设备、核对结果）。
+ * 命令很短也很少，用一行 40 字节缓冲 + 逐字符状态机，不加动态内存。 */
+#define CONSOLE_LINE_MAX 40u
+static char    s_cmd_line[CONSOLE_LINE_MAX];
+static uint8_t s_cmd_len;
+
+static void rtc_apply_to_ui(void)
+{
+#if BBCALL_LCD_ENABLED
+  rtc_dt_t dt;
+  if (!bbcall_rtc_get(&dt)) return;
+  ui_set_wallclock(dt.wday, dt.mon, dt.day);   /* 锁屏页第二行：周W M/D */
+  ui_set_clock_ms(bbcall_rtc_day_ms());        /* 设备时钟切到当天 0 点起的毫秒数 */
+#else
+  /* 没有 LCD：RTC 只通过串口读写 */
+#endif
+}
+
+static const char *const RTC_WDAY_NAME[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+
+static void rtc_print_dt(const char *tag, const rtc_dt_t *dt)
+{
+  char buf[20];
+  rtc_format_dt(dt, buf, (uint8_t)sizeof(buf));
+  hw_console_puts(tag);
+  hw_console_puts(buf);
+  hw_console_puts(" ");
+  hw_console_puts(RTC_WDAY_NAME[dt->wday % 7u]);
+  hw_console_puts(" src=");
+  hw_console_puts(bbcall_rtc_clock_src_name());
+  hw_console_puts("\r\n");
+}
+
+static void console_cmd_apply(const char *line)
+{
+  const char *s = line;
+  rtc_dt_t dt;
+
+  while (*s == ' ' || *s == '\t') s++;
+  if (*s == '\0') return;
+
+  if (strncmp(s, "TIME?", 5u) == 0) {
+    if (bbcall_rtc_get(&dt) && bbcall_rtc_valid()) rtc_print_dt("[RTC] now ", &dt);
+    else hw_console_puts("[RTC] no-time (send TIME=YYYY-MM-DD HH:MM:SS)\r\n");
+    return;
+  }
+  if (strncmp(s, "TIME=", 5u) == 0)              s += 5;
+  else if (strncmp(s, "SETTIME=", 8u) == 0)      s += 8;
+  else { hw_console_puts("[RTC] err: use TIME=YYYY-MM-DD HH:MM:SS or TIME?\r\n"); return; }
+
+  if (!rtc_parse_dt(s, &dt)) {
+    hw_console_puts("[RTC] err: bad format, want TIME=YYYY-MM-DD HH:MM:SS\r\n");
+    return;
+  }
+  if (bbcall_rtc_clock_src() == RTC_SRC_NONE) {
+    hw_console_puts("[RTC] err: no clock source\r\n");
+    return;
+  }
+  bbcall_rtc_set(&dt);
+  rtc_apply_to_ui();                     /* 不用等 1s 同步，命令里立刻生效 */
+  rtc_print_dt("[RTC] set ", &dt);
+}
+
+static void console_poll(void)
+{
+  char c;
+  while (hw_console_try_getc(&c)) {
+    if (c == '\r' || c == '\n') {
+      if (s_cmd_len) { s_cmd_line[s_cmd_len] = '\0'; console_cmd_apply(s_cmd_line); s_cmd_len = 0u; }
+    } else if (c >= 0x20 && c <= 0x7E) {   /* 只收可见 ASCII，杂散字节直接丢 */
+      if (s_cmd_len + 1u < CONSOLE_LINE_MAX) s_cmd_line[s_cmd_len++] = c;
+      else s_cmd_len = 0u;                 /* 行太长：整行丢弃，等下一条 */
+    }
+  }
+}
 
 #if BBCALL_LCD_ENABLED
 /* ---------------- 三键扫描与背光（design.md §9：只有 ▲ ▼ ●） ----------------
@@ -220,6 +300,26 @@ void bbcall_app_init(void)
   hw_console_hex16(bk4802_read_reg(1));
   hw_console_puts("\r\n");
 
+  /* 片内 RTC：优先 LSE(32.768k 晶振)，没有就退到 HSE/128(主板 8MHz 晶振)，最后 LSI；
+   * 掉电（没有 VBAT 电池）后时间会丢，重新上电跑 tools/set_rtc_time.ps1 再对一次 */
+  bbcall_rtc_init();
+  hw_console_puts("[RTC] src=");
+  hw_console_puts(bbcall_rtc_clock_src_name());
+  if (bbcall_rtc_valid()) {
+    rtc_dt_t rdt;
+    if (bbcall_rtc_get(&rdt)) {
+      char rbuf[20];
+      rtc_format_dt(&rdt, rbuf, (uint8_t)sizeof(rbuf));
+      hw_console_puts(" time=");
+      hw_console_puts(rbuf);
+      hw_console_puts(" wday=");
+      hw_console_u8(rdt.wday);
+    }
+  } else if (bbcall_rtc_clock_src() != RTC_SRC_NONE) {
+    hw_console_puts(" no-time (send TIME=YYYY-MM-DD HH:MM:SS)");
+  }
+  hw_console_puts("\r\n");
+
 #if BBCALL_LCD_ENABLED
   /* 三态 UI（design.md v2.0）：ui_init 内含 lcd_init()，模拟器与真机同一份代码 */
   ui_init();
@@ -229,6 +329,7 @@ void bbcall_app_init(void)
   /* 锁屏页默认墙钟（bbcall_cfg.h）：周W M/D + HH:MM，开机即从这一刻走 */
   ui_set_wallclock(BBCALL_WALLCLOCK_WDAY, BBCALL_WALLCLOCK_MON, BBCALL_WALLCLOCK_DAY);
   ui_set_clock_ms(BBCALL_WALLCLOCK_BASE_MS);
+  rtc_apply_to_ui();   /* 已对过时：用 RTC 真实时间覆盖默认值 */
 #endif
   ui_show(UI_SCREEN_IDLE);
   lcd_backlight(1u);
@@ -265,6 +366,8 @@ void bbcall_app_loop(void)
   static uint8_t n_uniq = 0;
   static uint32_t last_frame_tick = 0;
 
+  console_poll();   /* 串口命令：TIME=... / TIME?（PC 对时） */
+
   if (modem_get_frame(&fr)) {
     if (modem_frame_was_fixed()) hw_console_puts("[FIX] ");
     else if (modem_frame_was_repeat()) hw_console_puts("[REP] ");
@@ -288,6 +391,16 @@ void bbcall_app_loop(void)
       hw_console_puts("[DUP] src=");
       hw_console_puts(fname);
       hw_console_puts("\r\n");
+#if BBCALL_LCD_ENABLED
+      /* 重复包不再丢弃：仍交给 UI，把这条消息的时间戳刷新成现在（用户 2026-09-18 要求）。
+       * 不打印 [RAW]/[FRAME]、不加 rx_count，避免日志与统计被重复包淹没。 */
+      rf_apply_for_frame();
+      if (ui_feed_ax25(fr.frame, fr.len, ui_clock_ms(),
+                       modem_frame_was_fixed() ? 1u : 0u,
+                       modem_frame_was_repeat() ? 1u : 0u)) {
+        ui_backlight_wake();
+      }
+#endif
     } else {
       rx_count++;
       last_frame_tick = now_ms;
@@ -315,7 +428,7 @@ void bbcall_app_loop(void)
 #if BBCALL_LCD_ENABLED
       /* 解码当刻取这条消息的 RSSI/SNR：先直读寄存器 24，读失败才用采样窗口兜底（见函数说明） */
       uint8_t rf_fresh = rf_apply_for_frame();
-      if (ui_feed_ax25(fr.frame, fr.len, BBCALL_WALLCLOCK_BASE_MS + now_ms,   /* 与锁屏同一基准 */
+      if (ui_feed_ax25(fr.frame, fr.len, ui_clock_ms(),   /* 与锁屏同一基准 */
                        modem_frame_was_fixed() ? 1u : 0u,
                        modem_frame_was_repeat() ? 1u : 0u)) {
         /* 真的入箱了（不是重复包/ackNNN）：点亮背光，否则背光超时后看不到这条新消息 */
@@ -492,6 +605,20 @@ void bbcall_app_loop(void)
     uint32_t t_ui_now = HAL_GetTick();
     ui_tick(t_ui_now - t_ui_last);
     t_ui_last = t_ui_now;
+  }
+  /* 每秒跟 RTC 查一次：跨零点、PC 刚对过时，画面时钟与日期立即跟上（平时不动，避免抖动） */
+  {
+    static uint32_t t_rtc_sync = 0;
+    if ((uint32_t)(HAL_GetTick() - t_rtc_sync) >= 1000u) {
+      t_rtc_sync = HAL_GetTick();
+      if (bbcall_rtc_valid()) {
+        uint32_t dm = bbcall_rtc_day_ms();
+        uint32_t cur = ui_clock_ms() % 86400000u;
+        int32_t dd = (int32_t)(dm - cur);
+        if (dd < 0) dd = -dd;
+        if (dd > 1200) rtc_apply_to_ui();
+      }
+    }
   }
   ui_keys_poll();
   if (s_bl_off_at && (int32_t)(HAL_GetTick() - s_bl_off_at) >= 0) {

@@ -94,6 +94,42 @@ void hw_board_pins_init(void)
 }
 
 /* ---------------- USART3 控制台（寄存器级, TX=PB10 RX=PB11） ---------------- */
+/* ---------------- USART3 控制台接收（DMA1_Channel3 环形缓冲） ----------------
+ * 为什么要 DMA：主循环里的 hw_console_puts 是阻塞发送（一条 [RAW] 90 字节约 7.8ms @115200），
+ * TIM3 的 9600Hz 采样中断又能占到约 100us，轮询或低优先级中断接收都会丢字节；DMA 环形接收
+ * 不占 CPU，也不会插进采样中断的时间预算。上位机对时命令很短（26 字符以内），32 字节环足够。 */
+#define CONSOLE_RX_RING_SZ 32u
+static uint8_t  s_rx_ring[CONSOLE_RX_RING_SZ];
+static uint16_t s_rx_tail;
+
+static void hw_console_rx_start(void)
+{
+  __HAL_RCC_DMA1_CLK_ENABLE();
+  USART3->CR1 &= (uint16_t)~USART_CR1_RE;      /* 配置期间先关接收 */
+  (void)USART3->SR;                            /* 读 SR 再读 DR：清掉可能挂起的 RXNE/ORE */
+  (void)USART3->DR;
+  DMA1_Channel3->CCR = 0u;                     /* 改配置前必须先关通道 */
+  DMA1_Channel3->CPAR = (uint32_t)&USART3->DR;
+  DMA1_Channel3->CMAR = (uint32_t)s_rx_ring;
+  DMA1_Channel3->CNDTR = CONSOLE_RX_RING_SZ;
+  DMA1_Channel3->CCR = DMA_CCR_MINC | DMA_CCR_CIRC | (2u << DMA_CCR_PL_Pos);  /* 8bit、循环、高优先级 */
+  DMA1_Channel3->CCR |= DMA_CCR_EN;
+  USART3->CR3 |= USART_CR3_DMAR;               /* USART3_RX 固定在 DMA1_Channel3 */
+  USART3->CR1 |= USART_CR1_RE;
+  s_rx_tail = 0u;
+}
+
+/* 非阻塞取 1 字节：0 = 当前没有新数据 */
+uint8_t hw_console_try_getc(char *c)
+{
+  uint16_t head = (uint16_t)(CONSOLE_RX_RING_SZ - (uint16_t)DMA1_Channel3->CNDTR);  /* DMA 写到的位置 */
+  if (!c) return 0u;
+  if (head == s_rx_tail) return 0u;
+  *c = (char)s_rx_ring[s_rx_tail];
+  s_rx_tail++;
+  if (s_rx_tail >= CONSOLE_RX_RING_SZ) s_rx_tail = 0u;
+  return 1u;
+}
 void hw_console_init(uint32_t baud)
 {
   GPIO_InitTypeDef g = {0};
@@ -116,6 +152,7 @@ void hw_console_init(uint32_t baud)
   if (frac > 15u) frac = 15u;
   USART3->BRR = (uint16_t)((mant << 4) | frac);
   USART3->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE;
+  hw_console_rx_start();
 }
 
 void hw_console_putc(char c)
@@ -123,6 +160,7 @@ void hw_console_putc(char c)
   while ((USART3->SR & USART_SR_TXE) == 0u) { }
   USART3->DR = (uint8_t)c;
 }
+
 
 void hw_console_puts(const char *s)
 {
