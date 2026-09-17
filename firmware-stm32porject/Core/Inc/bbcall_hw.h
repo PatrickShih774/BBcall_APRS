@@ -24,4 +24,6 @@ void hw_timers_init(void);
 void hw_watchdog_init(uint32_t ms);
 void hw_watchdog_feed(void);
 void TIM3_IRQHandler(void);
+/* TIM3 ISR 负载统计：最近/最大耗时(us)、平均耗时 x100(us)、调用次数。预算 104us。 */
+void hw_isr_stats(uint16_t *last_us, uint16_t *max_us, uint32_t *avg_x100, uint32_t *cnt);
 #endif

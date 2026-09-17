@@ -253,8 +253,22 @@ void hw_watchdog_feed(void)
 
 
 
+/* TIM3 ISR 负载统计（DWT 周期计数）。ISR 周期 = 1/9600Hz = 104us，是硬预算。
+ * 用途：实机 A/B 时确认软判决的 16+9 路累加没有把 ISR 顶爆（PLAN §10.3 验收项）。 */
+static uint16_t s_isr_us_last = 0, s_isr_us_max = 0;
+static uint32_t s_isr_us_sum = 0, s_isr_cnt = 0;
+
+void hw_isr_stats(uint16_t *last_us, uint16_t *max_us, uint32_t *avg_x100, uint32_t *cnt)
+{
+  if (last_us)  *last_us  = s_isr_us_last;
+  if (max_us)   *max_us   = s_isr_us_max;
+  if (avg_x100) *avg_x100 = s_isr_cnt ? (uint32_t)((s_isr_us_sum * 100u) / s_isr_cnt) : 0u;
+  if (cnt)      *cnt      = s_isr_cnt;
+}
+
 void TIM3_IRQHandler(void)
 {
+  uint32_t t_isr0 = DWT->CYCCNT;
   if (TIM3->SR & 0x0001u) {   /* UIF */
     TIM3->SR = (uint16_t)~0x0001u;
     ADC1->CR2 |= ADC_CR2_SWSTART;
@@ -266,5 +280,12 @@ void TIM3_IRQHandler(void)
     } else {
       (void)ADC1->DR;   /* 超时：丢弃本次采样，避免中断死等 */
     }
+  }
+  {   /* ISR 耗时（us）：预算 104us */
+    uint32_t dt = (uint32_t)((DWT->CYCCNT - t_isr0) / (SystemCoreClock / 1000000u));
+    s_isr_us_last = (dt > 0xFFFFu) ? 0xFFFFu : (uint16_t)dt;
+    if (s_isr_us_last > s_isr_us_max) s_isr_us_max = s_isr_us_last;
+    s_isr_us_sum += s_isr_us_last;
+    s_isr_cnt++;
   }
 }

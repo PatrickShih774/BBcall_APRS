@@ -16,6 +16,10 @@ void modem_get_adc_range(uint16_t *min, uint16_t *max);
 void modem_get_stats(uint16_t *mark, uint16_t *space, uint16_t *other);
 /* 诊断：16 相位路径 / 9 条跳变对齐(TR)路径 各自解出的帧数（含重复） */
 void modem_get_path_counts(uint16_t *phase, uint16_t *tr);
+#if defined(MODEM_SELFTEST)
+/* host 回归专用：结构性断言"TR 重对齐后累积窗起点 >= 重对齐点"的通过/失败计数 */
+void modem_selftest_get_assert(uint16_t *ok, uint16_t *fail);
+#endif
 /* 拿到解码后的整帧（0=无） */
 uint8_t modem_get_frame(ax25_frame_t *out);
 uint16_t modem_get_fix_count(void);

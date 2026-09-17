@@ -111,6 +111,14 @@ int main(int argc, char **argv) {
     free(buf);
     modem_get_stats(&mk, &sp, &ot);
     modem_get_path_counts(&path_ph, &path_tr);
+#if defined(MODEM_SELFTEST)
+    {
+        uint16_t as_ok = 0, as_fail = 0;
+        modem_selftest_get_assert(&as_ok, &as_fail);
+        printf("ASSERT tr_realign_window ok=%u fail=%u\n", as_ok, as_fail);
+        if (as_fail != 0u) { fprintf(stderr, "STRUCTURAL ASSERT FAILED\n"); return 1; }
+    }
+#endif
     printf("STAT mark=%u space=%u other=%u FIX=%u FIX2=%u REP=%u frames=%d PATH phase=%u tr=%u\n",
         mk, sp, ot, modem_get_fix_count(), modem_get_fix2_count(), modem_get_rep_count(), count,
         path_ph, path_tr);

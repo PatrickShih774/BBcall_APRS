@@ -16,6 +16,19 @@
  *   0 = 恢复单点硬判决（每 8 个采样直接判一次，2026-09-16 之前的做法）。
  * 用途：docs/PLAN.md §10.3 的回退策略与 A/B 对比；也可用 -DBBCALL_MODEM_SOFT_DECISION=0 覆盖。
  * 关掉可省 25 x 4 = 100 字节 RAM（20KB 机上这不算小）。 */
+#if defined(MODEM_SELFTEST)
+/* 结构性断言（只在 host 回归构建里启用，-DMODEM_SELFTEST；不占固件 RAM）：
+ *   TR 重对齐后，累积窗必须从重对齐时刻(或之后)开始，绝不能包含跳变之前的音调能量。
+ *   实现方式：为每条 TR 解码器记 win_start（本窗第一个样本）与 relign（上次重对齐样本），
+ *   判决时要求 win_start >= relign。谁把重对齐处的 acc 清零删掉，这个断言立刻失败。 */
+static uint16_t s_as_ok = 0, s_as_fail = 0;
+void modem_selftest_get_assert(uint16_t *ok, uint16_t *fail)
+{
+  if (ok)   *ok   = s_as_ok;
+  if (fail) *fail = s_as_fail;
+}
+#endif
+
 #ifndef BBCALL_MODEM_SOFT_DECISION
 #define BBCALL_MODEM_SOFT_DECISION 1
 #endif
@@ -73,6 +86,10 @@ typedef struct {
   int32_t period_q8;
 #if BBCALL_MODEM_SOFT_DECISION
   int32_t acc;
+#endif
+#if defined(MODEM_SELFTEST)
+  uint32_t win_start, relign;   /* 断言用：本窗起点 / 上次重对齐点 */
+  uint8_t  win_open;
 #endif
   uint8_t prev_tone;
   uint8_t have_tone;
@@ -209,6 +226,11 @@ void modem_reset_sync(void)
 #if BBCALL_MODEM_SOFT_DECISION
     s_trd[i].acc = 0;
 #endif
+#if defined(MODEM_SELFTEST)
+    s_trd[i].win_start = 0xFFFFFFFFu;
+    s_trd[i].relign = 0;
+    s_trd[i].win_open = 1u;
+#endif
     s_trd[i].next_q8 = 0;
     s_trd[i].prev_tone = 0;
     s_trd[i].have_tone = 0;
@@ -291,7 +313,12 @@ void modem_adc_sample(uint16_t adc)
   for (uint8_t i = 0; i < MODEM_NPHASE; i++)
     s_dec[i].acc += (i & 1u) ? vh : v;
   for (uint8_t i = 0; i < TR_N; i++)
-    if (s_trd[i].have_next) s_trd[i].acc += v;
+    if (s_trd[i].have_next) {
+      s_trd[i].acc += v;
+#if defined(MODEM_SELFTEST)
+      if (s_trd[i].win_open) { s_trd[i].win_start = s_nsamp; s_trd[i].win_open = 0u; }
+#endif
+    }
 #else
   uint8_t tone_full = (v  >= 0) ? 0u : 1u;   /* 0=mark, 1=space */
   uint8_t tone_half = (vh >= 0) ? 0u : 1u;
@@ -327,6 +354,12 @@ void modem_adc_sample(uint16_t adc)
 #if BBCALL_MODEM_SOFT_DECISION
       s_trd[i].acc = 0;
 #endif
+#if defined(MODEM_SELFTEST)
+      /* 直接断言：重对齐之后累积器必须为空（删掉上面那行清零这里立刻失败） */
+      if (s_trd[i].acc != 0) s_as_fail++; else s_as_ok++;
+      s_trd[i].relign = s_nsamp;
+      s_trd[i].win_open = 1u;
+#endif
       s_trd[i].have_next = 1;
     }
   }
@@ -342,9 +375,18 @@ void modem_adc_sample(uint16_t adc)
 #if BBCALL_MODEM_SOFT_DECISION
         d->acc = 0;                     /* 同上：重新对准即重开累积窗 */
 #endif
+#if defined(MODEM_SELFTEST)
+        if (d->acc != 0) s_as_fail++; else s_as_ok++;
+        d->relign = s_nsamp;
+        d->win_open = 1u;
+#endif
         continue;
       }
 #if BBCALL_MODEM_SOFT_DECISION
+#if defined(MODEM_SELFTEST)
+      if (d->win_start >= d->relign) s_as_ok++; else s_as_fail++;   /* 结构性断言 */
+      d->win_open = 1u;
+#endif
       uint8_t tone = (d->acc >= 0) ? 0u : 1u;
       d->acc = 0;
 #else
