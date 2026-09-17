@@ -4,7 +4,7 @@
 >
 > 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 [README §10](../README.md#10-许可与合规) 与 [`../licenses/THIRD_PARTY_LICENSES.md`](../licenses/THIRD_PARTY_LICENSES.md)。
 >
-> 本文件以 **2026-09-11** 的实际实现为准；历史 bring-up 过程见 [docs/DEBUG_LOG.md](DEBUG_LOG.md)。
+> 本文件以 **2026-09-16（v0.5）** 的实际实现与实机验证为准；历史 bring-up 过程见 [docs/DEBUG_LOG.md](DEBUG_LOG.md)。
 
 ## 1. 当前状态
 
@@ -263,7 +263,7 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
   - **砍掉** `COMPOSE`/`DRAFTS`（仅接收，只能存草稿＝假功能）、`SENT`（永远为空）、
     以及 Messenger 启动器本身（它的 HEARD 与主菜单 Heard 重复，去掉后少一层导航）。
   ``ackNNN`` 分流逻辑已内联进 `ui_feed_ax25()`（ACK 不污染收件箱）；msg_store.c 已删除。
-    取舍与偏离见 [docs/design.md](design.md) §11。
+    当前三态 UI 的唯一权威规范见 [docs/design.md](design.md) §6。
 ### 8.4 后续（S4 候选）
 
 已完成（原 S4 清单的一部分，已并入第 8.3 节）：删除二次确认、未读标记、详情分页、中继路径显示。

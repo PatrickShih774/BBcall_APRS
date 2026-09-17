@@ -151,7 +151,7 @@ x = x0 + floor((x1 - x0 + 1 - 宽(str, 档) × 倍率) / 2)
 
 实际生成的 C 数组按"每行 ceil(gw/8) 字节"存储（含行填充），`fusion_font.h`
 常量数据实测 **16.4 KB**——预算按实际值计。对 64 KB Flash 仍是可接受的一笔
-（当前固件 text 约 24 KB，余量约 20 KB，实测编译后确认）。若要覆盖更多汉字，
+（v0.5 实测 `text=57324 / data=132`，64KB Flash 余量约 8.0KB）。若要覆盖更多汉字，
 12px 档每字约 36 字节、10px 档每字约 28 字节（含元数据 6 字节/字）。
 
 ---
@@ -536,8 +536,8 @@ SIL Open Font License 1.1
 https://github.com/TakWolf/fusion-pixel-font
 ```
 
-- 该项目本身又把若干开源点阵字型"缝合"而成，随包附带的
-  `LICENSES/` 目录中含各上游字型的许可（ark-pixel / cubic-11 / galmuri 等），
-  **一并保留，不得删除**。
+- 该项目本身又把若干开源点阵字型"缝合"而成；上游字体包内的 `LICENSES/`
+  目录含各上游字型的许可（ark-pixel / cubic-11 / galmuri 等）。若再分发原始字体包，
+  必须保留这些上游许可；当前仓库仅保留 `licenses/Fusion-Pixel-OFL.txt` 与 `licenses/THIRD_PARTY_LICENSES.md` 中的位图子集声明。
 - 本项目只提取字形位图用于屏幕渲染，未修改字形本身。
 - 旧版 8×16 / 6×8 ASCII 字模及其生成链路已删除；当前 UI 只保留 Fusion Pixel 字模。

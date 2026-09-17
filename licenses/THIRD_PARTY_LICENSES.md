@@ -40,9 +40,8 @@
   因此本项目参考了它的消息模型与版面参数：正文 36 字符上限、Inbox 16 / Sent 8 / Drafts 8、
   `NOW`/`12m`/`3h` 年龄列、未读 `*`、送达 `+`/`x`/`-`、按 `(from,id)` 去重、`ackNNN` 送达确认、
   点状分隔线（1 实 3 空）、右对齐计数留安全边距、启动器选中项右侧大图标。
-- **未复制其代码**：本项目最初版的实现（`simulator/src/msg_store.c`、`ui_harness.c` 的 Messenger 段）
-  按本项目自己的 chrome 系统与字模独立编写；采用与偏离逐条记录在 `../docs/design.md` §11
-  （原 `UISkill.md` 第 11 节，已并入 design.md v2.0）。
+- **未复制其代码**：本项目最初版的实现（当时位于 `simulator/src/msg_store.c`，现文件已删除；以及 `ui_harness.c` 的 Messenger 段）
+  按本项目自己的 chrome 系统与字模独立编写；具体取舍见 `../docs/PLAN.md` §8.3，当前 UI 规范见 `../docs/design.md` §6。
 - 合规说明：Apache-2.0 与 GPL-3.0 兼容；本项目未纳入其源码，仅作设计参考并在文档中标注出处。
   如后续需要直接复用其代码，应保留 Apache-2.0 许可与 NOTICE 要求。
 

@@ -228,7 +228,7 @@ BB 机功能规划（v0.4 → v1.0）、版本路线、验收标准与当前优�
 快速构建：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # Windows 免安装（TinyCC + 内置 SDL2）+ 打开窗口
+powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # Windows 免安装工具链（TinyCC/SDL2 不入库，需本地按 SIMULATOR.md 准备）+ 打开窗口
 # 其它构建方式（CMake / Makefile）与完整命令见 simulator/SIMULATOR.md
 ```
 

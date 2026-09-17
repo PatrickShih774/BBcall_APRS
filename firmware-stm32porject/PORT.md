@@ -1,6 +1,8 @@
 # BBcall_APRS 移植说明（STM32F103C8Tx CubeIDE 工程）
 
-本工程是你手动创建的 CubeIDE 工程（`.ioc` 未配外设）。BBcall 代码已按「不依赖 CubeMX 生成、可在 USER CODE 区存活」的方式移植：
+本工程是你手动创建的 CubeIDE 工程（`.ioc` 未配外设）。BBcall 代码已按「不依赖 CubeMX 生成、可在 USER CODE 区存活」的方式移植。
+
+> 本文件保留初版移植步骤与当时验证项；当前硬件、软件结构和最新状态以 [README](../README.md)、[docs/PLAN.md](../docs/PLAN.md) 和 [docs/DEBUG_LOG.md](../docs/DEBUG_LOG.md) 为准。
 
 ## 新增文件
 

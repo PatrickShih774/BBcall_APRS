@@ -14,7 +14,7 @@ ui_harness.c  三态界面（待机 / 有未读 / 收件箱）与按键状态机
 
 ## 快速开始（Windows 免安装，已在原机器验证）
 
-仓库自带 TinyCC（`third_party/tcc/`）与 SDL2（`third_party/sdl2/`），**不需要** MSVC / MinGW / CMake：
+当前工作区已把 TinyCC（`third_party/tcc/`）与 SDL2（`third_party/sdl2/`）放在本地（两者被 `.gitignore` 排除，不进 Git），因此本机**不需要** MSVC / MinGW / CMake；全新克隆需先按下方「SDL2 依赖说明」准备 SDL2，并放置 TinyCC：
 
 ```powershell
 # 编译
@@ -150,7 +150,7 @@ HEARD 台站列表与 MESSAGES 消息列表合并为一个统一收件箱——�
 类型用 `M/P/C/X` 标注；该结构沿革保留作历史记录。数据规则参考
 [Gogu-Qs/GOGUFW-UV-K1-Messenger](https://github.com/Gogu-Qs/GOGUFW-UV-K1-Messenger)
 （Apache-2.0，UV-K1 / UV-K5 V3 定制固件，同样是 128x64 单色 LCD）。
-采用的规范与取舍都记在[docs/design.md](../docs/design.md) §11（唯一权威规范）。
+当前 UI 规范以 [docs/design.md](../docs/design.md) v2.0 为准（版面/数据见 §6，硬规则见 §8，验证见 §13）。
 
 - 最新在上；消息时刻按 `rx_ms` 显示 `HH:MM:SS`；未读 `*` 行首；
 - ackNNN 送达确认只计数、不进收件箱；
