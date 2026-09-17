@@ -448,3 +448,22 @@ UI 与数据侧：状态机行为（收包切页 / 背光 / 墙钟 / 呼号 SSID
 6. **ISR 负载**：ST-Link 读 `hw_isr_stats(&last_us, &max_us, &avg_x100, &cnt)`，确认最大耗时远小于 104us；
 7. **路径贡献**：ST-Link 读 `modem_get_path_counts(&phase, &tr)`，确认有频偏时由 TR 路径兜底、无频偏时 16 相位也参与；
 8. **漏包归因**（P1 计划）：底噪跟踪 + 疑似漏包计数（`s_rf_pkt_cnt / s_rf_miss_cnt`，待实现）区分"没信号"与"有信号没解出"。
+
+### 14.4 接收增益变体（预编译固件，2026-09-18）
+
+增益主旋钮是 reg7 B15:B13（0..7 = 0..21dB，3dB/级），AGC 范围与阈值在 `bbcall_cfg.h`。
+以下四版均含 `2b8b99a` 的 acc 修复与软判决，可用于"先排除 AGC 变量、再比增益档位"的 A/B：
+
+| 文件（`firmware-stm32porject/Debug/`） | 编译期开关 | 含义 |
+|---|---|---|
+| `BBCall_APRS.hex` | 默认（`BBCALL_IF_AGC=1`，4..6 档） | AGC 自动 12/15/18dB（当前基线） |
+| `BBCall_APRS_gainA_max21.hex` | `-DBK4802_IF_GAIN_MAX=7` | AGC 上限放到 21dB（弱信号优先） |
+| `BBCall_APRS_gainB_min9.hex` | `-DBK4802_IF_GAIN_MIN=3` | AGC 下限放到 9dB（强信号优先） |
+| `BBCall_APRS_gainC_fixed18.hex` | `-DBBCALL_IF_AGC=0 -DBK4802_IF_GAIN_CODE=6` | 固定 18dB，**排除 AGC 变量** |
+
+复现方式：在 `firmware-stm32porject/Debug/` 下用同样的 `-D` 编译 `bbcall_app.c` 与 `bk4802.c`，
+替换 `objects.list` 里对应的 `.o` 后链接（三个变体已用 `arm-none-eabi-gcc -E` 逐条核对：
+默认 `if_code<6u / >4u`、A 版 `<7`、B 版 `>3`、C 版 AGC 分支被编译掉且 reg7 写入 `6u`）。
+
+注意：**固定增益模式没有回退保护**，强信号（RSSI 打满 127）可能压缩/破音；
+且 RSSI/SNR 取自 reg24、位于中频链路之后，**换档会改变读数**，跨档比较无意义（记录当时的 G 值）。
