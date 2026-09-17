@@ -112,7 +112,9 @@
 #define BK4802_CIC_GAIN      2u  /* reg19 B15:B14 CIC 增益 2=3.5dB */
 #define BK4802_DEMOD_AMP     1u  /* reg19 B13:B12 解调幅度（第 1 档） */
 #define BK4802_AUDIO_VOL    15u  /* reg19 音量 */
+#ifndef BK4802_IF_GAIN_CODE
 #define BK4802_IF_GAIN_CODE  4u  /* reg7 中频增益：上电初始档，4 x 3dB = 12dB */
+#endif
 
 /* ---------- 接收中频增益（reg7 B15:B13，0..7 = 0..21dB，3dB/级） ----------
  * 这是"接收增益"的主旋钮：调大 = 灵敏度更高，但强信号更容易压缩/破音。
@@ -123,10 +125,18 @@
 #ifndef BBCALL_IF_AGC
 #define BBCALL_IF_AGC        1     /* 1=自动按 RSSI 调档，0=固定 BK4802_IF_GAIN_CODE */
 #endif
+#ifndef BK4802_IF_GAIN_MIN
 #define BK4802_IF_GAIN_MIN   4u    /* 自动可降到的最低档：4 = 12dB */
+#endif
+#ifndef BK4802_IF_GAIN_MAX
 #define BK4802_IF_GAIN_MAX   6u    /* 自动可升到的最高档：6 = 18dB（21dB 需改 7） */
+#endif
+#ifndef BK4802_AGC_UP_RSSI
 #define BK4802_AGC_UP_RSSI   90u   /* RSSI 低于此值 -> 提高一档 */
+#endif
+#ifndef BK4802_AGC_DN_RSSI
 #define BK4802_AGC_DN_RSSI   115u  /* RSSI 高于此值 -> 降低一档 */
+#endif
 /* reg22 静噪：B11:B10=噪声阈值倍率(0:x2,1:x4,...)，B07:B00=RSSI 关闭阈值。
  * reg23 B07:B00=开喇叭的带外噪声阈值（越小越难打开）。
  * 实测：无信号 RSSI≈59/EXN≈321；强信号 RSSI≈127/EXN≈5。 */
