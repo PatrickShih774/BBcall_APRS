@@ -24,10 +24,10 @@
 | 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
 | 8 | [固件功能与审计修复（v0.3）](#8-固件功能与审计修复v03) | 解码功能清单 / 审计修复 / 实测数据 |
 | 9 | [硬件改进方案](#9-硬件改进方案提升解码率) | RF 前端 / 音频链路 / 电源 / 晶振 / 发射端 |
-| 10 | [待办 / 下一步](#10-待办--下一步) | v0.4 → v1.0 路线图 |
+| 10 | [待办 / 下一步](#10-待办--下一步) | → [PLAN.md](PLAN.md)（路线图 / 验收标准） |
 | 11 | [许可与合规](#11-许可与合规) | GPL-3.0 / 第三方许可兼容性 / 合规要点 |
 | 12 | [参考项目](#12-参考项目) | MM-Radio / BG5ESN / VP-Digi 等 |
-| 13 | [PC 端 LCD 模拟器（SDL2）](#13-pc-端-lcd-模拟器sdl2) | 编译 / 数据源 / UI 验收 |
+| 13 | [PC 端 LCD 模拟器（SDL2）](#13-pc-端-lcd-模拟器sdl2) | 概要 → [simulator/SIMULATOR.md](simulator/SIMULATOR.md) |
 
 **相关文档**：
 
@@ -357,19 +357,11 @@ APRS 消息类型（信息域以 `:` 开头）会多一行：
 | 对比度偏浓 | 初始 0x24 偏大 | 改 0x12（`0x81` 后的字节，范围 0x00~0x3F） |
 | 焊好后想快速判断屏通不通 | 没有自检手段 | `LCD_BOOT_FLASH=1`：上电全屏点亮 300ms 再清屏；只有硬件侧（PSB/CS/RST/V0/对比度）有问题才看不到这一下 |
 
-UI 与数据侧：
+UI 与数据侧：状态机行为（收包切页 / 背光 / 墙钟 / 呼号 SSID / 帧级 RSSI/SNR 直读与兜底）已在 [design.md](design.md) §9（状态机与按键）与 §12.4（真机移植记录）中完整描述，此处不再重复。
 
-- **收包立即切页**：`ui_feed_ax25()` 入箱后立刻把待机/有未读态切成「有未读」页并重绘（design.md §9 的状态机），不再等 `ui_tick` 的冒号闪烁；正在收件箱里则不抢焦点，只把光标后移一位（新条插队首，看的还是原来那条）。实测：解码一帧后的画面与强制 `--screen unread` **逐字节一致**。
-- **新消息点亮背光**：入箱成功（非重复包、非 ackNNN）点亮 15s，否则背光超时后新消息刷了也看不见；`ui_key_event()` 因此改名 `ui_backlight_wake()`。
-- **锁屏默认墙钟**：`bbcall_cfg.h` 的 `BBCALL_WALLCLOCK_*`（出厂 20:45 / 周三 9/16），开机即从这一刻走；帧时间戳用同一基准（`BBCALL_WALLCLOCK_BASE_MS + now_ms`），收件箱时间戳才对得上。`BBCALL_WALLCLOCK_ENABLE 0` 退回 `UP HH:MM` 开机时长。
-- **呼号带 SSID**：解出 `BG5BLB-12` 时屏幕与串口都写 `BG5BLB-12`（`src[12]`）。
-- **帧级 RSSI/SNR**：解出一帧时**先直读** BK4802 寄存器 24（低 8 位 RSSI 0..127、bit13:8 SNR 0..63，与串口 `R19=` 同源），
-  这条消息显示的就是"解码当刻"的读数；直读失败（0xFFFF / RSSI>127）才退回采样兜底：接收窗口（1s）峰值 → 最近一次有效采样 → `--`。
-  另有每 100ms 的周期采样给兜底用（某次读失败只计数、不影响取值）。**是芯片原始读数，不是标定 dBm**。
-  串口 `[FRAME]` 行末尾会标注来源：`(decode-now)` = 当刻直读，`(peak-fallback)` = 用了采样兜底。
 - **UTF-8 截断 bug**：`utf8_clip_tail()` 前几版会把结尾一个**完整**汉字也删掉（位置帧注释末尾丢字），已改成按「尾部这一串字节数够不够一个完整字符」判断。
 - **位置帧正文改为注释优先**：经纬度在「有未读」页右上有专用格子，正文再抄一遍会把真正的消息文字挤进滚动区；有注释就只放注释，纯信标才回退成「经纬度 + 类型 + 速度/航向」。
-- **无串口时的观测手段**：`s_rf_ok_cnt / s_rf_fail_cnt / s_rf_last_raw`（S-meter 采样成功/失败次数与最近原始值）可以用 ST-Link 的 Live Expressions 直接看，变量名在 GDB 里写 `文件.c::变量名`；`ui_harness.c::s_box[0]` 能看到屏上那条消息的全部字段。**SWO 用不了**：SWO 是 PB3，已经被 LCD 当 SCLK 占用。
+- **无串口时的观测手段**：`s_rf_ok_cnt / s_rf_fail_cnt / s_rf_last_raw`（S-meter 采样成功/失败次数与最近原始值）可以用 ST-Link 的 Live Expressions 直接看；`ui_harness.c::s_box[0]` 能看到屏上那条消息的全部字段。**SWO 用不了**：SWO 是 PB3，已经被 LCD 当 SCLK 占用。
 
 内存：v2.0 UI 接进来后 RAM 吃紧，`UI_INBOX_MAX 24→16`、`UI_BODY_MAX 96→64`、`_Min_Stack_Size 0x800→0x600`（详见 design.md §6.3）。
 
@@ -595,33 +587,9 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 
 ## 10. 待办 / 下一步
 
-BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
+BB 机功能规划（v0.4 → v1.0）、版本路线、验收标准与当前优先级全部在 **[PLAN.md](PLAN.md)**，此处不再重复。
 
-### v0.4（MVP：能当 BB 机用）
-- [ ] ST7567 显示呼号/时间/正文/未读数
-- [ ] 蜂鸣/振动提示与静音模式
-- [ ] 收件箱/消息详情/删除、未读计数
-- [ ] RSSI/SNR/电池状态页
-
-### v0.5（存储与菜单）
-- [ ] W25Q64/AT24C512 消息与设置存储
-- [ ] RTC（DS3231/内部 RTC）时间戳
-- [ ] 菜单/设置、台站列表、按键锁、重复提醒
-
-### v0.6（APRS 扩展）
-- [ ] 群发/公告、Ack 显示、关键词过滤
-- [ ] 天气/遥测/状态包解析
-- [ ] 位置/方位显示
-
-### v1.0（可选双向，需发射）
-- [ ] BK4802 发射通路、Ack/Rej、发送消息
-
-### 其他
-- [ ] 静噪最终标定（当前为解码测试关闭）
-- [ ] 射频前端硬件改进（见第 9 节）
-- [ ] 清理 `firmware-stm32porject/PORT.md` 过时说明
-
----
+当前最高优先级：**量化漏包率 → 射频前端改进**（方案见 PLAN.md §10）。
 
 ## 11. 许可与合规
 
@@ -665,38 +633,11 @@ BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
 > **完整文档**：[simulator/SIMULATOR.md](simulator/SIMULATOR.md)（命令行参数 / 按键映射 / 导航模型 / 构建坑 / SEG 方向与列偏移）。
 > **UI 规范**：[design.md](design.md)（唯一权威规范：骨架 / 三态 / 硬规则 / 验证）。
 
-### 13.1 快速构建
+快速构建：
 
 ```powershell
-# Windows 免安装（TinyCC + 内置 SDL2，不需要 MSVC / MinGW / CMake）
-powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1            # 只编译
-powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Selftest  # 编译 + 无窗口自检（写 BMP）
-powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # 编译 + 打开窗口
-
-# 其它构建方式（需自备工具链）：CMake / Makefile，命令见 simulator/SIMULATOR.md
-cmake -B build -S simulator && cmake --build build && ./build/bbcall_sim --scale 4
+powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run       # Windows 免安装（TinyCC + 内置 SDL2）+ 打开窗口
+# 其它构建方式（CMake / Makefile）与完整命令见 simulator/SIMULATOR.md
 ```
 
-### 13.2 三种数据源
-
-| 来源 | 命令 | 经过的固件代码 |
-|---|---|---|
-| 内置示例 | `--demo` | `ax25.c` + `aprs.c` |
-| 串口日志回放 | `--replay tools\sample_aprs_log.txt` | `[RAW] hex=` → `ax25.c` + `aprs.c` |
-| WAV 音频解调 | `--wav tools\test_aprs_144.wav` | `modem.c` → `ax25.c` → `aprs.c` |
-
-WAV 路径就是**完整的固件解码链路**：48kHz PCM 降采样到 9600Hz 后逐点喂给 `modem_adc_sample()`，再用 `modem_get_frame()` 取帧。实测 `test_aprs_144.wav` 解出 1 帧（另有 15 次重复抑制，来自 16 路并行相位各解一遍）；`--replay` 13 帧真实日志全部入箱，呼号/类型与 `tools/ax25_reference.py` 独立解码一致。
-
-### 13.3 验收
-
-- `tools/verify_ui.py`：对 `idle / unread / inbox / inbox2` 四张截图做**逐像素校验**（反显底填充、挖字极性、坐标、分隔线），全部通过、差异为 0；
-- `--keymap`：键盘映射自检 6 项全过；
-- `build_win.ps1 -Selftest`：编译 + 固定参数自检通过。
-
-### 13.4 字模工具速查
-
-| 字模 | 生成工具 | 说明 |
-|---|---|---|
-| **Fusion Pixel 12px/10px**（当前 UI 唯一字模） | `tools/gen_fusion_font.py` | 374 字形（95 ASCII + 279 汉字），从原型 `bbcall-aprs-screen-states.html` 内嵌字表提取，生成 `fusion_font.h`；详见 [design.md](design.md) §3.5 |
-| GNU Unifont 16×16 中文子集（**已被取代**） | `tools/gen_cn_font.py` | 字符清单 `tools/cn_chars.txt`；新 UI 不再编译 `cn_font.c`，保留作历史参考 |
-| X11 misc-fixed ASCII 8×16 / 6×8（**已被取代**） | `tools/gen_font.py` | BDF 源 `tools/bdf/`（公有领域）；仅保留作纯 ASCII 兜底字模的生成工具 |
+三种数据源（`--demo` / `--replay` / `--wav`）与验收方法详见 [simulator/SIMULATOR.md](simulator/SIMULATOR.md)。
