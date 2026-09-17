@@ -36,7 +36,7 @@
 | [PLAN.md](PLAN.md) | BB 机功能规划（按版本推进，唯一路线图） |
 | [design.md](design.md) | UI 设计规范（唯一权威规范，坐标/字模/按键全锁死） |
 | [simulator/SIMULATOR.md](simulator/SIMULATOR.md) | 模拟器详细文档（命令行参数 / 按键 / 数据源 / 构建坑） |
-| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方组件与许可声明 |
+| [THIRD_PARTY_NOTICES.md](licenses/THIRD_PARTY_NOTICES.md) | 第三方组件与许可声明 |
 
 ---
 
@@ -640,12 +640,12 @@ BB 机功能规划详见 [PLAN.md](PLAN.md)，按版本推进：
 | [BG7QKU STM32_SIMPLE_CONTROL_BK4802N](https://github.com/BG7QKU/STM32_SIMPLE_CONTROL_BK4802N) | **未声明 LICENSE**（默认保留所有权利） | 不可直接复制代码 | 仅作资料参考；引用代码需作者授权 |
 | STM32 HAL / CMSIS（`Drivers/`） | ST 工程自带许可（目录内 `LICENSE.txt`） | 兼容（保留声明） | CubeIDE 生成代码，勿删许可文件 |
 
-许可证原文放在 `licenses/`，第三方组件说明见 `THIRD_PARTY_NOTICES.md`。
+许可证原文放在 `licenses/`，第三方组件说明见 `licenses/THIRD_PARTY_NOTICES.md`。
 
 ### 合规要点
 
 1. **BSD-2 / MIT 代码并入 GPL-3.0 是允许的**，但要保留原版权声明、许可全文和免责声明。
-2. 发布 HEX/BIN/Release 时，二进制分发同样需要附带 `LICENSE`、`licenses/` 与 `THIRD_PARTY_NOTICES.md`（或在 Release 说明中给出链接）。
+2. 发布 HEX/BIN/Release 时，二进制分发同样需要附带 `LICENSE`、`licenses/` 与 `licenses/THIRD_PARTY_NOTICES.md`（或在 Release 说明中给出链接）。
 3. **不要直接复制 BG7QKU 仓库的代码**：该仓库未声明 LICENSE，默认保留所有权利。
 4. `BK4802P.pdf` 作为 BK4802P 参考数据手册保留在仓库中；版权归 Beken 所有，仅供学习与开发参考。
 5. 本项目只做接收（RX-only）。

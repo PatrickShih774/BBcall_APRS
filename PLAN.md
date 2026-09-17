@@ -1,8 +1,8 @@
-# BBcall_APRS 计划（BK4802P + STM32F103C8T6 + ST7567，APRS 寻呼机）
+﻿# BBcall_APRS 计划（BK4802P + STM32F103C8T6 + ST7567，APRS 寻呼机）
 
 > 项目名（暂定）：**BBcall_APRS** —— 用 APRS（AX.25 / 1200 baud Bell202 AFSK）技术路线复刻 BB 机（无线寻呼机）。
 >
-> 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 README 第 11 节与 `THIRD_PARTY_NOTICES.md`。
+> 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 README 第 11 节与 `licenses/THIRD_PARTY_NOTICES.md`。
 >
 > 本文件以 **2026-09-11** 的实际实现为准；历史 bring-up 过程见 README 第 4 节「调试过程记录」。
 
@@ -307,7 +307,7 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
 
 - **字源不能用 WQY Bitmap Song**：GPL v2（仅此一版）+ 字体嵌入例外，与本项目 GPL-3.0
   **不兼容**（GPLv2-only 无法并入 GPLv3）。改用 **GNU Unifont**
-  （2013 起 GPLv2+ 或 OFL-1.1 双许可，且本身就是 16x16 点阵）；见 `THIRD_PARTY_NOTICES.md`。
+  （2013 起 GPLv2+ 或 OFL-1.1 双许可，且本身就是 16x16 点阵）；见 `licenses/THIRD_PARTY_NOTICES.md`。
 - **暂不做拼音输入法**：本项目没有键盘，信道名也暂不支持中文输入。
 
 **片上预算**（STM32F103C8T6，64KB Flash；当前 text 24,160 B，可用约 38KB）：
@@ -350,7 +350,7 @@ python tools/gen_cn_font.py --unifont <unifont.hex> --chars-file tools/cn_chars.
 - BG5ESN FMO（MIT，频率字参考）；
 - VP-Digi（GPL-3.0，AFSK/AX.25 参考）；
 - BG7QKU 仓库未声明 License，仅作资料参考，不复制代码。
-- 本项目 GPL-3.0；详见 README 第 11 节、`THIRD_PARTY_NOTICES.md` 与 `licenses/`。
+- 本项目 GPL-3.0；详见 README 第 11 节、`licenses/THIRD_PARTY_NOTICES.md` 与 `licenses/`。
 
 ## 10. 下一步方案：把漏包率降下来（v0.5 之后）
 
