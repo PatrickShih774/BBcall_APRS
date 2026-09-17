@@ -10,6 +10,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 固件覆盖 BK4802P 接收配置与增益控制、音频取样、ADC、1200/2200Hz AFSK 判频、NRZI/HDLC/AX.25 解析、APRS 消息/位置/Mic-E 解析，以及 ST7567 三态 UI 和串口诊断。仓库还提供 PC 端 LCD 模拟器、测试音频生成与回归工具，便于在实机烧录前验证界面与解码链路。
 
 **当前状态**：RF → 音频 → ADC → 判频 → NRZI → HDLC → AX.25 → APRS 全链路已打通；实机可解真实 APRS 数据包（见 [docs/DEBUG_LOG.md §10](docs/DEBUG_LOG.md#10-成功解码记录)）；LCD 已点亮、三态 UI 真机联调通过；解码优化（幅度门限 20000→500、16 相位、跳变对齐位时钟）后成功率大幅提升；射频前端无滤波/匹配是当前弱信号解码率的主要瓶颈（改进方案见 [docs/PLAN.md §11](docs/PLAN.md#11-硬件改进方案提升解码率)）。
+**最新发布**：**v0.6**（2026-09-18，[Release](https://github.com/PatrickShih774/BBcall_APRS/releases/tag/BBCall_APRS_v0.6)）：重复包也上屏（刷新该条时间戳、不新增条目）+ 片内 RTC 对时（没焊串口时用编译时间戳兜底，接上串口可精确对时）；这两项**待实机验证**。
 
 ---
 
@@ -21,7 +22,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 | 2 | [引脚分配](#2-引脚分配) | → [docs/PLAN.md §2](docs/PLAN.md#2-硬件与引脚以实机为准) |
 | 3 | [软件结构](#3-软件结构) | 文件表 / 架构图；信号链 → [docs/PLAN.md §3](docs/PLAN.md#3-软件架构) |
 | 4 | [调试过程记录](#4-调试过程记录) | 概要 → [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md)（完整 bring-up / 实测） |
-| 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出格式 |
+| 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出 / §5.1 对时（RTC） |
 | 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频生成 / UI 校验 |
 | 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
 | 8 | [待办 / 下一步](#8-待办--下一步) | → [docs/PLAN.md](docs/PLAN.md)（路线图 / 验收标准） |
@@ -58,14 +59,16 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 
 | 文件 | 作用 |
 |---|---|
-| `Core/Src/bbcall_hw.c` | 时钟(72MHz)/延时/GPIO/寄存器级 USART3/ADC1/TIM3 |
+| `Core/Src/bbcall_hw.c` | 时钟(72MHz)/延时/GPIO/寄存器级 USART3（TX 阻塞 + RX DMA 环形缓冲）/ADC1/TIM3 |
 | `Core/Src/bk4802.c` | BK4802 位敲 I2C、RX 配置、频率字、增益、静噪 |
 | `Core/Src/modem.c` | ADC 采样 → 1200/2200Hz 定点相关判频 → NRZI → 16 相位并行 HDLC + 跳变对齐位时钟 |
 | `Core/Src/ax25.c` | CRC-16/X.25、HDLC 去填充、AX.25 地址/控制/PID/信息解析 |
 | `Core/Src/aprs.c` | APRS 消息/位置/Mic-E 解析 |
 | `Core/Src/lcd_st7567.c` | ST7567 位敲 SPI 驱动 + 绘图原语（`BBCALL_LCD_ENABLED` 控制启用） |
-| `Core/Src/ui_harness.c` | 三态界面（待机/有未读/收件箱）与按键状态机；模拟器与真机单源共用 |
-| `Core/Src/bbcall_app.c` | 初始化、主循环、串口诊断/解码输出、UI 接线（按键/背光/喂帧） |
+| `Core/Src/ui_harness.c` | 三态界面（待机/有未读/收件箱）与按键状态机；重复包刷新该条时间戳；模拟器与真机单源共用 |
+| `Core/Src/bbcall_app.c` | 初始化、主循环、串口诊断/解码输出、串口对时命令（`TIME=`/`TIME?`）、UI 接线（按键/背光/喂帧） |
+| `Core/Src/bbcall_rtc.c` | 片内 RTC 寄存器级驱动：时钟源 LSE→HSE/128→LSI、对时、秒计数器读数 |
+| `Core/Src/rtc_math.c` | 纯整数公历换算与时间解析/格式化（不碰寄存器，PC 上可单测） |
 
 信号链与关键实现点由 **[docs/PLAN.md §3](docs/PLAN.md#3-软件架构)** 维护，此处不再重复。
 
@@ -159,8 +162,7 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 误差只有"编译到上电"的这几分钟。开关在 `bbcall_cfg.h` 的 `BBCALL_RTC_SEED_BUILD_TIME`（默认 1，置 0 关闭）。
 上电串口会打 `[RTC] src=HSE/128 seeded=2026-09-18 00:37:12`，其中 `seeded=` 就是写进 RTC 的编译时间。
 
-想要精确到秒、或不想每次重新烧录，接上串口跑一次对时脚本（会把 RTC 覆盖成 PC 当前时间）：
-设备就换成 PC 的真实时间，锁屏页时钟与消息时间戳都跟着走：
+接上串口后可以改成精确时间（会覆盖设备里 RTC 的值），锁屏页时钟与消息时间戳都跟着走：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1          # 自动找串口并对时
@@ -172,8 +174,9 @@ powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -List    # 列�
 回复形如 `[RTC] set 2026-09-18 22:30:00 Fri src=HSE/128`。
 
 - 时钟源优先级：**LSE 32.768kHz（板上焊了 32.768k 晶振才有）→ HSE/128 = 62.5kHz（借主板 8MHz 晶振，够准）→ LSI（F103 的 LSI 误差极大，只兜底）**；
-  上电串口会打印实际用的那档，例如 `[RTC] src=HSE/128 no-time (send TIME=YYYY-MM-DD HH:MM:SS)`；
-- 没有 VBAT 电池时**掉电会丢时间**，重新上电再跑一次脚本即可；普通复位/重新烧录不会丢；
+  上电串口会打印实际用的那档：默认（`BBCALL_RTC_SEED_BUILD_TIME 1`）打 `[RTC] src=HSE/128 seeded=2026-09-18 00:37:12 time=2026-09-18 00:37:12 wday=5`；
+  把兜底关掉后打 `[RTC] src=HSE/128 no-time (send TIME=YYYY-MM-DD HH:MM:SS)`，此时只能靠串口对时；
+- 没有 VBAT 电池时**掉电会丢时间**：下次上电自动回到编译时刻（或跑脚本改成 PC 当前时间）；普通复位/重新烧录不会丢；
 - 串口接收走 **DMA1_Channel3 环形缓冲**：不占 9600Hz 采样中断的时间预算，也不会因为主循环正在打印 `[RAW]` 而丢命令字节；
 - 对时后设备每秒跟 RTC 查一次（跨零点、手动改时间都会立刻反映到屏幕）。
 
@@ -241,6 +244,12 @@ LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用�
 BB 机功能规划（v0.4 → v1.0）、版本路线、验收标准与当前优先级全部在 **[docs/PLAN.md](docs/PLAN.md)**，此处不再重复。
 
 当前最高优先级：**建立漏包率基线 → 软件链路观测/验证 → 射频前端改进**（方案见 [docs/PLAN.md §10](docs/PLAN.md#10-下一步方案把漏包率降下来v05-之后)）。
+
+v0.6 的实机验证清单（先做完这三条，再谈漏包率）：
+
+- [ ] 上电看 `[RTC] src=...` 是哪一档、锁屏页时钟是否为编译时刻，跨零点后日期是否自动翻；
+- [ ] 同一包连发两次：收件箱仍是 1 条、时间戳刷新成第二次（串口 `DUP=` 加 1）；
+- [ ] （焊上串口后）`powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1` 能回读到与 PC 一致的时间。
 
 ---
 

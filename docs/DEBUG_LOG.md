@@ -588,3 +588,18 @@ PC 系统时间 --tools/set_rtc_time.ps1--> USART3 "TIME=2026-09-18 22:30:00"
 - 编译结果：`text=63868 / data=132 / bss=20236`，0 错误 0 警告；主固件与 6 个对照 hex 已重出。
 
 这条路径等价于"把当前时间戳直接烧进 RTC"：不需要串口、不需要 ST-Link 额外脚本，Build + 烧录即可。
+
+## 17. v0.6 发布记录（2026-09-18）
+
+| 项 | 值 |
+|---|---|
+| tag / release | `BBCall_APRS_v0.6`（commit `e87af2a`，[release 页](https://github.com/PatrickShih774/BBcall_APRS/releases/tag/BBCall_APRS_v0.6)） |
+| 内容 | 重复包刷新屏上时间戳（§15 后续） + 片内 RTC 对时（§16，含编译时间戳兜底） |
+| 构建 | `text=63868 / data=132 / bss=20236`，0 错误 0 警告（CubeIDE 13.3.rel1 / -O0） |
+| 附件 | `BBCall_APRS_v0.6.hex / .bin / .elf / .map` |
+| 状态 | **未实机验证**（RTC 时钟源档位、对时回读、重复包刷新、跨零点翻日期都等烧录确认） |
+
+注意：预编译 hex 里嵌的编译时间戳是**发版构建时刻**（2026-09-18 00:37 北京时间），
+直接烧这版 hex，设备初始时间就是 00:37；要让自己设备的初始时间等于自己的编译时刻，重新 Build 一次再烧。
+
+后续版本的版本记录与验收结论写回 [PLAN.md §4](PLAN.md#4-已发布版本) 与本文件。
