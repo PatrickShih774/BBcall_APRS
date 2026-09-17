@@ -18,11 +18,98 @@
  * ● ：松开时按按住时长区分短按 / 长按（≥620ms = 退出），与模拟器 lcd_sim 翻译规则一致。 */
 static uint32_t s_bl_off_at;   /* 背光熄灭时刻（0 = 已灭） */
 
-static void ui_key_event(void)
+/* ---------------- S-meter（BK4802 寄存器 24）采样与取值 ----------------
+ * 为什么不在"解出帧的那一刻"读一次：解码完成时包已经结束，S-meter 未必还停在那个值上，
+ * 单次读还有失败概率（bk4802_read_reg 内部已重试 3 次 + 总线恢复）。
+ * 改成每 100ms 采一次，记录最近 1 秒内的峰值：解出帧时用"接收窗口内的峰值"，
+ * 既是这包的真实强度，也不怕单次读失败。 */
+#define RF_POLL_MS      BBCALL_SMETER_POLL_MS   /* 0 = 不采样（见 bbcall_cfg.h） */
+#define RF_PEAK_WIN_MS  1000u
+#define RF_PEAK_USE_MS  1500u
+static uint8_t  s_rf_rssi, s_rf_snr;        /* 最近一次有效读数 */
+static uint8_t  s_rf_valid;
+static uint8_t  s_rf_pk_rssi, s_rf_pk_snr;  /* 最近 1 秒峰值 */
+static uint32_t s_rf_last_ms, s_rf_pk_ms;
+/* 诊断用（没有串口时用 ST-Link 的 Live Expressions 看这几个）：
+ *   s_rf_ok_cnt / s_rf_fail_cnt  S-meter 采样成功/失败次数，可直接算出读失败率；
+ *   s_rf_last_raw                最近一次寄存器 24 原始值（0xFFFF = 读失败）。 */
+static uint16_t s_rf_ok_cnt, s_rf_fail_cnt, s_rf_last_raw = 0xFFFFu;
+
+static void rf_smeter_poll(void)
+{
+  uint32_t now = HAL_GetTick();
+#if RF_POLL_MS == 0
+  return;                                  /* 采样已关闭：只保留"最近有效值"的兜底逻辑 */
+#else
+  if ((uint32_t)(now - s_rf_last_ms) < RF_POLL_MS) return;
+#endif
+  s_rf_last_ms = now;
+  uint16_t r24 = bk4802_read_reg(24);
+  s_rf_last_raw = r24;
+  if ((r24 == 0xFFFFu) || ((uint8_t)(r24 & 0x00FFu) > 127u)) {   /* 读失败：只计数，保留上次的值 */
+    if (s_rf_fail_cnt < 0xFFFFu) s_rf_fail_cnt++;
+    return;
+  }
+  if (s_rf_ok_cnt < 0xFFFFu) s_rf_ok_cnt++;
+  s_rf_rssi = (uint8_t)(r24 & 0x00FFu);
+  s_rf_snr  = (uint8_t)((r24 & 0x3F00u) >> 8);
+  s_rf_valid = 1u;
+  if (((uint32_t)(now - s_rf_pk_ms) > RF_PEAK_WIN_MS) || (s_rf_rssi >= s_rf_pk_rssi)) {
+    s_rf_pk_rssi = s_rf_rssi;
+    s_rf_pk_snr  = s_rf_snr;
+    s_rf_pk_ms   = now;
+  }
+}
+
+/* 解出一帧时决定这条消息显示的 RSSI/SNR（返回 1 = 用的是"解码当刻"直读值，0 = 用了兜底）：
+ *   1) 先直读一次寄存器 24（bk4802_read_reg 内部已重试 3 次 + 总线恢复）——这就是这包解出来时的读数；
+ *   2) 读失败（0xFFFF / RSSI>127）退回接收窗口（1s）峰值——包刚结束，S-meter 未必还停在原值上；
+ *   3) 峰值也过期就退回最近一次有效采样；一次有效采样都没有才 --。 */
+static uint8_t rf_apply_for_frame(void)
+{
+  uint32_t now = HAL_GetTick();
+  uint16_t r24 = bk4802_read_reg(24);
+  s_rf_last_raw = r24;
+  if ((r24 != 0xFFFFu) && ((uint8_t)(r24 & 0x00FFu) <= 127u)) {
+    s_rf_rssi = (uint8_t)(r24 & 0x00FFu);
+    s_rf_snr  = (uint8_t)((r24 & 0x3F00u) >> 8);
+    s_rf_valid = 1u;
+    if (s_rf_ok_cnt < 0xFFFFu) s_rf_ok_cnt++;
+    if (((uint32_t)(now - s_rf_pk_ms) > RF_PEAK_WIN_MS) || (s_rf_rssi >= s_rf_pk_rssi)) {
+      s_rf_pk_rssi = s_rf_rssi;
+      s_rf_pk_snr  = s_rf_snr;
+      s_rf_pk_ms   = now;
+    }
+    ui_set_radio_stats((int16_t)s_rf_rssi, (int16_t)s_rf_snr);
+    return 1u;
+  }
+  if (s_rf_fail_cnt < 0xFFFFu) s_rf_fail_cnt++;
+  if (s_rf_valid && ((uint32_t)(now - s_rf_pk_ms) <= RF_PEAK_USE_MS)) {
+    ui_set_radio_stats((int16_t)s_rf_pk_rssi, (int16_t)s_rf_pk_snr);
+    return 0u;
+  }
+  if (s_rf_valid) {
+    ui_set_radio_stats((int16_t)s_rf_rssi, (int16_t)s_rf_snr);
+    return 0u;
+  }
+  ui_set_radio_stats((int16_t)-32768, (int16_t)-32768);
+  return 0u;
+}
+
+static void ui_backlight_wake(void)
 {
   lcd_backlight(1u);
   s_bl_off_at = HAL_GetTick() + 15000u;   /* 任意按键后背光亮 15s */
 }
+
+/* 按键诊断（没有串口时用 ST-Link 的 Live Expressions 看）：
+ *   s_key_up_cnt / s_key_down_cnt   ▲▼ 触发次数
+ *   s_key_ok_cnt / s_key_oklong_cnt ● 短按 / 长按次数
+ *   s_key_last_ms                   最近一次 ● 的按住时长（ms）——判断是否被误判成长按
+ *   s_key_last_raw                  最近一次 ● 松开时读到的原始电平（1=未按） */
+static uint16_t s_key_up_cnt, s_key_down_cnt, s_key_ok_cnt, s_key_oklong_cnt;
+static uint16_t s_key_last_ms;
+static uint8_t  s_key_last_raw = 1u;
 
 static void ui_keys_poll(void)
 {
@@ -50,10 +137,20 @@ static void ui_keys_poll(void)
     if (r == 0u) {                            /* 按下沿 */
       down_ms[i] = now;
       rep_ms[i]  = now;
-      if (i < 2u) { ui_handle_key(i == 0u ? SIM_KEY_UP : SIM_KEY_DOWN); ui_key_event(); }
+      if (i < 2u) {
+        if (i == 0u) { if (s_key_up_cnt   < 0xFFFFu) s_key_up_cnt++;   }
+        else         { if (s_key_down_cnt < 0xFFFFu) s_key_down_cnt++; }
+        ui_handle_key(i == 0u ? SIM_KEY_UP : SIM_KEY_DOWN);
+        ui_backlight_wake();
+      }
     } else if (i == 2u) {                     /* ● 松开沿：短按/长按互斥 */
-      ui_handle_key(((uint32_t)(now - down_ms[i]) >= 620u) ? SIM_KEY_OK_LONG : SIM_KEY_OK);
-      ui_key_event();
+      uint32_t held = (uint32_t)(now - down_ms[i]);
+      s_key_last_ms  = (held > 0xFFFFu) ? 0xFFFFu : (uint16_t)held;
+      s_key_last_raw = r;
+      if (held >= 620u) { if (s_key_oklong_cnt < 0xFFFFu) s_key_oklong_cnt++; }
+      else              { if (s_key_ok_cnt     < 0xFFFFu) s_key_ok_cnt++;     }
+      ui_handle_key((held >= 620u) ? SIM_KEY_OK_LONG : SIM_KEY_OK);
+      ui_backlight_wake();
     }
   }
   /* ▲▼ 长按自动重复 */
@@ -62,7 +159,7 @@ static void ui_keys_poll(void)
         (uint32_t)(now - rep_ms[i]) >= 180u) {
       rep_ms[i] = now;
       ui_handle_key(i == 0u ? SIM_KEY_UP : SIM_KEY_DOWN);
-      ui_key_event();
+      ui_backlight_wake();
     }
   }
 }
@@ -128,6 +225,11 @@ void bbcall_app_init(void)
   ui_init();
   ui_set_mycall(BBCALL_MYCALL);
   ui_set_rx_freq_khz((uint32_t)(BBCALL_DEF_FREQ_MHZ * 1000.0 + 0.5));
+#if BBCALL_WALLCLOCK_ENABLE
+  /* 锁屏页默认墙钟（bbcall_cfg.h）：周W M/D + HH:MM，开机即从这一刻走 */
+  ui_set_wallclock(BBCALL_WALLCLOCK_WDAY, BBCALL_WALLCLOCK_MON, BBCALL_WALLCLOCK_DAY);
+  ui_set_clock_ms(BBCALL_WALLCLOCK_BASE_MS);
+#endif
   ui_show(UI_SCREEN_IDLE);
   lcd_backlight(1u);
   s_bl_off_at = HAL_GetTick() + 15000u;
@@ -223,14 +325,18 @@ void bbcall_app_loop(void)
     static ax25_decoded_t d;
     if (ax25_decode(fr.frame, fr.len, &d)) {
 #if BBCALL_LCD_ENABLED
-      /* 三态 UI 入箱（自带 60s 去重 / ackNNN 分流，design.md §6.4）；
-       * RSSI/SNR 无标定采样，不注入（design.md §12.2，收件箱显示 --） */
-      ui_feed_ax25(fr.frame, fr.len, now_ms,
-                   modem_frame_was_fixed() ? 1u : 0u,
-                   modem_frame_was_repeat() ? 1u : 0u);
+      /* 解码当刻取这条消息的 RSSI/SNR：先直读寄存器 24，读失败才用采样窗口兜底（见函数说明） */
+      uint8_t rf_fresh = rf_apply_for_frame();
+      if (ui_feed_ax25(fr.frame, fr.len, BBCALL_WALLCLOCK_BASE_MS + now_ms,   /* 与锁屏同一基准 */
+                       modem_frame_was_fixed() ? 1u : 0u,
+                       modem_frame_was_repeat() ? 1u : 0u)) {
+        /* 真的入箱了（不是重复包/ackNNN）：点亮背光，否则背光超时后看不到这条新消息 */
+        ui_backlight_wake();
+      }
 #endif
       hw_console_puts("\r\n[FRAME] src=");
       hw_console_puts(d.src);
+      if (d.src_ssid != 0u) { hw_console_putc('-'); hw_console_u16((uint16_t)d.src_ssid); }
       hw_console_puts(" dest=");
       hw_console_puts(d.dest);
       hw_console_puts(" path=");
@@ -246,6 +352,16 @@ void bbcall_app_loop(void)
       hw_console_u8(d.control);
       hw_console_puts(" info=");
       for (uint8_t i = 0; i < d.info_len; i++) hw_console_putc((char)d.info[i]);
+#if BBCALL_LCD_ENABLED
+      /* 本帧记下的 RSSI/SNR（芯片原始读数，非 dBm）：没有有效采样时打 -- */
+      if (s_rf_valid) {
+        hw_console_puts(" RSSI="); hw_console_u8(s_rf_rssi);
+        hw_console_puts(" SNR=");  hw_console_u8(s_rf_snr);
+        hw_console_puts(rf_fresh ? " (decode-now)" : " (peak-fallback)");
+      } else {
+        hw_console_puts(" RSSI=-- SNR=--");
+      }
+#endif
       hw_console_puts("\r\n");
       /* Mic-E 的目标呼号包含位置模糊度空格，必须用原始地址字节（保留空格） */
       char mice_dest[7];
@@ -327,6 +443,11 @@ void bbcall_app_loop(void)
      * 强信号下 I2C 读可能失效（0xFFFF / RSSI>127），此时不调整；
      * 刚收到帧的 1 秒内也不切换增益，避免包中途改变增益影响解码。 */
     uint8_t rssi_ok = (r24 != 0xFFFFu) && (rssi_now <= 127u);
+    if (rssi_ok) {                     /* 与 100ms 快采共用同一份缓存 */
+      s_rf_rssi = rssi_now;
+      s_rf_snr  = (uint8_t)((r24 & 0x3F00u) >> 8);
+      s_rf_valid = 1u;
+    }
     uint8_t can_adjust = rssi_ok && ((HAL_GetTick() - last_frame_tick) > 1000u);
     static uint8_t if_code = BK4802_IF_GAIN_CODE;
     uint8_t new_code = if_code;
@@ -369,6 +490,7 @@ void bbcall_app_loop(void)
   }
 
 #if BBCALL_LCD_ENABLED
+  rf_smeter_poll();   /* 每 100ms 采一次 S-meter，供解码时取接收窗口峰值 */
   /* 三态 UI：推进设备时钟（态 1/2 冒号闪烁 0.5s 触发重绘）+ 扫描按键 + 背光超时熄灭 */
   {
     static uint32_t t_ui_last = 0;

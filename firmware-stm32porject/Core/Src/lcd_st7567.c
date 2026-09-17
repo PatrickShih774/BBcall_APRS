@@ -22,6 +22,11 @@
 
 static uint8_t fb[LCD_FB_BYTES];
 
+/* 上电白屏自检（1=开，0=关）：见 lcd_init() 末尾说明 */
+#ifndef LCD_BOOT_FLASH
+#define LCD_BOOT_FLASH 1
+#endif
+
 #ifndef LCD_SIM
 static void pin_hi(uint16_t p){ HAL_GPIO_WritePin(LCD_GPIO, p, GPIO_PIN_SET); }
 static void pin_lo(uint16_t p){ HAL_GPIO_WritePin(LCD_GPIO, p, GPIO_PIN_RESET); }
@@ -100,15 +105,35 @@ void lcd_init(void)
 #endif
 
   lcd_cmd(0xE2); lcd_cmd(0xAE);
-  /* 段方向(SEG/ADC select)：0xA0 正常、0xA1 反向。
-   * 原来写的 0xA1 会让文字左右镜像；实测改为 0xA0 后显示正常。
-   * COM 方向 0xC0 保持不变，因此只有左右镜像问题。 */
-  lcd_cmd(0x40); lcd_cmd(0xA0); lcd_cmd(0xC0);
+  /* 段/行方向：0xA0=SEG 正常(0xA1 反向)，0xC0=COM 正常(0xC8 反向)。
+   * 实板结论：本机模组的 SEG 走线是反的（正装要 0xA1）；
+   * 面板 180° 安装等于上下+左右一起翻，所以两处同时反向（0xA0 + 0xC8），
+   * 列起点也随 ADC 方向换到另一端（见 bbcall_cfg.h 的 LCD_COL_OFFSET）。
+   * 模拟器在 lcd_sim.c 里按同一块屏 + 同一安装方向建模，预览与实机一致。 */
+#if LCD_MOUNT_180
+  lcd_cmd(0x40); lcd_cmd(0xA0); lcd_cmd(0xC8);
+#else
+  lcd_cmd(0x40); lcd_cmd(0xA1); lcd_cmd(0xC0);
+#endif
   lcd_cmd(0xA6); lcd_cmd(0xA2);
-  lcd_cmd(0x2C); lcd_cmd(0x25);
-  lcd_cmd2(0x81, 0x1C);
+  /* 电源控制命令是 0x28 | (VC<<2) | (VR<<1) | VF：VC=电压转换、VR=稳压、VF=电压跟随。
+   * 原代码只写 0x2C，等于"只开电压转换"，稳压和电压跟随都没开，V0 建立不起来，
+   * 现象就是"背光亮、屏上一个字都没有"。按 2C -> 2E -> 2F 逐级打开，给电荷泵留建立时间。 */
+  lcd_cmd(0x2C); HAL_Delay(2);      /* VC on */
+  lcd_cmd(0x2E); HAL_Delay(2);      /* VC + VR on */
+  lcd_cmd(0x2F); HAL_Delay(2);      /* VC + VR + VF on：这一步之后 V0 才到位 */
+  lcd_cmd(0x25);                    /* 内部电阻比 5（0x20~0x27） */
+  lcd_cmd2(0x81, 0x12);             /* 电子音量（对比度）0x12 = 0x24 的一半；范围 0x00~0x3F，太浓往下减、太淡往上加 */
   lcd_cmd(0xA4); lcd_cmd(0xAF);
 
+#if LCD_BOOT_FLASH
+  /* 上电全屏点亮 300ms 再清屏：分诊用。看不到这一下全白，问题就在硬件侧
+   * （PSB 串/并口选择、CS/RST 接线、V0 电容、对比度），而不是界面画错。
+   * 不想看到就把宏改成 0。 */
+  lcd_clear(1);
+  lcd_flush();
+  HAL_Delay(300);
+#endif
   lcd_clear(0);
   lcd_flush();
   lcd_backlight(1);
@@ -277,8 +302,10 @@ void lcd_flush(void)
 {
   for (uint8_t page = 0; page < LCD_PAGES; page++) {
     lcd_cmd(0xB0u | page);
-    lcd_cmd(0x00u);
-    lcd_cmd(0x10u);
+    /* 列地址起点 = LCD_COL_OFFSET：本机模组可见 SEG 从芯片第 4 列开始（见 bbcall_cfg.h），
+     * 于是整幅画面右移 4 像素。芯片列地址 0..131 自增，写满 128 字节不会回卷到左侧。 */
+    lcd_cmd((uint8_t)(0x10u | ((LCD_COL_OFFSET >> 4) & 0x0Fu)));
+    lcd_cmd((uint8_t)(LCD_COL_OFFSET & 0x0Fu));
     lcd_data_bytes(&fb[page * LCD_W], LCD_W);
   }
 }

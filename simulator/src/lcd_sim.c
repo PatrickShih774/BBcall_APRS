@@ -1,4 +1,5 @@
 #include "lcd_sim.h"
+#include "bbcall_cfg.h"   /* LCD_COL_OFFSET：与固件共用同一个面板列偏移 */
 #include <SDL.h>
 #include <string.h>
 #include <stdio.h>
@@ -6,6 +7,7 @@
 #define LCD_W 128
 #define LCD_H 64
 #define LCD_FB 1024
+#define LCD_COLS 132   /* ST7567 内部 132 列；可见 128 列从 LCD_COL_OFFSET 起 */
 
 static SDL_Window   *s_win;
 static SDL_Renderer *s_ren;
@@ -18,7 +20,7 @@ static int s_display_on = 1, s_invert = 0, s_all_on = 0;
 static int s_seg_rev = 0, s_com_rev = 0, s_start = 0;
 static int s_contrast_next = 0;
 static int s_backlight = 1;
-static int s_panel_flip = 0;   /* 模拟另一种面板接线（SEG 方向反向） */
+static int s_panel_flip = 1;   /* 本机模组 SEG 走线是反的（固件发 0xA1）；模拟同一块屏默认带上，F3 可切另一种接线对比 */
 static int s_scale = 4;
 static int s_running = 1;
 
@@ -66,8 +68,8 @@ void lcd_sim_cmd(uint8_t c)
   if (c == 0xC8) { s_com_rev = 1; return; }
   if (c >= 0x40 && c <= 0x7F) { s_start = c & 0x3F; return; }
   if (c >= 0xB0 && c <= 0xB7) { s_page = c & 0x07; return; }
-  if (c >= 0x00 && c <= 0x0F) { s_col_lo = c & 0x0F; s_col = (s_col_hi << 4) | s_col_lo; return; }
-  if (c >= 0x10 && c <= 0x1F) { s_col_hi = c & 0x0F; s_col = (s_col_hi << 4) | s_col_lo; return; }
+  if (c >= 0x00 && c <= 0x0F) { s_col_lo = c & 0x0F; s_col = (s_col_hi << 4) | s_col_lo; if (s_col > LCD_COLS - 1) s_col = LCD_COLS - 1; return; }
+  if (c >= 0x10 && c <= 0x1F) { s_col_hi = c & 0x0F; s_col = (s_col_hi << 4) | s_col_lo; if (s_col > LCD_COLS - 1) s_col = LCD_COLS - 1; return; }
   if (c == 0x81) { s_contrast_next = 1; return; }
   /* 其它命令忽略 */
 }
@@ -75,10 +77,15 @@ void lcd_sim_cmd(uint8_t c)
 void lcd_sim_data(uint8_t d)
 {
   if (s_contrast_next) { s_contrast_next = 0; return; }
-  if (s_page < 0 || s_page > 7 || s_col < 0 || s_col > 127) return;
-  s_fb[s_page * LCD_W + s_col] = d;
+  if (s_page < 0 || s_page > 7 || s_col < 0 || s_col >= LCD_COLS) return;
+  /* 面板可见列 = 芯片列 - LCD_COL_OFFSET：写进不可见列的数据丢弃。
+   * 固件从第 4 列开始写、面板从第 4 列开始显示，两边相消，预览画面与实机一致。 */
+  {
+    int x = s_col - (int)LCD_COL_OFFSET;
+    if (x >= 0 && x < LCD_W) s_fb[s_page * LCD_W + x] = d;
+  }
   s_col++;
-  if (s_col >= LCD_W) s_col = 0;
+  if (s_col >= LCD_COLS) s_col = 0;
 }
 
 void lcd_sim_data_bytes(const uint8_t *d, uint16_t n)
@@ -133,9 +140,9 @@ static void build_pixels(void)
   const uint32_t px     = 0xFF182018u;   /* 点亮像素 */
   for (int y = 0; y < LCD_H; y++) {
     int sy = (y + s_start) % LCD_H;
-    if (s_com_rev) sy = LCD_H - 1 - sy;
+    if (s_com_rev ^ (int)LCD_MOUNT_180) sy = LCD_H - 1 - sy;   /* ^ 安装方向：180° 安装时上下也翻 */
     for (int x = 0; x < LCD_W; x++) {
-      int sx = (s_seg_rev ^ s_panel_flip) ? (LCD_W - 1 - x) : x;
+      int sx = (s_seg_rev ^ s_panel_flip ^ (int)LCD_MOUNT_180) ? (LCD_W - 1 - x) : x;
       int on = (s_fb[(sy / 8) * LCD_W + sx] >> (sy % 8)) & 1;
       if (s_all_on) on = 1;
       if (!s_display_on) on = 0;

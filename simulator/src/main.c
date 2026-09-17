@@ -10,6 +10,7 @@
 #include "lcd_sim.h"
 #include "ui_harness.h"
 #include "sim_feed.h"
+#include "bbcall_cfg.h"   /* 默认墙钟与实机同源 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +60,7 @@ static void usage(void)
          "  --demo           注入内置示例帧（含中文消息；无外部文件时的默认）\n"
          "  --clock SEC      设备时钟固定值（自检截图用，决定时钟/时间显示）\n"
          "  --wallclock W,M,D  模拟 RTC：态 1 大格显示 周W M/D（如 3,9,16 = 周三 9/16）\n"
+         "  --rf R,S         wav/日志回放时按真机那样注入 RSSI,SNR（芯片原始读数）\n"
          "  --mycall CALL    本机呼号（态 1 上格，默认 NOCALL）\n"
          "  --batt N         电量挡位 0 低 / 1 中 / 2 高（默认无采样，显示 --）\n"
          "  --keys LIST      按键序列（1=上 2=下 3=确定 4=长按确定），验证导航路径\n"
@@ -77,7 +79,7 @@ int main(int argc, char **argv)
   int batt = -1;
   int i;
   const char *wav = NULL, *log = NULL, *out = "sim_selftest.bmp";
-  const char *keys = NULL, *mycall = NULL, *wallclock = NULL;
+  const char *keys = NULL, *mycall = NULL, *wallclock = NULL, *rf = NULL;
 
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
@@ -91,6 +93,7 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--replay") && i + 1 < argc) log = argv[++i];
     else if (!strcmp(argv[i], "--clock") && i + 1 < argc) clock_sec = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--wallclock") && i + 1 < argc) wallclock = argv[++i];
+    else if (!strcmp(argv[i], "--rf") && i + 1 < argc) rf = argv[++i];
     else if (!strcmp(argv[i], "--mycall") && i + 1 < argc) mycall = argv[++i];
     else if (!strcmp(argv[i], "--batt") && i + 1 < argc) batt = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = argv[++i];
@@ -113,7 +116,16 @@ int main(int argc, char **argv)
     else
       printf("[sim] --wallclock 格式应为 W,M,D（W: 0=周日..6=周六），已忽略: %s\n", wallclock);
   }
+  if (rf) {                                /* --rf RSSI,SNR：复现真机解码当刻的芯片读数 */
+    unsigned r = 0, s = 0;
+    if (sscanf(rf, "%u,%u", &r, &s) == 2) sim_feed_set_rf((int)r, (int)s);
+    else printf("[sim] --rf 格式应为 RSSI,SNR（如 73,19），已忽略: %s\n", rf);
+  }
   if (clock_sec >= 0) ui_set_clock_ms((uint32_t)clock_sec * 1000u);
+  else                ui_set_clock_ms(BBCALL_WALLCLOCK_BASE_MS);   /* 不给 --clock 就用实机的默认值 */
+#if BBCALL_WALLCLOCK_ENABLE
+  if (!wallclock)     ui_set_wallclock(BBCALL_WALLCLOCK_WDAY, BBCALL_WALLCLOCK_MON, BBCALL_WALLCLOCK_DAY);
+#endif
 
   if (wav) sim_feed_wav(wav);
   if (log) sim_feed_log(log);
@@ -125,8 +137,11 @@ int main(int argc, char **argv)
          (unsigned)ui_inbox_count(), (unsigned)ui_unread_count(), (unsigned)ui_rx_total(),
          (unsigned)ui_dup_total());
 
+  /* --screen 只用于自检强制指定画面；不给就保持状态机自己的结果。
+   * 真机上没有任何代码会在收包后调 ui_show，这里必须与真机一致，
+   * 才能验证「解码成功 -> 自动从待机切到有未读页」。 */
   if (screen) ui_show(screen);
-  else        ui_show(ui_unread_count() > 0u ? UI_SCREEN_UNREAD : UI_SCREEN_IDLE);
+  else printf("[sim] 状态机当前页 = %u（1=待机 2=有未读 3=收件箱）\n", (unsigned)ui_current_screen());
 
   /* --keys "3,2,2"：按顺序派发按键，用于验证导航路径（自检可复现） */
   if (keys) {
@@ -139,6 +154,8 @@ int main(int argc, char **argv)
       if (*q == ',') q++;
     }
     printf("\n");
+    /* 按键之后再报一次当前页，便于自检断言按键结果（1=待机 2=有未读 3=收件箱） */
+    printf("[sim] 按键后状态机当前页 = %u\n", (unsigned)ui_current_screen());
   }
   lcd_sim_render();
 

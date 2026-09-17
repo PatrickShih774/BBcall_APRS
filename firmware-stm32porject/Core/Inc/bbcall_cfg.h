@@ -17,6 +17,23 @@
 #define AF_CAPTURE_GPIO    GPIOA
 #define AF_CAPTURE_PIN     GPIO_PIN_1
 /* ---------- ST7567 LCD（GPIO 模拟 SPI，4 线；背光让出 PA8 给 DIO1） ---------- */
+/* 面板安装方向：0 = 正装；1 = 旋转 180° 安装（上下 + 左右一起翻）。
+ * 180° 安装时 SEG 与 COM 同时反向，列起点也随之移到另一端。 */
+#ifndef LCD_MOUNT_180
+#define LCD_MOUNT_180  1
+#endif
+
+/* 本机模组是 132 列驱动 + 128 列面板，可见 SEG 只占其中 128 列：
+ *   正装   ：可见 SEG 从芯片第 4 列开始，写数据要从列 4 起，否则画面整体左偏 4 像素；
+ *   180°  ：两端互换，改成从第 0 列起。
+ * 数值可按实板微调，0 = 不偏移。 */
+#ifndef LCD_COL_OFFSET
+#if LCD_MOUNT_180
+#define LCD_COL_OFFSET  0u
+#else
+#define LCD_COL_OFFSET  4u
+#endif
+#endif
 #define LCD_GPIO           GPIOB
 #define LCD_CS_PIN         GPIO_PIN_6
 #define LCD_CLK_PIN        GPIO_PIN_3
@@ -32,6 +49,31 @@
  * 注：UI v2.0 三态界面改用 Fusion Pixel 字模（fusion_font.h），不再走本链路。 */
 #ifndef CN_FONT_ENABLED
 #define CN_FONT_ENABLED   0
+#endif
+
+/* ---------- S-meter（BK4802 寄存器 24）采样周期 ----------
+ * 锁屏/收件箱显示的 RSSI/SNR 来自这里：周期采样 + 取接收窗口峰值。
+ * 置 0 表示完全不采样（界面上 RSSI/SNR 显示 --）——用于排查
+ * "I2C 读取是否干扰了解码"这类问题（读失败会触发总线恢复脉冲）。 */
+#ifndef BBCALL_SMETER_POLL_MS
+#define BBCALL_SMETER_POLL_MS 100u
+#endif
+
+/* ---------- 锁屏页默认墙钟（无 RTC 时用） ----------
+ * 开机即从这一刻走：大格显示 HH:MM，下一行显示 周W M/D。
+ * 置 BBCALL_WALLCLOCK_ENABLE 0 则退回"开机时长 UP HH:MM"（design.md 的原始留白做法）。
+ * 接上 RTC / 串口对时后，用 ui_set_wallclock() + ui_set_clock_ms() 覆盖即可。 */
+#define BBCALL_WALLCLOCK_ENABLE 1
+#define BBCALL_WALLCLOCK_WDAY   3    /* 0=周日, 1=周一 ... 6=周六 */
+#define BBCALL_WALLCLOCK_MON    9
+#define BBCALL_WALLCLOCK_DAY    16
+#define BBCALL_WALLCLOCK_HH     20
+#define BBCALL_WALLCLOCK_MM     45
+
+#if BBCALL_WALLCLOCK_ENABLE
+#define BBCALL_WALLCLOCK_BASE_MS  ((((uint32_t)BBCALL_WALLCLOCK_HH * 60u) + BBCALL_WALLCLOCK_MM) * 60000u)
+#else
+#define BBCALL_WALLCLOCK_BASE_MS  0u
 #endif
 
 /* ---------- UI v2.0 三态界面（design.md v2.0；唯一权威规范） ----------

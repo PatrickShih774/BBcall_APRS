@@ -36,9 +36,9 @@ typedef struct {
   uint8_t  have_rf;     /* rssi/snr 有真实采样 */
   int16_t  rssi;
   int16_t  snr;
-  char     src[10];
+  char     src[12];    /* 呼号 + "-SSID"：BG5BLB-12 是 10 字符，留 12 字节 */
   char     dst[10];
-  char     path[30];
+  char     path[22];    /* 中继路径：屏上一列约 10 格，22 字节足够 */
   char     lat[10];
   char     lon[11];
   char     body[UI_BODY_MAX];   /* UTF-8 */
@@ -184,7 +184,7 @@ static int16_t fp_cx(const char *s, uint8_t tier, int16_t x0, int16_t x1, uint8_
 /* ------------------------------------------------------------------ */
 /* 按单元格折行（ASCII=1 格，汉字=2 格；不切断 UTF-8 序列）               */
 /* ------------------------------------------------------------------ */
-#define WRAP_MAXLINES 8
+#define WRAP_MAXLINES 4     /* 正文上限 64 字节最多 3 行（21 格/行），4 行留滚动余量 */
 #define WRAP_MAXCELLS 21
 
 static uint8_t wrap_cells(const char *s, uint8_t maxcells,
@@ -290,7 +290,6 @@ static void draw_idle(void)
 {
   char buf[24];
   char clk[8];
-  uint8_t inv = 1u;
   lcd_clear(0);
 
   /* 大格（恒反显）：时钟 2 倍 + 日期/时长 */
@@ -338,7 +337,7 @@ static void draw_unread(void)
 {
   const ui_item_t *it = latest_unread();
   char buf[24];
-  char lines[WRAP_MAXLINES][WRAP_MAXCELLS * 3 + 1];
+  char lines[2][WRAP_MAXCELLS * 3 + 1];   /* 这一屏只用 2 行，不必按最大版面开栈（wrap_cells 的列宽固定） */
   uint8_t n, i;
   lcd_clear(0);
   if (!it) { draw_idle(); return; }
@@ -496,12 +495,12 @@ void ui_handle_key(int key)
       if (key == SIM_KEY_UP || key == SIM_KEY_DOWN) {
         /* 死键：这两态没有可移动的焦点，屏幕不做任何反应（design.md §9） */
       } else if (key == SIM_KEY_OK) {
-        if (s_count > 0u) {
-          s_view = UI_SCREEN_INBOX;
-          s_idx = 0u;               /* 焦点落在第一条（最新在上） */
-          s_vscroll = 0u;
-          redraw();
-        }
+        /* design.md §9：待机/有未读 ● 短按就进收件箱，空箱也要进（显示"无消息 0 / 0"），
+         * 否则用户按下去只有背光会亮、屏幕上没有任何反馈。 */
+        s_view = UI_SCREEN_INBOX;
+        s_idx = 0u;                 /* 焦点落在第一条（最新在上） */
+        s_vscroll = 0u;
+        redraw();
       } else if (key == SIM_KEY_OK_LONG) {
         /* 已是最外层：设备上无反应（原型里的提示在演示读数条，不是屏幕内容） */
       }
@@ -512,12 +511,34 @@ void ui_handle_key(int key)
 /* ------------------------------------------------------------------ */
 /* 数据注入                                                            */
 /* ------------------------------------------------------------------ */
+/* 字符串被截断时不许把一个 UTF-8 汉字切成半个。
+ * 注意判据是"尾部这一串是否完整"，不是"尾部是不是续字节"：
+ * 完整以汉字结尾时，前几版实现会把整个末字误删（位置帧注释末尾丢字就是这个原因）。 */
+static void utf8_clip_tail(char *s)
+{
+  size_t n = strlen(s);
+  size_t i = n;
+  while (i > 0u && (((uint8_t)s[i - 1u] & 0xC0u) == 0x80u)) i--;   /* 最后一个首字节之后的位置 */
+  if (i == 0u) { s[0] = 0; return; }                               /* 整串都是续字节：清空 */
+  {
+    uint8_t lead = (uint8_t)s[i - 1u];
+    size_t need;
+    if ((lead & 0x80u) == 0x00u)      need = 1u;
+    else if ((lead & 0xE0u) == 0xC0u) need = 2u;
+    else if ((lead & 0xF0u) == 0xE0u) need = 3u;
+    else if ((lead & 0xF8u) == 0xF0u) need = 4u;
+    else { s[i - 1u] = 0; return; }                                /* 非法首字节 */
+    if ((n - (i - 1u)) < need) s[i - 1u] = 0;                      /* 这一串不完整才截掉 */
+  }
+}
+
 static void clip_str(char *dst, uint8_t cap, const char *src)
 {
   uint8_t i = 0;
   if (cap == 0u) return;
   while ((uint8_t)(i + 1u) < cap && src[i]) { dst[i] = src[i]; i++; }
   dst[i] = 0;
+  utf8_clip_tail(dst);
 }
 
 uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
@@ -563,7 +584,7 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
     n = (uint8_t)((m.body_len < (sizeof(ackbuf) - 1u)) ? m.body_len : (sizeof(ackbuf) - 1u));
     for (i = 0u; i < n; i++) ackbuf[i] = (char)m.body[i];
     ackbuf[n] = 0;
-    if (is_ack_body(ackbuf)) { s_ack_total++; return 1u; }
+    if (is_ack_body(ackbuf)) { s_ack_total++; return 0u; }   /* 按接口约定：ackNNN 只计数，不算入箱 */
   }
 
   if (s_count >= UI_INBOX_MAX) {           /* 满：丢掉最旧（队尾） */
@@ -581,7 +602,10 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
   it->rssi = s_rssi_next;
   it->snr = s_snr_next;
   s_have_rf_next = 0u;                     /* 采样只消费一次，不跨帧沿用 */
-  clip_str(it->src, sizeof(it->src), d.src);
+  if (d.src_ssid != 0u)                   /* 带 SSID 时显示成 BG5BLB-12，屏上一格放得下 */
+    snprintf(it->src, sizeof(it->src), "%s-%u", d.src, (unsigned)d.src_ssid);
+  else
+    clip_str(it->src, sizeof(it->src), d.src);
   clip_str(it->dst, sizeof(it->dst), d.dest);
 
   if (d.npath == 0u) {
@@ -604,15 +628,25 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
     it->have_pos = 1u;
     clip_str(it->lat, sizeof(it->lat), mi.lat);
     clip_str(it->lon, sizeof(it->lon), mi.lon);
-    snprintf(it->body, sizeof(it->body), "%s %s %s %ukm/h %u %s",
-             mi.lat, mi.lon, mi.mtype,
-             (unsigned)mi.speed_kmh, (unsigned)mi.course, mi.comment);
+    /* 注释优先：经纬度在态 2 已有专用格子，正文再抄一遍会把真正的消息文字挤进滚动区。
+     * 有注释（消息/备注）就只放注释；纯信标才回退成经纬度 + 类型 + 速度/航向。 */
+    if (mi.comment[0] != 0)
+      snprintf(it->body, sizeof(it->body), "%.40s", mi.comment);
+    else
+      snprintf(it->body, sizeof(it->body), "%.9s %.10s %.4s %ukm/h %u",
+               mi.lat, mi.lon, mi.mtype,
+               (unsigned)mi.speed_kmh, (unsigned)mi.course);
+    utf8_clip_tail(it->body);
   } else if (aprs_parse_position(d.info, d.info_len, &pos)) {
     it->kind = UI_KIND_POS;
     it->have_pos = 1u;
     clip_str(it->lat, sizeof(it->lat), pos.lat);
     clip_str(it->lon, sizeof(it->lon), pos.lon);
-    snprintf(it->body, sizeof(it->body), "%s %s %s", pos.lat, pos.lon, pos.comment);
+    if (pos.comment[0] != 0)
+      snprintf(it->body, sizeof(it->body), "%.40s", pos.comment);
+    else
+      snprintf(it->body, sizeof(it->body), "%.9s %.10s", pos.lat, pos.lon);
+    utf8_clip_tail(it->body);
   } else if (aprs_parse_message(d.info, d.info_len, &m)) {
     it->kind = UI_KIND_MSG;
     n = (uint8_t)((m.body_len < (UI_BODY_MAX - 1u)) ? m.body_len : (UI_BODY_MAX - 1u));
@@ -627,6 +661,16 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
 
   s_count++;
   s_unread++;
+  /* design.md §9：待机态收到新包要立刻从锁屏切到"有未读"页并重绘；
+   * 已经在收件箱里时不抢焦点（但新条插在队首，光标跟着 +1 才是原来那条）。 */
+  if (s_view == UI_SCREEN_IDLE || s_view == UI_SCREEN_UNREAD) {
+    s_view = UI_SCREEN_UNREAD;
+    s_vscroll = 0u;
+  } else if (s_view == UI_SCREEN_INBOX) {
+    if ((uint16_t)(s_idx + 1u) < s_count) s_idx++;
+    s_vscroll = 0u;
+  }
+  redraw();                      /* 立即刷新，不等 ui_tick 的冒号闪烁 */
   return 1u;
 }
 
@@ -677,7 +721,9 @@ void ui_set_radio_stats(int16_t rssi_dbm, int16_t snr)
 {
   s_rssi_next = rssi_dbm;
   s_snr_next = snr;
-  s_have_rf_next = 1u;
+  /* -32768 = 本帧没有采样（I2C 读失败）：清掉标志，界面显示 --，
+   * 否则上一帧的读数会被当成这一帧的值（design.md 第 12 节：没有测量就不显示）。 */
+  s_have_rf_next = (uint8_t)((rssi_dbm == (int16_t)-32768) ? 0u : 1u);
 }
 
 uint16_t ui_inbox_count(void) { return s_count; }
@@ -685,6 +731,7 @@ uint16_t ui_unread_count(void) { return s_unread; }
 uint16_t ui_rx_total(void) { return s_rx_total; }
 uint16_t ui_dup_total(void) { return s_dup_total; }
 uint32_t ui_clock_ms(void) { return s_now_ms; }
+uint8_t  ui_current_screen(void) { return s_view; }
 
 void ui_tick(uint32_t ms)
 {
