@@ -23,7 +23,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 | 3 | [软件结构](#3-软件结构) | 文件表 / 架构图；信号链 → [docs/PLAN.md §3](docs/PLAN.md#3-软件架构) |
 | 4 | [调试过程记录](#4-调试过程记录) | 概要 → [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md)（完整 bring-up / 实测） |
 | 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出 / §5.1 对时（RTC） |
-| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频生成 / UI 校验 |
+| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频 / UI 校验 / 串口桥与实时调参 / 现场排障套路 |
 | 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
 | 8 | [待办 / 下一步](#8-待办--下一步) | → [docs/PLAN.md](docs/PLAN.md)（路线图 / 验收标准） |
 | 9 | [PC 端 LCD 模拟器（SDL2）](#9-pc-端-lcd-模拟器sdl2) | 概要 → [simulator/SIMULATOR.md](simulator/SIMULATOR.md) |
@@ -272,6 +272,49 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 ```
 
 主机的同算法仿真可解出 `len=47, CRC=True`。
+
+### 6.1 调试工具总览（2026-09-19 联调沉淀）
+
+| 工具 | 用途 | 典型命令 |
+|---|---|---|
+| `tools/serial_bridge.ps1` | **常驻串口桥**：实时打印设备输出 + 从"命令文件"发命令（让 Codex/脚本直接驱动设备） | `powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5` |
+| `tools/set_rtc_time.ps1` | PC 系统时间写进片内 RTC；`-Query` 还会打印**与 PC 的时差**，`-TrimPpm <ppm>` 标定走时 | 见 §5.1 |
+| `tools/test_rtc_math.c` | 日期换算 / 编译时间戳 / ppm 校准的主机自测（TCC 直接跑，不碰硬件） | `third_party\tcc\tcc\tcc.exe -I firmware-stm32porject\Core\Inc -o %TEMP%\rtc.exe tools\test_rtc_math.c; %TEMP%\rtc.exe` |
+| `tools/regression_baud.ps1` | host 侧频偏回归：生成 ±x% 波特率素材，对比软/硬判决帧数 | `powershell -ExecutionPolicy Bypass -File tools\regression_baud.ps1` |
+| `tools/verify_ui.py` | 模拟器截图逐像素核对（呼号/经纬度/正文/RSSI/SNR/未读数） | `python tools\verify_ui.py shot.bmp unread` |
+| `tools/gen_afsk_wav.py` | 生成标准 / VOX / 位置 / 消息测试音频（`--baud-bias` 造频偏） | 见本节上方 |
+| `tools/make_hex.ps1` | ELF → HEX/BIN（手编后出烧录文件） | `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1` |
+| `simulator/` | PC 端 ST7567 模拟器，与固件共用 `ui_harness.c`，不烧录就能验 UI 与解码 | `powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run` |
+
+### 6.2 让 AI / 脚本直接驱动设备（串口桥工作流）
+
+串口是**独占**的，所以由 `serial_bridge.ps1` 一个进程同时管收发：
+
+1. 关掉串口助手（SSCOM 等），确认 **PB10(TX)→适配器 RX、PB11(RX)←适配器 TX、共地**；
+2. 起桥（可选 `-LogFile` 落盘）：
+   `powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5`
+3. 发命令：任何进程只要往命令文件写一行就行（桥发完自动删文件）：
+   `"STAT?" | Out-File -Encoding ascii "$env:TEMP\bbcall_tx.txt"`
+4. 设备回复直接出现在桥的输出里（`[CFG]` / `[STAT]` / `[RTC]` 行），可以边调边看。
+
+配合 §5.2 的**运行时调参命令**（`GAIN=` / `AGC=` / `SQ=` / `SQN=` / `FREQ=` / `MUTE=` / `STAT?` / `PING`），
+改参数**不用重烧**：改完立刻用 `STAT?`、`R19=`、`[FRAME]` 看效果，最后再把满意的值写回 `bbcall_cfg.h`。
+
+**踩过的坑（已在脚本/固件里处理）**：
+
+- 一次写入多条、背靠背发送时，设备偶尔读坏第一条（实测 `TIME=`+`TIME?` 连发时第一条回 `err`）→ 桥现在**每条之间等 200ms**；
+- 带调参命令的固件 `Debug`(-O0) **装不下**（溢出 1484 字节）→ 用 `Release`(-Os)，见 §7；
+- 端口被别人占用会直接报 `Access to the port 'COM5' is denied`，先关掉串口助手。
+
+### 6.3 现场排障套路（实战验证）
+
+| 现象 | 一步定性 | 判读 |
+|---|---|---|
+| BK4802 读寄存器全 `FFFF` | 看固件自动打印的 `[I2C] no response: scl=? sda=? relPA8=? ack=?` | `scl`/`sda` = 0 → 总线被拉死/短路；两者=1 且 `ack=0` → 线是好的、芯片不应答（查供电/CE/21.25MHz 晶振/模块）；`relPA8=1` → SCL 被 PA8(DIO1) 拉低，PA8/PA9 在 LQFP48 上相邻，八成连锡 |
+| 串口发命令没反应 | 短接板上 **PB10 ↔ PB11**（相邻两脚） | 日志随即刷出 `[RTC] err: use TIME=...` → MCU 接收链路（PB11→DMA→解析）正常，问题在 USB-TTL→PB11 那根线或焊点 |
+| 怀疑 USB-TTL | 拔下适配器，短接它自己的 **TX ↔ RX**，再让对面发一串字符 | 能回显 = PC 与适配器正常；不能 = 换适配器 |
+| 一天时差偏大 | `set_rtc_time.ps1 -Query` 看 Δ | 无 VBAT 时**掉电会重置成编译时刻**（最常见误判）；LSE 正常约 ±2 秒/天，超出用 `-TrimPpm Δ/(T×3600)×1e6` |
+| 收不到包但命令正常 | `STAT?` | 看 `RSSI/SNR/G/AGC/I2CE/ID/RX/U/DUP/ISRavg/ISRmax`：一眼分清是射频增益、I2C、还是解码层的问题（ISR 预算 104µs） |
 
 ---
 
