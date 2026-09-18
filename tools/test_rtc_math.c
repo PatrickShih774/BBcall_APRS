@@ -5,6 +5,7 @@
  * 覆盖：已知星期/天数、闰年、往返换算、解析（含非法输入）。退出码 0 = 全部通过。 */
 #include <stdio.h>
 #include <string.h>
+#include "../firmware-stm32porject/Core/Src/strfmt.c"   /* rtc_format_dt 现在用 sfb 拼装 */
 #include "../firmware-stm32porject/Core/Src/rtc_math.c"
 
 static int fails = 0;

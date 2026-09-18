@@ -69,6 +69,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 | `Core/Src/bbcall_app.c` | 初始化、主循环、串口诊断/解码输出、串口对时命令（`TIME=`/`TIME?`）、UI 接线（按键/背光/喂帧） |
 | `Core/Src/bbcall_rtc.c` | 片内 RTC 寄存器级驱动：时钟源 LSE→HSE/128→LSI、对时、秒计数器读数 |
 | `Core/Src/rtc_math.c` | 纯整数公历换算与时间解析/格式化（不碰寄存器，PC 上可单测） |
+| `Core/Src/strfmt.c` | 极简字符串拼装（替代 snprintf，去掉 newlib printf/malloc 约 2.2KB） |
 
 信号链与关键实现点由 **[docs/PLAN.md §3](docs/PLAN.md#3-软件架构)** 维护，此处不再重复。
 
@@ -326,7 +327,9 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
    `hw_delay_init()/hw_clock_try_72mhz()`、`bbcall_app_init()`、`bbcall_app_loop()`。
 3. Build（0 错误即可）。
 4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出；
-5. **构建配置**：`Debug` 是 `-O0`，加了调参命令后会超出 64KB；日常烧录用 **`Release`（`-Os`，省约 15.5KB）**，或把 `BBCALL_TUNE_CMDS` 置 0。
+5. **构建配置**：`Debug`(-O0) 与 `Release`(-Os) **现在都能装下**（Debug：`text=65132`，余 336 字节；Release：`text=47404`，余约 18KB）。
+   加新功能前先看余量：Debug 快满时把 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）或改用 Release；
+   另外固件已不用 newlib printf/malloc（见 [DEBUG_LOG §23](docs/DEBUG_LOG.md#23-代码内存优化去掉-newlib-printf让-debug-o0-也能装下2026-09-19)），别再引入 `printf/snprintf/malloc`。
 6. **Release 配置不产出 `.hex`**（只有 elf/list/map）：用 `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或在 CubeIDE 里直接 Run（烧 elf）。
 
 LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用显示。

@@ -1,6 +1,6 @@
 /* 纯整数公历日期时间换算（见 rtc_math.h）。与硬件无关，主机上可直接自测。 */
 #include "rtc_math.h"
-#include <stdio.h>
+#include "strfmt.h"
 
 static int rtc_is_leap(int y)
 {
@@ -191,7 +191,12 @@ uint8_t rtc_parse_build_stamp(const char *date, const char *time, rtc_dt_t *dt)
 void rtc_format_dt(const rtc_dt_t *dt, char *buf, uint8_t cap)
 {
   if (!buf || cap < 20u) { if (buf && cap) buf[0] = '\0'; return; }
-  snprintf(buf, cap, "%04u-%02u-%02u %02u:%02u:%02u",
-           (unsigned)dt->year, (unsigned)dt->mon, (unsigned)dt->day,
-           (unsigned)dt->hour, (unsigned)dt->min, (unsigned)dt->sec);
+  sfb_t b;
+  sfb_init(&b, buf, cap);
+  sfb_u32w(&b, dt->year, 4u);
+  sfb_ch(&b, '-'); sfb_u32w(&b, dt->mon, 2u);
+  sfb_ch(&b, '-'); sfb_u32w(&b, dt->day, 2u);
+  sfb_ch(&b, ' '); sfb_u32w(&b, dt->hour, 2u);
+  sfb_ch(&b, ':'); sfb_u32w(&b, dt->min, 2u);
+  sfb_ch(&b, ':'); sfb_u32w(&b, dt->sec, 2u);
 }

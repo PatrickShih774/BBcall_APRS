@@ -868,3 +868,48 @@ powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
 
 注意：发布用的 hex 内嵌编译时间戳 = 本版构建时刻（2026-09-19 00:56 北京时间），直接烧该 hex 设备初始时间即为那一刻；
 用 CubeIDE 的 Release 配置自行 Build 时，**Release 配置不产出 .hex**（只有 elf/list/map），可用 `tools/make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或直接 Run 烧 elf。
+
+## 23. 代码内存优化：去掉 newlib printf，让 Debug(-O0) 也能装下（2026-09-19）
+
+**起因**：用户希望 CubeIDE 工具栏直接选 **Debug** 配置就能烧（不想每次都切 Release）。
+但加了运行时调参命令后 Debug(-O0) 链接报 `region FLASH overflowed by 1792 bytes`。
+
+### 23.1 先量再改：newlib printf 家族是最大的可摘项
+
+`nm --print-size` 量出来（-O0，nano.specs）：
+
+| 符号 | 字节 | 说明 |
+|---|---|---|
+| `_svfprintf_r` | 504 | 格式化引擎 |
+| `_malloc_r` / `_free_r` / `_realloc_r` | 256 / 144 / 92 | printf 内部要动态内存 |
+| `__ssputs_r` | 182 | 字符串输出 |
+| `snprintf` | 108 | 包装层 |
+| `_sbrk` / `_sbrk_r` / `__sbrk_heap_end`… | ~140 | 堆 |
+| 合计 | **约 2.2KB** | 顺带把 malloc 拖进固件（本工程并不用堆） |
+
+### 23.2 改法
+
+1. **新增 `Core/Src/strfmt.c`（480 字节）+ `strfmt.h`**：极简拼装 `sfb_t`（`sfb_str/sfb_strn/sfb_u32/sfb_u32w/sfb_i32/sfb_ch`），
+   所有写入截断安全；把固件里 **19 处 `snprintf`**（`ui_harness.c` 18 处 + `rtc_math.c` 1 处）全部替换；
+2. **每帧详细解析打印做成开关**：`BBCALL_VERBOSE_LOG`（默认 0），关掉 `[MICE]/[POS]/[MSG]` 逐字段打印（`[FRAME]` 行与屏幕内容不受影响），bring-up 时可开；
+3. **堆归零**：`STM32F103C8TX_FLASH.ld` 的 `_Min_Heap_Size` 由 `0x100` 改成 `0x0`（固件已无 malloc；`sysmem.c` 仍保留栈冲突保护）；
+4. `ui_harness.c` / `rtc_math.c` 去掉 `<stdio.h>` 依赖；`tools/test_rtc_math.c` 一并编译 `strfmt.c`，模拟器构建也加入该文件。
+
+### 23.3 效果
+
+| 配置 | 改前 | 改后 |
+|---|---|---|
+| **Debug (-O0)** | 链接失败：超 1792 字节 | `text=65132 / data=68 / bss=19340`，**余 336 字节**，可正常烧 |
+| Release (-Os) | `text=49900 / data=132 / bss=20212` | `text=47404 / data=52 / bss=19308`（省 2.5KB） |
+| RAM (Debug) | bss 20244 | bss 19340（堆 256B 归零 + newlib 内部数据消失），余量 ~1KB |
+
+### 23.4 验证
+
+- **模拟器四态逐像素校验全通过**：`python tools/verify_ui.py <bmp> {idle|unread|inbox|inbox2}` 退出码 0；
+- 更严格：把改动前的 HEAD 拉进独立 worktree 编出对照模拟器，同一命令出图后与原图**逐像素 0 差异**，说明格式化改写是行为中性的；
+- 主机自测 `tools/test_rtc_math.c`（含 `strfmt.c`）仍 `all pass`；
+- 注意：跑四态校验必须带全套参数（`--selftest --clock 51960 --wallclock 3,9,16 --mycall BG5BLH --batt 2 --demo`），
+  少了 `--clock` 时间行就对不上（我这次先踩了一次，已记在这里）。
+
+**后续加功能的余量策略**：Debug 只剩 336 字节，再加功能要么把 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）、
+要么用 Release(-Os)（余约 18KB），要么继续按"先去 newlib/浮点依赖"的思路找空间。

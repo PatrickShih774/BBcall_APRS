@@ -150,7 +150,7 @@ static void console_cmd_apply(const char *line)
   }
   if (strncmp(s, "DUPMS=", 6u) == 0) {
     uint16_t v;
-    if (!parse_u16(s + 6, &v)) { hw_console_puts("[CFG] err: DUPMS=<0..60000> ms\r\n"); return; }
+    if (!parse_u16(s + 6, &v)) { hw_console_puts("[CFG] err: DUPMS=<ms> 0..60000\r\n"); return; }
     s_dedup_ms = v;
     ui_set_dedup_ms(v);      /* UI 层同一个窗口 */
     hw_console_puts("[CFG] DUPMS="); hw_console_u16(v); hw_console_puts("ms\r\n");
@@ -174,14 +174,14 @@ static void console_cmd_apply(const char *line)
   }
   if (strncmp(s, "SQ=", 3u) == 0) {
     uint16_t v;
-    if (!parse_u16(s + 3, &v) || v > 255u) { hw_console_puts("[CFG] err: SQ=0..255 (reg22 RSSI thr)\r\n"); return; }
+    if (!parse_u16(s + 3, &v) || v > 255u) { hw_console_puts("[CFG] err: SQ=0..255\r\n"); return; }
     s_sq_rssi_thr = v; bk4802_set_squelch((uint8_t)v);
     hw_console_puts("[CFG] SQ="); hw_console_u8((uint8_t)v); hw_console_puts("\r\n");
     return;
   }
   if (strncmp(s, "SQN=", 4u) == 0) {
     uint16_t v;
-    if (!parse_u16(s + 4, &v) || v > 255u) { hw_console_puts("[CFG] err: SQN=0..255 (reg23 noise thr)\r\n"); return; }
+    if (!parse_u16(s + 4, &v) || v > 255u) { hw_console_puts("[CFG] err: SQN=0..255\r\n"); return; }
     s_sq_noise_thr = v;
     bk4802_write_reg(23, (uint16_t)(0x6400u | v));
     hw_console_puts("[CFG] SQN="); hw_console_u8((uint8_t)v); hw_console_puts("\r\n");
@@ -189,7 +189,7 @@ static void console_cmd_apply(const char *line)
   }
   if (strncmp(s, "FREQ=", 5u) == 0) {
     uint16_t v;
-    if (!parse_u16(s + 5, &v) || v < 24000u) { hw_console_puts("[CFG] err: FREQ=<kHz> e.g. FREQ=144640\r\n"); return; }
+    if (!parse_u16(s + 5, &v) || v < 24000u) { hw_console_puts("[CFG] err: FREQ=<kHz>\r\n"); return; }
     s_rx_khz = v; bk4802_set_rx_freq_khz(s_rx_khz);
 #if BBCALL_LCD_ENABLED
     ui_set_rx_freq_khz(s_rx_khz);
@@ -212,10 +212,10 @@ static void console_cmd_apply(const char *line)
   }
   if (strncmp(s, "TIME=", 5u) == 0)              s += 5;
   else if (strncmp(s, "SETTIME=", 8u) == 0)      s += 8;
-  else { hw_console_puts("[RTC] err: use TIME=YYYY-MM-DD HH:MM:SS or TIME?\r\n"); return; }
+  else { hw_console_puts("[RTC] err: TIME=YYYY-MM-DD HH:MM:SS\r\n"); return; }
 
   if (!rtc_parse_dt(s, &dt)) {
-    hw_console_puts("[RTC] err: bad format, want TIME=YYYY-MM-DD HH:MM:SS\r\n");
+    hw_console_puts("[RTC] err: bad TIME format\r\n");
     return;
   }
   if (bbcall_rtc_clock_src() == RTC_SRC_NONE) {
@@ -689,6 +689,7 @@ void bbcall_app_loop(void)
       }
 #endif
       hw_console_puts("\r\n");
+#if BBCALL_VERBOSE_LOG
       /* Mic-E 的目标呼号包含位置模糊度空格，必须用原始地址字节（保留空格） */
       char mice_dest[7];
       for (uint8_t i = 0; i < 6u; i++) {
@@ -727,6 +728,7 @@ void bbcall_app_loop(void)
         for (uint8_t i = 0; i < m.body_len; i++) hw_console_putc((char)m.body[i]);
         hw_console_puts("\r\n");
       }
+#endif /* BBCALL_VERBOSE_LOG */
     }
     }
   }

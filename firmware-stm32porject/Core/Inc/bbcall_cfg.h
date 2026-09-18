@@ -117,6 +117,13 @@
 #define KEY_PWR_PIN        GPIO_PIN_2
 #define KEY_PTT_GPIO       GPIOA
 #define KEY_PTT_PIN        GPIO_PIN_4
+/* ---------- 每帧详细解析打印（[MICE]/[POS]/[MSG] 行） ----------
+ * 0 = 不打（默认）：[FRAME] 行已经含 src/dest/path/ctrl/info 与 RSSI/SNR，屏幕也会显示内容；
+ * 1 = 打开：额外打 [MICE]/[POS]/[MSG] 的逐字段解析结果，bring-up/排障时用。
+ * 关掉可省 ~0.5KB Flash（-O0 下），也是 Debug 配置能装下的余量来源之一。 */
+#ifndef BBCALL_VERBOSE_LOG
+#define BBCALL_VERBOSE_LOG 0u
+#endif
 /* ---------- 重复包去重窗口 ----------
  * 同一次发射会被多条解调路径同时解出（实测每次 3 条，间隔 75~220ms），
  * 所以这个窗口的作用是"把同一次发射的多路冗余合成一条"：

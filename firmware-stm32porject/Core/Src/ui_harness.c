@@ -16,12 +16,12 @@
  *   - RSSI/SNR 随帧入箱时捕获，属于该帧，不是全局状态。
  */
 #include "ui_harness.h"
+#include "strfmt.h"
 #include "lcd_st7567.h"
 #include "fusion_font.h"
 #include "ax25.h"
 #include "aprs.h"
 #include <string.h>
-#include <stdio.h>
 
 /* ------------------------------------------------------------------ */
 /* 收件箱条目                                                          */
@@ -234,9 +234,11 @@ static uint32_t tod_at(uint32_t rx_ms)
 static void fmt_hhmmss(uint32_t rx_ms, char *buf, uint8_t cap)
 {
   uint32_t t = tod_at(rx_ms) / 1000u;
-  snprintf(buf, cap, "%02lu:%02lu:%02lu",
-           (unsigned long)(t / 3600u), (unsigned long)((t / 60u) % 60u),
-           (unsigned long)(t % 60u));
+  sfb_t b;
+  sfb_init(&b, buf, cap);
+  sfb_u32w(&b, t / 3600u, 2u);       sfb_ch(&b, ':');
+  sfb_u32w(&b, (t / 60u) % 60u, 2u); sfb_ch(&b, ':');
+  sfb_u32w(&b, t % 60u, 2u);
 }
 
 /* 正文是 ackNNN 时视为送达确认（协议流量，不进收件箱） */
@@ -298,24 +300,24 @@ static void draw_idle(void)
   lcd_fill_rect(0, 0, 63, 63, 1u);
   {
     uint32_t t = (s_now_ms % 86400000u) / 1000u;
-    snprintf(clk, sizeof(clk), "%02lu:%02lu",
-             (unsigned long)(t / 3600u), (unsigned long)((t / 60u) % 60u));
+    { sfb_t b; sfb_init(&b, clk, (uint8_t)sizeof(clk));
+      sfb_u32w(&b, t / 3600u, 2u); sfb_ch(&b, ':'); sfb_u32w(&b, (t / 60u) % 60u, 2u); }
     if (((s_now_ms / 500u) & 1u) != 0u) clk[2] = ' ';   /* 冒号 0.5s 闪烁（唯一动效） */
     fp_text(fp_cx(clk, 12, 0, 63, 2u), 11, clk, 12, 0u, 2u);
   }
   if (s_wday != 0xFFu) {
     static const char *const WD[7] =
       { "日", "一", "二", "三", "四", "五", "六" };   /* UTF-8 串按字节索引会取到半个汉字 */
-    snprintf(buf, sizeof(buf), "周%s %u/%u", WD[s_wday % 7u],
-             (unsigned)s_mon, (unsigned)s_mday);
+    { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf));
+      sfb_str(&b, "周"); sfb_str(&b, WD[s_wday % 7u]); sfb_ch(&b, ' ');
+      sfb_u32(&b, s_mon); sfb_ch(&b, '/'); sfb_u32(&b, s_mday); }
   } else {
     /* 无 RTC：显示开机时长，不编造绝对日期（design.md §8.5/§12.2） */
     uint32_t d = s_now_ms / 86400000u;
     uint32_t t = (s_now_ms % 86400000u) / 1000u;
-    if (d > 0u) snprintf(buf, sizeof(buf), "%ud %02lu:%02lu", (unsigned)d,
-                         (unsigned long)(t / 3600u), (unsigned long)((t / 60u) % 60u));
-    else        snprintf(buf, sizeof(buf), "UP %02lu:%02lu",
-                         (unsigned long)(t / 3600u), (unsigned long)((t / 60u) % 60u));
+    { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf));
+      if (d > 0u) { sfb_u32(&b, d); sfb_str(&b, "d "); } else { sfb_str(&b, "UP "); }
+      sfb_u32w(&b, t / 3600u, 2u); sfb_ch(&b, ':'); sfb_u32w(&b, (t / 60u) % 60u, 2u); }
   }
   fp_text(fp_cx(buf, 12, 0, 63, 1u), 41, buf, 12, 0u, 1u);
 
@@ -325,7 +327,7 @@ static void draw_idle(void)
   cell_label_value(65, 95, 34, 50, "电量",
                    (s_batt < 0) ? "--" : (s_batt == 0) ? "低" : (s_batt == 1) ? "中" : "高", 0u);
   /* 右下：未读数 */
-  snprintf(buf, sizeof(buf), "%u", (unsigned)s_unread);
+  { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf)); sfb_u32(&b, s_unread); }
   cell_label_value(97, 127, 34, 50, "未读", buf, 0u);
 
   tile_frame();
@@ -365,11 +367,11 @@ static void draw_unread(void)
   }
 
   /* 左下/右下：RSSI / SNR（无采样显示 --） */
-  if (it->have_rf) snprintf(buf, sizeof(buf), "%d", (int)it->rssi);
-  else snprintf(buf, sizeof(buf), "--");
+  { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf));
+    if (it->have_rf) sfb_i32(&b, it->rssi); else sfb_str(&b, "--"); }
   cell_label_value(65, 95, 34, 50, "RSSI", buf, 0u);
-  if (it->have_rf) snprintf(buf, sizeof(buf), "%d", (int)it->snr);
-  else snprintf(buf, sizeof(buf), "--");
+  { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf));
+    if (it->have_rf) sfb_i32(&b, it->snr); else sfb_str(&b, "--"); }
   cell_label_value(97, 127, 34, 50, "SNR", buf, 0u);
 
   tile_frame();
@@ -400,7 +402,8 @@ static void draw_inbox(void)
   if (s_idx >= s_count) s_idx = (uint8_t)(s_count - 1u);
   it = &s_box[s_idx];
   fp_text(4, 0, it->src, 12, 0u, 1u);
-  snprintf(buf, sizeof(buf), "%u / %u", (unsigned)(s_idx + 1u), (unsigned)s_count);
+  { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf));
+    sfb_u32(&b, (uint32_t)s_idx + 1u); sfb_str(&b, " / "); sfb_u32(&b, s_count); }
   fp_text(94, 0, buf, 12, 0u, 1u);
 
   /* 正文带：y=16 起，12px 行高，2 行可见；超长在带内滚动（§6.3） */
@@ -416,8 +419,8 @@ static void draw_inbox(void)
   /* 元信息带：两行 */
   fmt_hhmmss(it->rx_ms, buf, sizeof(buf));
   fp_text(4, 40, buf, 12, 1u, 1u);
-  if (it->have_rf) snprintf(buf, sizeof(buf), "RSSI %d", (int)it->rssi);
-  else snprintf(buf, sizeof(buf), "RSSI --");
+  { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf)); sfb_str(&b, "RSSI ");
+    if (it->have_rf) sfb_i32(&b, it->rssi); else sfb_str(&b, "--"); }
   fp_text(76, 40, buf, 12, 1u, 1u);
   fp_text(4, 52, it->path, 12, 1u, 1u);
   fp_text(106, 52, crc_label(it), 12, 1u, 1u);
@@ -637,7 +640,8 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
   it->snr = s_snr_next;
   s_have_rf_next = 0u;                     /* 采样只消费一次，不跨帧沿用 */
   if (d.src_ssid != 0u)                   /* 带 SSID 时显示成 BG5BLB-12，屏上一格放得下 */
-    snprintf(it->src, sizeof(it->src), "%s-%u", d.src, (unsigned)d.src_ssid);
+    { sfb_t b; sfb_init(&b, it->src, (uint8_t)sizeof(it->src));
+      sfb_strn(&b, d.src, 9u); sfb_ch(&b, '-'); sfb_u32(&b, d.src_ssid); }
   else
     clip_str(it->src, sizeof(it->src), d.src);
   clip_str(it->dst, sizeof(it->dst), d.dest);
@@ -665,11 +669,12 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
     /* 注释优先：经纬度在态 2 已有专用格子，正文再抄一遍会把真正的消息文字挤进滚动区。
      * 有注释（消息/备注）就只放注释；纯信标才回退成经纬度 + 类型 + 速度/航向。 */
     if (mi.comment[0] != 0)
-      snprintf(it->body, sizeof(it->body), "%.40s", mi.comment);
+      { sfb_t b; sfb_init(&b, it->body, (uint8_t)sizeof(it->body)); sfb_strn(&b, mi.comment, 40u); }
     else
-      snprintf(it->body, sizeof(it->body), "%.9s %.10s %.4s %ukm/h %u",
-               mi.lat, mi.lon, mi.mtype,
-               (unsigned)mi.speed_kmh, (unsigned)mi.course);
+      { sfb_t b; sfb_init(&b, it->body, (uint8_t)sizeof(it->body));
+        sfb_strn(&b, mi.lat, 9u); sfb_ch(&b, ' '); sfb_strn(&b, mi.lon, 10u); sfb_ch(&b, ' ');
+        sfb_strn(&b, mi.mtype, 4u); sfb_ch(&b, ' '); sfb_u32(&b, mi.speed_kmh);
+        sfb_str(&b, "km/h "); sfb_u32(&b, mi.course); }
     utf8_clip_tail(it->body);
   } else if (aprs_parse_position(d.info, d.info_len, &pos)) {
     it->kind = UI_KIND_POS;
@@ -677,9 +682,10 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
     clip_str(it->lat, sizeof(it->lat), pos.lat);
     clip_str(it->lon, sizeof(it->lon), pos.lon);
     if (pos.comment[0] != 0)
-      snprintf(it->body, sizeof(it->body), "%.40s", pos.comment);
+      { sfb_t b; sfb_init(&b, it->body, (uint8_t)sizeof(it->body)); sfb_strn(&b, pos.comment, 40u); }
     else
-      snprintf(it->body, sizeof(it->body), "%.9s %.10s", pos.lat, pos.lon);
+      { sfb_t b; sfb_init(&b, it->body, (uint8_t)sizeof(it->body));
+        sfb_strn(&b, pos.lat, 9u); sfb_ch(&b, ' '); sfb_strn(&b, pos.lon, 10u); }
     utf8_clip_tail(it->body);
   } else if (aprs_parse_message(d.info, d.info_len, &m)) {
     it->kind = UI_KIND_MSG;

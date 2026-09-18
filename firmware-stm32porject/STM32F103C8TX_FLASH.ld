@@ -38,7 +38,7 @@ ENTRY(Reset_Handler)
 /* Highest address of the user mode stack */
 _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
 
-_Min_Heap_Size = 0x100; /* required amount of heap：全工程无 malloc（只有 newlib 内部可能用到），为 v0.5+ 的解码改动腾 RAM */
+_Min_Heap_Size = 0x0; /* v0.7：固件已不用 newlib printf，malloc/_sbrk 不再被链接，堆不再预留（sysmem.c 仍有栈冲突保护） */
 _Min_Stack_Size = 0x600; /* required amount of stack：实测最大单帧 576B（UI 换行缓存），链路 main->loop->key->draw 约 0.9KB */
 
 /* Memories definition */

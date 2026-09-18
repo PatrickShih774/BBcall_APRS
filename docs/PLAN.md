@@ -1,6 +1,6 @@
 # BBcall_APRS 计划（BK4802P + STM32F103C8T6 + ST7567，APRS 寻呼机）
 
-> 项目名（暂定）：**BBcall_APRS** —— 用 APRS（AX.25 / 1200 baud Bell202 AFSK）技术路线复刻 BB 机（无线寻呼机）。
+> 项目名（暂定）：**BBcall_APRS** -- 用 APRS（AX.25 / 1200 baud Bell202 AFSK）技术路线复刻 BB 机（无线寻呼机）。
 >
 > 参考项目：MM-Radio (BSD-2)、BG7QKU、BG5ESN FMO、VP-Digi。许可与合规见 [README §10](../README.md#10-许可与合规) 与 [`../licenses/THIRD_PARTY_LICENSES.md`](../licenses/THIRD_PARTY_LICENSES.md)。
 >
@@ -16,7 +16,8 @@
 - 按键：UP/DOWN/OK = PB12/PB13/PB14（上拉输入、按下为低），驱动与状态机已完成（详见 [DEBUG_LOG §11](DEBUG_LOG.md#11-实机联调lcd-点亮--三态-ui--帧级-rssisnr2026-09-16)）；
 - 解码：**已完成**，实机可解真实 APRS 包（含 Mic-E / 普通位置 / 消息）；v0.5 实机连续收包正常；
 - 低功耗：**未实现**；当前是 BK4802P 连续 RX + STM32 连续解码。方案只做规划，见本文 [§12](#12-低功耗方案规划暂不执行)。
-- 最新固件：**v0.7**（2026-09-19 发布，Release/-Os：`text=49900 / data=132 / bss=20212`）：**每次发射在屏幕留一条**（去重窗口 60s 改成 2s 可配）+ **运行时调参命令** + 串口桥；RTC/对时/命令链路已实机验证；
+- 最新固件：**v0.8**（2026-09-19：代码内存优化，去掉 newlib printf/malloc + `BBCALL_VERBOSE_LOG` 开关 + 堆归零）：**Debug(-O0) 重新可烧**（`text=65132 / data=68 / bss=19340`，余 336B）、Release(-Os) `text=47404 / data=52 / bss=19308`；
+  上一版 **v0.7**（Release/-Os：`text=49900`）：**每次发射在屏幕留一条**（去重窗口 60s 改成 2s 可配）+ **运行时调参命令** + 串口桥；RTC/对时/命令链路已实机验证；
 - 实测：SunSDR2 DX 手动 MOX 低功率可稳定解出；但**连续发射仍会漏包**，做不到"发一条看到一条"；
 - 漏包率软件优化：已实现逐位相关差积累判决实验，host 回归无回退且有初步改善；**未实机验证**，待按 [§10](#10-下一步方案把漏包率降下来v05-之后) 验收；
 - 硬件前端目前是 **天线直接接 BK4802 ANT 脚、无滤波/匹配**，是漏包的主要瓶颈，改进见本文 [§10](#10-下一步方案把漏包率降下来v05-之后) / [§11](#11-硬件改进方案提升解码率)；
@@ -80,6 +81,8 @@ BK4802P FM 接收 → EAROP 音频（D 类 PWM）
 | v0.4 | **LCD 实机点亮**（关 JTAG 释放 PB3/PB4、ST7567 电源序列、SEG/列偏移、180° 安装），三态界面接入固件，锁屏默认墙钟，收包立即切页 + 唤醒背光，呼号带 SSID，帧级 RSSI/SNR，20KB RAM 裁剪 |
 | v0.5 | 修按键（收件箱为空时 ● 短按无反应），RSSI/SNR 改为**解码当刻直读寄存器 24**（采样只做兜底），S-meter 采样周期配置化，模拟器自检增强 |
 | v0.6 | **重复包也上屏**（60s 内同内容重复帧不新增条目，但刷新该条时间戳、提队首、重新未读）；**片内 RTC 对时**（无串口时用编译时间戳 `__DATE__`/`__TIME__` 兜底，接串口可用 `TIME=` 或 `tools/set_rtc_time.ps1` 精确对时；时钟源 LSE→HSE/128→LSI 自动选）；控制台接收改 DMA 环形缓冲 |
+| v0.7 | **每次发射都在屏幕留一条**：去重窗口 60s 改成 **2s 可配**（`BBCALL_DEDUP_MS` / 串口 `DUPMS=`，只合并同一次发射的多路冗余）；新增**运行时调参命令**（`STAT?`/`GAIN=`/`AGC=`/`SQ=`/`SQN=`/`FREQ=`/`MUTE=`/`PING`）与 `tools/serial_bridge.ps1` 串口桥；**改用 Release(-Os) 构建**（当时 Debug -O0 装不下）；频率字整数化去掉软浮点；模拟器 replay 支持真机日志的独立 `[T=]` 行 |
+| v0.8 | **代码内存优化**：19 处 `snprintf` 换成自写 `strfmt.c`、去掉 newlib printf/malloc（-O0 省约 2.2KB）、每帧 `[MICE]/[POS]/[MSG]` 详细打印改 `BBCALL_VERBOSE_LOG` 开关（默认关）、`_Min_Heap_Size` 归零；**Debug(-O0) 重新可烧**（余 336B），Release 降到 `text=47404`；模拟器四态逐像素校验全通过且与改动前 0 像素差异 |
 
 ## 5. BB 机功能规划（v0.4 → v1.0）
 
@@ -223,7 +226,7 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
 - `sim_hal.c`：最小 HAL/GPIO/延时桩，让 `lcd_st7567.c` 可在 PC 编译。
 - `lcd_sim.c`：实现 ST7567 命令子集（页/列地址、显示开关、反显、全亮、起始行、SEG/COM 方向），SDL2 渲染 128×64，支持放大、反显、背光、截图；按 `F3` 可对比两种面板 SEG 方向。
 - `ui_harness.c`：收件箱数据模型（消息/位置/Mic-E/其它）+ 待机/列表/详情/删除界面，支持滚动与分页；解析复用 `ax25.c`、`aprs.c`。
-- `sim_feed.c`：三种数据源 —— `--wav`（音频→`modem.c`→UI）、`--replay`（串口日志 `[RAW] hex=`）、`--demo`（内置示例）。
+- `sim_feed.c`：三种数据源 -- `--wav`（音频→`modem.c`→UI）、`--replay`（串口日志 `[RAW] hex=`）、`--demo`（内置示例）。
 - 构建：`simulator/build_win.ps1`（Windows 免安装，TinyCC + 内置 SDL2，推荐）；`simulator/CMakeLists.txt` 与 `simulator/Makefile` 保留给装好 MSYS2 / vcpkg / w64devkit 的机器。
 
 ### 8.2 阶段与验收
