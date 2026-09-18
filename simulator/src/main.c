@@ -133,9 +133,9 @@ int main(int argc, char **argv)
     sim_feed_demo();          /* 内置示例帧 */
   }
 
-  printf("[sim] 收件箱 %u 条（未读 %u）/ 累计收到 %u 帧（重复抑制 %u）\n",
-         (unsigned)ui_inbox_count(), (unsigned)ui_unread_count(), (unsigned)ui_rx_total(),
-         (unsigned)ui_dup_total());
+  printf("[sim] 收件箱 %u 条（未读 %u，满箱丢弃未读 %u）/ 累计收到 %u 帧（重复抑制 %u）\n",
+         (unsigned)ui_inbox_count(), (unsigned)ui_unread_count(), (unsigned)ui_unread_dropped(),
+         (unsigned)ui_rx_total(), (unsigned)ui_dup_total());
 
   /* --screen 只用于自检强制指定画面；不给就保持状态机自己的结果。
    * 真机上没有任何代码会在收包后调 ui_show，这里必须与真机一致，

@@ -52,6 +52,7 @@ uint8_t  ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
 void     ui_set_dedup_ms(uint32_t ms);       /* 重复包去重窗口：只合并"同一次发射"的多路冗余（默认 2000ms，0=不去重） */
 uint16_t ui_inbox_count(void);
 uint16_t ui_unread_count(void);
+uint16_t ui_unread_dropped(void);   /* 满箱且全为未读时被迫丢掉的未读条数（诊断） */
 uint16_t ui_rx_total(void);
 uint16_t ui_dup_total(void);
 uint8_t  ui_current_screen(void); /* 状态机当前页：UI_SCREEN_IDLE/UNREAD/INBOX */

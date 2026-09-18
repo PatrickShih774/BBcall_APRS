@@ -579,6 +579,9 @@ void bbcall_app_loop(void)
     hw_console_puts(" RX=");   hw_console_u16((uint16_t)rx_count);
     hw_console_puts(" U=");    hw_console_u8(n_uniq);
     hw_console_puts(" DUP=");  hw_console_u16((uint16_t)dup_count);
+    hw_console_puts(" UNREAD="); hw_console_u8((uint8_t)ui_unread_count());
+    hw_console_puts(" INBOX=");  hw_console_u8((uint8_t)ui_inbox_count());
+    hw_console_puts(" DROPN=");  hw_console_u8((uint8_t)ui_unread_dropped());
     hw_console_puts(" FIX=");  hw_console_u16(modem_get_fix_count());
     hw_console_puts(" FIX2="); hw_console_u16(modem_get_fix2_count());
     hw_console_puts(" REP=");  hw_console_u16(modem_get_rep_count());

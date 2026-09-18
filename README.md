@@ -375,7 +375,8 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
    `hw_delay_init()/hw_clock_try_72mhz()`、`bbcall_app_init()`、`bbcall_app_loop()`。
 3. Build（0 错误即可）。
 4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出；
-5. **构建配置**：`Debug`(-O0) 与 `Release`(-Os) **现在都能装下**（Debug：`text=65132`，余 336 字节；Release：`text=47404`，余约 18KB）。
+5. **构建配置**：`Debug` 现在用 **`-Og`**（工程 `.cproject` 已改）：保留调试信息的优化档，比 -O0 小 12.8KB，
+   工具栏直接选 Debug 就能烧（`text=51932 / data=56 / bss=19344`，余 13.5KB）；`Release` 仍是 `-Os`（`text=47772`，余约 17.7KB）。
    加新功能前先看余量：Debug 快满时把 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）或改用 Release；
    另外固件已不用 newlib printf/malloc（见 [DEBUG_LOG §23](docs/DEBUG_LOG.md#23-代码内存优化去掉-newlib-printf让-debug-o0-也能装下2026-09-19)），别再引入 `printf/snprintf/malloc`。
 6. **Release 配置不产出 `.hex`**（只有 elf/list/map）：用 `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或在 CubeIDE 里直接 Run（烧 elf）。

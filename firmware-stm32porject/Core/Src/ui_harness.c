@@ -62,6 +62,17 @@ static uint32_t  s_freq_khz = 144640u;
 static int16_t   s_rssi_next = 0, s_snr_next = 0;
 static uint8_t   s_have_rf_next = 0u;
 static uint16_t  s_rx_total, s_unread, s_dup_total, s_ack_total;
+static uint8_t   s_unread_dropped;   /* 满箱且全为未读时被迫丢掉的未读条数（诊断用） */
+
+/* 未读数一律从条目数组现算：插入/重复刷新/标记已读/满箱丢弃之后各调一次，
+ * 这样"未读数 = read==0 的条数"永远成立，不会再因为漏加漏减而漂移。 */
+static void recount_unread(void)
+{
+  uint8_t i;
+  uint16_t n = 0u;
+  for (i = 0u; i < s_count; i++) if (!s_box[i].read) n++;
+  s_unread = n;
+}
 
 #define UI_DUP_N 8
 static uint16_t s_dup_hash[UI_DUP_N];
@@ -395,16 +406,30 @@ static void draw_inbox(void)
   lcd_fill_rect(0, 0, 127, 11, 1u);
   if (s_count == 0u) {
     fp_text(4, 0, "无消息", 12, 0u, 1u);
-    fp_text(94, 0, "0 / 0", 12, 0u, 1u);
+    fp_text(104, 0, "0/0", 12, 0u, 1u);
     lcd_flush();
     return;
   }
   if (s_idx >= s_count) s_idx = (uint8_t)(s_count - 1u);
   it = &s_box[s_idx];
-  fp_text(4, 0, it->src, 12, 0u, 1u);
+  /* 右侧：未读标记 + "i/N"，右对齐到 128（原来固定 x=94 加 "i / N" 会被右边界截掉计数） */
   { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf));
-    sfb_u32(&b, (uint32_t)s_idx + 1u); sfb_str(&b, " / "); sfb_u32(&b, s_count); }
-  fp_text(94, 0, buf, 12, 0u, 1u);
+    sfb_ch(&b, it->read ? ' ' : '*');
+    sfb_u32(&b, (uint32_t)s_idx + 1u); sfb_ch(&b, '/'); sfb_u32(&b, s_count); }
+  {
+    int16_t x = (int16_t)(128 - (int16_t)strlen(buf) * 12);
+    uint8_t cells, cap;
+    char srcbuf[12];
+    if (x < 4) x = 4;
+    cells = (uint8_t)((x - 4) / 12);            /* 呼号最多画到索引左边 */
+    cap = (uint8_t)((cells < 10u) ? (cells + 1u) : sizeof(srcbuf));
+    if (cap > sizeof(srcbuf)) cap = (uint8_t)sizeof(srcbuf);
+    { uint8_t j = 0u;                       /* 呼号是 ASCII：按格数直接截断，不用 clip_str（它在下面才定义） */
+      while ((uint8_t)(j + 1u) < cap && it->src[j] != 0) { srcbuf[j] = it->src[j]; j++; }
+      srcbuf[j] = 0; }
+    fp_text(4, 0, srcbuf, 12, 0u, 1u);
+    fp_text(x, 0, buf, 12, 0u, 1u);
+  }
 
   /* 正文带：y=16 起，12px 行高，2 行可见；超长在带内滚动（§6.3） */
   n = wrap_cells(it->body, 21u, lines, WRAP_MAXLINES);
@@ -482,7 +507,8 @@ void ui_handle_key(int key)
       } else if (key == SIM_KEY_OK) {
         if (s_count > 0u) {
           ui_item_t *it = &s_box[s_idx];
-          if (!it->read) { it->read = 1u; if (s_unread > 0u) s_unread--; }
+          it->read = 1u;
+          recount_unread();
           if (s_unread == 0u) { settle_view(); redraw(); return; }
           s_idx = (uint8_t)((s_idx + 1u) % s_count);
           s_vscroll = 0u;
@@ -560,7 +586,8 @@ static uint8_t ui_bump_duplicate(uint16_t fh, uint32_t t_ms)
   {
     ui_item_t tmp = s_box[k];
     tmp.rx_ms = t_ms;                    /* 关键：时间戳刷新为本次接收时刻 */
-    if (tmp.read) { tmp.read = 0u; s_unread++; }   /* 重新变未读，屏上才会显示 */
+    tmp.read = 0u;                       /* 重新变未读，屏上才会显示 */
+    recount_unread();
     if (k > 0u) {
       memmove(&s_box[1], &s_box[0], sizeof(ui_item_t) * (size_t)k);
       if (s_view == UI_SCREEN_INBOX) {
@@ -623,9 +650,18 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
     if (is_ack_body(ackbuf)) { s_ack_total++; return 0u; }   /* 按接口约定：ackNNN 只计数，不算入箱 */
   }
 
-  if (s_count >= UI_INBOX_MAX) {           /* 满：丢掉最旧（队尾） */
-    if (!s_box[s_count - 1u].read && s_unread > 0u) s_unread--;
-    s_count = (uint8_t)(UI_INBOX_MAX - 1u);
+  if (s_count >= UI_INBOX_MAX) {
+    /* 满箱：优先丢"最旧的已读"（从新到旧扫，最后一个 read=1 的即最旧已读）；
+     * 全箱都是未读时只能丢最旧的未读，并记进 s_unread_dropped 供串口诊断。 */
+    uint8_t drop = (uint8_t)(s_count - 1u);
+    for (i = 0u; i < s_count; i++) if (s_box[i].read) drop = i;
+    if (!s_box[drop].read) s_unread_dropped++;
+    for (i = drop; (uint8_t)(i + 1u) < s_count; i++) s_box[i] = s_box[i + 1u];
+    s_count = (uint8_t)(s_count - 1u);
+    if (s_view == UI_SCREEN_INBOX) {          /* 光标跟着条目走，不跳条 */
+      if (s_idx > drop) s_idx = (uint8_t)(s_idx - 1u);
+      else if (s_idx >= s_count) s_idx = (s_count > 0u) ? (uint8_t)(s_count - 1u) : 0u;
+    }
   }
   memmove(&s_box[1], &s_box[0], sizeof(ui_item_t) * (size_t)s_count);
   it = &s_box[0];                          /* 新帧插队首：最新在上 */
@@ -700,7 +736,7 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
   }
 
   s_count++;
-  s_unread++;
+  recount_unread();
   /* design.md §9：待机态收到新包要立刻从锁屏切到"有未读"页并重绘；
    * 已经在收件箱里时不抢焦点（但新条插在队首，光标跟着 +1 才是原来那条）。 */
   if (s_view == UI_SCREEN_IDLE || s_view == UI_SCREEN_UNREAD) {
@@ -769,6 +805,7 @@ void ui_set_radio_stats(int16_t rssi_dbm, int16_t snr)
 void ui_set_dedup_ms(uint32_t ms) { s_dedup_ms = ms; }
 uint16_t ui_inbox_count(void) { return s_count; }
 uint16_t ui_unread_count(void) { return s_unread; }
+uint16_t ui_unread_dropped(void) { return s_unread_dropped; }   /* 满箱被迫丢掉的未读条数 */
 uint16_t ui_rx_total(void) { return s_rx_total; }
 uint16_t ui_dup_total(void) { return s_dup_total; }
 uint32_t ui_clock_ms(void) { return s_now_ms; }
