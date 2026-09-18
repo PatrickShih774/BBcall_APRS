@@ -70,6 +70,17 @@ int main(void)
   ck(!rtc_parse_dt("TIME=2026-09-18 22:30:00", &dt), "reject with prefix (caller strips it)");
   ck(!rtc_parse_dt("1999-12-31 23:59:59", &dt), "reject year<2000");
 
+  /* 走时校准：ppm -> 分频比（N-1），含分辨率量化与限幅 */
+  ck_u32(rtc_prescaler_for(32768u, 0) + 1u, 32768u, "div LSE 0ppm");
+  ck_u32(rtc_prescaler_for(62500u, 0) + 1u, 62500u, "div HSE 0ppm");
+  ck_u32(rtc_prescaler_for(40000u, 0) + 1u, 40000u, "div LSI 0ppm");
+  ck_u32(rtc_prescaler_for(62500u, 160) + 1u, 62510u, "div HSE +160ppm");
+  ck_u32(rtc_prescaler_for(62500u, -160) + 1u, 62490u, "div HSE -160ppm");
+  ck_u32(rtc_prescaler_for(32768u, 30) + 1u, 32768u, "div LSE +30ppm 低于一档");
+  ck_u32(rtc_prescaler_for(32768u, 31) + 1u, 32769u, "div LSE +31ppm 进一档");
+  ck_u32(rtc_prescaler_for(62500u, 20000), rtc_prescaler_for(62500u, 5000), "div clamp +5000");
+  ck(rtc_trim_effective_ppm(62500u, 160) == 160, "eff ppm HSE +160");
+  ck(rtc_trim_effective_ppm(32768u, 31) == 30, "eff ppm LSE +31 -> 30");
   /* 编译时间戳（__DATE__/__TIME__ -> dt）：含日号空格补齐、非法输入 */
   ck(rtc_parse_build_stamp("Sep 18 2026", "00:45:12", &dt) && dt.year == 2026u && dt.mon == 9u &&
      dt.day == 18u && dt.hour == 0u && dt.min == 45u && dt.sec == 12u && dt.wday == 5u, "build stamp normal");

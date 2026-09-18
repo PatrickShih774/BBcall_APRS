@@ -20,6 +20,7 @@
 #define RTC_MAGIC_INIT   0xA5A5u   /* BKP->DR2：时钟源/预分频已配好 */
 
 static uint8_t s_src = RTC_SRC_NONE;
+static int16_t s_trim;   /* ppm：正 = 走快了，分频比按同比例加大 */
 
 /* 等 RTC 寄存器写完成（RTOFF=1 才能改 CNF） */
 static void rtc_wait_rtoff(void)
@@ -36,6 +37,29 @@ static void rtc_wait_rsf(void)
   while (((RTC->CRL & RTC_CRL_RSF) == 0u) && (guard++ < 2000000u)) { }
 }
 
+/* 时钟源基准频率（Hz）：LSE 32.768k / HSE-128 62.5k / LSI 名义 40k */
+static uint32_t rtc_base_hz(uint8_t src)
+{
+  if (src == RTC_SRC_LSE) return 32768u;
+  if (src == RTC_SRC_HSE) return 62500u;
+  if (src == RTC_SRC_LSI) return 40000u;
+  return 0u;
+}
+
+/* 按当前 trim 重写预分频（改分频比不会动计数器，时间不跳） */
+static void rtc_write_prescaler(void)
+{
+  uint32_t base = rtc_base_hz(s_src);
+  uint32_t psc;
+  if (base == 0u) return;
+  psc = rtc_prescaler_for(base, s_trim);
+  rtc_wait_rtoff();
+  RTC->CRL |= RTC_CRL_CNF;
+  RTC->PRLH = (uint16_t)((psc >> 16) & 0xFFFFu);
+  RTC->PRLL = (uint16_t)(psc & 0xFFFFu);
+  RTC->CRL &= (uint16_t)~RTC_CRL_CNF;
+  rtc_wait_rtoff();
+}
 static uint8_t rtc_src_from_bdcr(void)
 {
   uint32_t sel = RCC->BDCR & RCC_BDCR_RTCSEL;
@@ -47,7 +71,6 @@ static uint8_t rtc_src_from_bdcr(void)
 
 void bbcall_rtc_init(void)
 {
-  uint32_t psc;
 
   /* 备份域要能改：PWR/BKP 时钟 + 解除写保护 */
   RCC->APB1ENR |= RCC_APB1ENR_PWREN | RCC_APB1ENR_BKPEN;
@@ -56,6 +79,7 @@ void bbcall_rtc_init(void)
   /* 已经初始化过（普通复位、或掉电后备份域还有电）：保持走时，不动时钟源和计数器 */
   if ((BKP->DR2 == RTC_MAGIC_INIT) && (RCC->BDCR & RCC_BDCR_RTCEN) && (rtc_src_from_bdcr() != RTC_SRC_NONE)) {
     s_src = rtc_src_from_bdcr();
+    s_trim = (int16_t)BKP->DR5;
     rtc_wait_rsf();
     return;
   }
@@ -69,7 +93,7 @@ void bbcall_rtc_init(void)
   RCC->BDCR |= RCC_BDCR_LSEON;
   {
     uint32_t t0 = HAL_GetTick();
-    while (((RCC->BDCR & RCC_BDCR_LSERDY) == 0u) && ((uint32_t)(HAL_GetTick() - t0) < 300u)) { }
+    while (((RCC->BDCR & RCC_BDCR_LSERDY) == 0u) && ((uint32_t)(HAL_GetTick() - t0) < 1000u)) { }
   }
   if (RCC->BDCR & RCC_BDCR_LSERDY) {
     s_src = RTC_SRC_LSE;
@@ -94,18 +118,16 @@ void bbcall_rtc_init(void)
 
   rtc_wait_rsf();
 
-  psc = (s_src == RTC_SRC_LSE) ? 32767u                    /* 32768Hz   -> 1Hz */
-      : (s_src == RTC_SRC_HSE) ? 62499u                    /* 62500Hz   -> 1Hz */
-      : 39999u;                                            /* LSI ~40kHz（不准） */
+  s_trim = (int16_t)BBCALL_RTC_TRIM_PPM;    /* 首次配置：用编译期默认值，之后可用串口 TRIM= 改 */
+  rtc_write_prescaler();
   rtc_wait_rtoff();
   RTC->CRL |= RTC_CRL_CNF;
-  RTC->PRLH = (uint16_t)((psc >> 16) & 0xFFFFu);
-  RTC->PRLL = (uint16_t)(psc & 0xFFFFu);
   RTC->CNTH = 0u;
   RTC->CNTL = 0u;
   RTC->CRL &= (uint16_t)~RTC_CRL_CNF;
   rtc_wait_rtoff();
 
+  BKP->DR5 = (uint16_t)s_trim;              /* 校准值：与 RTC 一起放在备份域，复位不丢 */
   BKP->DR1 = 0u;                            /* 还没对时 */
   BKP->DR2 = RTC_MAGIC_INIT;
   BKP->DR3 = 0u;
@@ -178,6 +200,26 @@ uint8_t bbcall_rtc_seed_build_time(void)
 }
 #endif /* BBCALL_RTC_SEED_BUILD_TIME */
 
+int16_t bbcall_rtc_get_trim(void)
+{
+  return s_trim;
+}
+
+void bbcall_rtc_set_trim(int16_t ppm)
+{
+  if (ppm > 5000) ppm = 5000;
+  if (ppm < -5000) ppm = -5000;
+  s_trim = ppm;
+  PWR->CR |= PWR_CR_DBP;
+  BKP->DR5 = (uint16_t)ppm;
+  if (s_src != RTC_SRC_NONE) rtc_write_prescaler();
+}
+
+uint32_t bbcall_rtc_divider(void)
+{
+  rtc_wait_rsf();
+  return (((uint32_t)RTC->PRLH << 16) | (uint32_t)RTC->PRLL) + 1u;
+}
 uint32_t bbcall_rtc_day_ms(void)
 {
   rtc_dt_t dt;

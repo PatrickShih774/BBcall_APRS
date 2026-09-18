@@ -141,6 +141,25 @@ uint8_t rtc_parse_dt(const char *s, rtc_dt_t *dt)
   return 1u;
 }
 
+uint32_t rtc_prescaler_for(uint32_t base_hz, int16_t ppm)
+{
+  int32_t n, adj;
+  if (base_hz < 2u) return 1u;
+  if (ppm > 5000) ppm = 5000;              /* 限幅 ±0.5%：再大说明时钟源本身有问题，不是校准能救的 */
+  if (ppm < -5000) ppm = -5000;
+  n = (int32_t)base_hz;
+  adj = (n * (int32_t)ppm) / 1000000;      /* n <= 62500、|ppm| <= 5000，最大 312500，不会溢出 */
+  n += adj;
+  if (n < 2) n = 2;
+  return (uint32_t)(n - 1);
+}
+
+int32_t rtc_trim_effective_ppm(uint32_t base_hz, int16_t ppm)
+{
+  if (base_hz < 2u) return 0;
+  return (int32_t)(((int32_t)(rtc_prescaler_for(base_hz, ppm) + 1u) - (int32_t)base_hz) * 1000000)
+         / (int32_t)base_hz;
+}
 uint8_t rtc_parse_build_stamp(const char *date, const char *time, rtc_dt_t *dt)
 {
   static const char MN[12][4] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",

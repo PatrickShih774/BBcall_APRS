@@ -19,6 +19,11 @@ uint8_t     bbcall_rtc_get(rtc_dt_t *dt);      /* 读当前时间；0 = 没走�
 void        bbcall_rtc_set(const rtc_dt_t *dt); /* 写时间并置"已对时"标记 */
 uint32_t    bbcall_rtc_day_ms(void);     /* 当日 0 点起的毫秒数（UI 时钟基准） */
 
+/* 走时校准（ppm，正 = 走快了要减慢）：存 BKP->DR5，复位不丢；掉电（无 VBAT）随备份域一起丢 */
+int16_t     bbcall_rtc_get_trim(void);
+void        bbcall_rtc_set_trim(int16_t ppm);
+uint32_t    bbcall_rtc_divider(void);     /* 当前分频比 N（PRL+1），用于回显与判断时钟源 */
+
 /* 编译时间戳兜底（BBCALL_RTC_SEED_BUILD_TIME=1 时用）：__DATE__/__TIME__ -> dt / 直接写 RTC */
 uint8_t     bbcall_rtc_build_time(rtc_dt_t *dt);
 uint8_t     bbcall_rtc_seed_build_time(void);

@@ -33,6 +33,12 @@ uint32_t rtc_dt_to_epoch2000(const rtc_dt_t *dt);
 void     rtc_epoch2000_to_dt(uint32_t sec, rtc_dt_t *dt);
 /* 解析 "YYYY-MM-DD HH:MM:SS"（日期与时间之间空格或 T/t 均可，首尾空白允许） */
 uint8_t  rtc_parse_dt(const char *s, rtc_dt_t *dt);
+/* 走时校准：RTC 分频比。base_hz = 时钟源频率（LSE 32768 / HSE-128 62500 / LSI 40000），
+ * ppm = 实测"走快了多少"（正 = 快，需要把分频比调大来减慢），返回写 PRLH/PRLL 的值（N-1）。
+ * 分辨率：32768 基准下一档 30.5ppm（2.6 秒/天），62500 基准下一档 16ppm（1.4 秒/天）。 */
+uint32_t rtc_prescaler_for(uint32_t base_hz, int16_t ppm);
+/* 实际生效的 ppm（受分辨率量化后的值，便于回显"到底校了多少"） */
+int32_t  rtc_trim_effective_ppm(uint32_t base_hz, int16_t ppm);
 /* 解析 C 的编译时间戳（__DATE__ = "Sep 18 2026"，__TIME__ = "00:45:12"），1 = 成功 */
 uint8_t  rtc_parse_build_stamp(const char *date, const char *time, rtc_dt_t *dt);
 /* 格式化 "2026-09-18 22:30:00"（buf 至少 20 字节） */

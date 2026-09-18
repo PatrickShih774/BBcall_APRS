@@ -35,6 +35,52 @@ static void rtc_apply_to_ui(void)
 
 static const char *const RTC_WDAY_NAME[7] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 
+/* 有符号 ppm 打印（hw_console_u16 只管无符号） */
+static void console_i16(int16_t v)
+{
+  if (v < 0) { hw_console_putc('-'); hw_console_u16((uint16_t)(-v)); }
+  else       { hw_console_u16((uint16_t)v); }
+}
+
+static uint32_t rtc_base_hz(void)
+{
+  switch (bbcall_rtc_clock_src()) {
+    case RTC_SRC_LSE: return 32768u;
+    case RTC_SRC_HSE: return 62500u;
+    case RTC_SRC_LSI: return 40000u;
+    default:          return 0u;
+  }
+}
+
+/* "[RTC] ... trim=+520ppm (eff=+512ppm) div=62532" */
+static void rtc_print_trim(void)
+{
+  hw_console_puts(" trim=");
+  console_i16(bbcall_rtc_get_trim());
+  hw_console_puts("ppm (eff=");
+  console_i16((int16_t)rtc_trim_effective_ppm(rtc_base_hz(), bbcall_rtc_get_trim()));
+  hw_console_puts("ppm) div=");
+  hw_console_u32(bbcall_rtc_divider());
+}
+
+/* 解析 "±NNNN"（ppm），成功返回 1 */
+static uint8_t parse_ppm(const char *s, int16_t *out)
+{
+  int32_t v = 0;
+  int sign = 1;
+  uint8_t n = 0u;
+  while (*s == ' ' || *s == '\t') s++;
+  if (*s == '+') s++;
+  else if (*s == '-') { sign = -1; s++; }
+  while (*s >= '0' && *s <= '9' && n < 4u) { v = v * 10 + (*s - '0'); s++; n++; }
+  while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+  if (n == 0u || *s != '\0') return 0u;
+  v *= sign;
+  if (v > 5000) v = 5000;
+  if (v < -5000) v = -5000;
+  *out = (int16_t)v;
+  return 1u;
+}
 static void rtc_print_dt(const char *tag, const rtc_dt_t *dt)
 {
   char buf[20];
@@ -56,7 +102,22 @@ static void console_cmd_apply(const char *line)
   while (*s == ' ' || *s == '\t') s++;
   if (*s == '\0') return;
 
-  if (strncmp(s, "TIME?", 5u) == 0) {
+  if (strncmp(s, "TRIM?", 5u) == 0) {
+    hw_console_puts("[RTC] src=");
+    hw_console_puts(bbcall_rtc_clock_src_name());
+    rtc_print_trim();
+    hw_console_puts("\r\n");
+    return;
+  }
+  if (strncmp(s, "TRIM=", 5u) == 0) {
+    int16_t ppm;
+    if (!parse_ppm(s + 5, &ppm)) { hw_console_puts("[RTC] err: use TRIM=+520 / TRIM=-120 (ppm)\r\n"); return; }
+    bbcall_rtc_set_trim(ppm);
+    hw_console_puts("[RTC] trim set");
+    rtc_print_trim();
+    hw_console_puts("\r\n");
+    return;
+  }  if (strncmp(s, "TIME?", 5u) == 0) {
     if (bbcall_rtc_get(&dt) && bbcall_rtc_valid()) rtc_print_dt("[RTC] now ", &dt);
     else hw_console_puts("[RTC] no-time (send TIME=YYYY-MM-DD HH:MM:SS)\r\n");
     return;
@@ -305,6 +366,7 @@ void bbcall_app_init(void)
   bbcall_rtc_init();
   hw_console_puts("[RTC] src=");
   hw_console_puts(bbcall_rtc_clock_src_name());
+  rtc_print_trim();   /* 分频比 = 实际走时速率，配指南见 bbcall_cfg.h 的 BBCALL_RTC_TRIM_PPM */
 #if BBCALL_RTC_SEED_BUILD_TIME
   /* 没焊串口也能有真实时间：RTC 还没对过时用编译时间戳兜底（= CubeIDE 点 Build 的那一刻）。
    * 接上串口后可随时用 tools/set_rtc_time.ps1 覆盖成精确时间。 */

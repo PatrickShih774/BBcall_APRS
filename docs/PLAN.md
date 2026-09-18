@@ -306,6 +306,8 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
 - 片内 RTC：上电打印的 `src=`（LSE / HSE/128 / LSI）是否符合板上有无 32.768k 晶振；锁屏页时钟是否为编译时刻；跨零点后日期是否自动翻；
 - 重复包刷新：同一包连发两次，收件箱仍是 1 条但时间戳变成第二次接收时刻（串口 `DUP=` 加 1）；
 - 串口对时（焊上调试口后）：`tools/set_rtc_time.ps1` 回读时间与 PC 一致；`[RAW]` 打印期间发命令不丢字节（DMA 环形缓冲）。
+- 走时精度（2026-09-18 追加）：跑满 24h 与 PC 比对，误差应在**秒级**（LSE / HSE-128）；偏大先查是否断过电（无 VBAT 会重置成编译时刻），
+  再用 `TRIM=±ppm`（或 `BBCALL_RTC_TRIM_PPM`）标定，目标 <1.5 秒/天；排查表见 [DEBUG_LOG §18](DEBUG_LOG.md#18-rtc-走时误差排查与-ppm-校准2026-09-18)。
 
 ### 10.1 P0：建立漏包率基线
 
