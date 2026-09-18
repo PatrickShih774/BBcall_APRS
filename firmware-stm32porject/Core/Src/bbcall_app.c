@@ -314,11 +314,11 @@ void bbcall_app_init(void)
   hw_console_puts(hw_clock_is72() ? "[CLK] HSE 72MHz\r\n" : "[CLK] HSI (check 8MHz HSE)\r\n");
   bk4802_init();                /* CE(PA0) 拉高、DIO1(PA8) 拉低、SCL/SDA 就绪 */
   bk4802_enter_rx();
-  bk4802_set_rx_freq_mhz(BBCALL_DEF_FREQ_MHZ);
+  bk4802_set_rx_freq_khz(BBCALL_DEF_FREQ_KHZ);
   /* 打印实际配置：默认频率与频率字跟随 bbcall_cfg.h */
   {
-    unsigned fmhz = (unsigned)BBCALL_DEF_FREQ_MHZ;
-    unsigned kmhz = (unsigned)((BBCALL_DEF_FREQ_MHZ - (double)fmhz) * 1000.0 + 0.5);
+    unsigned fmhz = BBCALL_DEF_FREQ_KHZ / 1000u;
+    unsigned kmhz = BBCALL_DEF_FREQ_KHZ % 1000u;
     char tmp[24];
     uint8_t n = 0;
     const char *tag = "[BBcall] RX ";
@@ -335,16 +335,11 @@ void bbcall_app_init(void)
     for (uint8_t i = 0; i < n; i++) hw_console_putc(tmp[i]);
   }
   {
-    /* 与 bk4802_set_rx_freq_mhz 相同的 24bit 频率字计算，仅用于打印 */
-    const double xtal_mhz = 21.25;
-    const double if_mhz   = 0.137;
-    double mhz = BBCALL_DEF_FREQ_MHZ;
-    uint32_t ndiv = 12;
+    /* 与 bk4802_set_rx_freq_khz 同一个整数算法，只用于打印（原来这里也有一份 double 版本，
+     * 会把软浮点库拖进固件；64KB Flash 放不下，已合并成整数实现） */
     uint16_t want_r2 = 0x2004u;
-    if (mhz >= 384.0f && mhz <= 512.0f) { ndiv = 4;  want_r2 = 0x0002u; }
-    else if (mhz >= 128.0f && mhz <= 170.0f) { ndiv = 12; want_r2 = 0x2004u; }
-    double lo = (double)mhz - if_mhz;
-    uint32_t value = (uint32_t)(lo * (double)ndiv * 16777216.0 / xtal_mhz + 0.5);
+    uint32_t value = 0u;
+    bk4802_freq_word_khz(BBCALL_DEF_FREQ_KHZ, &want_r2, &value);
     hw_console_puts("[FREQ] want r2=");
     hw_console_hex16(want_r2);
     hw_console_puts(" r0=");
@@ -353,13 +348,25 @@ void bbcall_app_init(void)
     hw_console_hex16((uint16_t)(value & 0xFFFFu));
     hw_console_puts("\r\n");
   }
-  hw_console_puts("[FREQ] read r2=");
-  hw_console_hex16(bk4802_read_reg(2));
-  hw_console_puts(" r0=");
-  hw_console_hex16(bk4802_read_reg(0));
-  hw_console_puts(" r1=");
-  hw_console_hex16(bk4802_read_reg(1));
-  hw_console_puts("\r\n");
+  /* BK4802 是位敲 I2C：上电第一次整组读偶尔全 0xFFFF（实测遇到过）。
+   * 这时按"配置可能没写进去"处理：重新初始化 + 重新设频，再读一次。 */
+  {
+    uint16_t rr2 = bk4802_read_reg(2), rr0 = bk4802_read_reg(0), rr1 = bk4802_read_reg(1);
+    if (rr2 == 0xFFFFu && rr0 == 0xFFFFu && rr1 == 0xFFFFu) {
+      hw_console_puts("[FREQ] read all FFFF -> re-init BK4802\r\n");
+      bk4802_init();
+      bk4802_enter_rx();
+      bk4802_set_rx_freq_khz(BBCALL_DEF_FREQ_KHZ);
+      rr2 = bk4802_read_reg(2); rr0 = bk4802_read_reg(0); rr1 = bk4802_read_reg(1);
+    }
+    hw_console_puts("[FREQ] read r2=");
+    hw_console_hex16(rr2);
+    hw_console_puts(" r0=");
+    hw_console_hex16(rr0);
+    hw_console_puts(" r1=");
+    hw_console_hex16(rr1);
+    hw_console_puts("\r\n");
+  }
 
   /* 片内 RTC：优先 LSE(32.768k 晶振)，没有就退到 HSE/128(主板 8MHz 晶振)，最后 LSI；
    * 掉电（没有 VBAT 电池）后时间会丢，重新上电跑 tools/set_rtc_time.ps1 再对一次 */
@@ -370,8 +377,8 @@ void bbcall_app_init(void)
   hw_console_puts(bbcall_rtc_clock_src_name());
   if (bbcall_rtc_clock_src() == RTC_SRC_LSE) {
     hw_console_puts(" lse=");
-    hw_console_u16(bbcall_rtc_lse_start_ms());
-    hw_console_puts("ms");
+    if (bbcall_rtc_lse_start_ms() == 0xFFFFu) hw_console_puts("--");   /* 沿用已有备份域：本次没测 */
+    else { hw_console_u16(bbcall_rtc_lse_start_ms()); hw_console_puts("ms"); }
   } else if (bbcall_rtc_clock_src() == RTC_SRC_NONE) {
     hw_console_puts(" ERR: no RTC clock source (cfg=1 -> check 32.768k crystal / load caps)");
   }
@@ -408,7 +415,7 @@ void bbcall_app_init(void)
   /* 三态 UI（design.md v2.0）：ui_init 内含 lcd_init()，模拟器与真机同一份代码 */
   ui_init();
   ui_set_mycall(BBCALL_MYCALL);
-  ui_set_rx_freq_khz((uint32_t)(BBCALL_DEF_FREQ_MHZ * 1000.0 + 0.5));
+  ui_set_rx_freq_khz(BBCALL_DEF_FREQ_KHZ);
 #if BBCALL_WALLCLOCK_ENABLE
   /* 锁屏页默认墙钟（bbcall_cfg.h）：周W M/D + HH:MM，开机即从这一刻走 */
   ui_set_wallclock(BBCALL_WALLCLOCK_WDAY, BBCALL_WALLCLOCK_MON, BBCALL_WALLCLOCK_DAY);

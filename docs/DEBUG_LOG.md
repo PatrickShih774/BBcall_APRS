@@ -671,3 +671,32 @@ CubeIDE 调试视图里 RCC/BDCR、RTC/PRL 都能直接展开；或者用 Live E
 或 `RTC->PRLL` = 0x7FFF（32767）。
 
 下一步（实机）：锁定 LSE 后跑 24h 复核漂移，按 §18.4 用 `TRIM=±ppm` 标定；LSE 一档 30.5ppm（2.6 秒/天）。
+
+### 18.6 实机日志判读与随之修掉的三处（2026-09-18 晚）
+
+实机日志（烧了带 LSE 锁定的固件后）：
+
+```text
+[FREQ] read r2=FFFF r0=FFFF r1=FFFF
+[RTC] cfg=001 src=LSE lse=00000ms trim=00000ppm (eff=00000ppm) div=32769 time=2026-09-18 23:28:27 wday=005
+```
+
+逐项判读与修正：
+
+| 现象 | 结论 | 处理 |
+|---|---|---|
+| `src=LSE` | 外部 32.768k 晶振已被选中并走时，时间（23:28:27 / 周五）与编译时刻 + 已运行时间吻合 | 无需处理 |
+| `lse=00000ms` | 这次上电走的是"沿用已有备份域"分支（普通复位），**本次没有重新给晶振起振计时**，不是"0ms 起振" | 改成打印 `lse=--`，避免误读 |
+| `div=32769` | **STM32F1 的 RTC_PRLH/PRLL 是只写寄存器**（RM0008，StdPeriph 也只有 `RTC_SetPrescaler` 没有 getter），读回来是未定义值；实际写进去的是 32767（LSE -> 1Hz） | `bbcall_rtc_divider()` 改为返回软件记录的写入值（LSE 显示 32768），不再读寄存器 |
+| `[FREQ] read ... FFFF` | BK4802 位敲 I2C 上电后**第一次整组读全失败**（本板已知的 I2C 抖动）；若配置写也没进去，射频参数会不对 | 新增自动重试：整组读全 0xFFFF 时重新 `bk4802_init()` + `enter_rx()` + 设频，再读一次并打印 |
+
+### 18.7 顺手做的 Flash 瘦身：频率字改整数运算
+
+- 现象：加上 TRIM/BK4802 重试后链接报 `region FLASH overflowed by 228 bytes`（C8T6 只有 64KB）；
+- 原因：`bk4802_set_rx_freq_mhz()` 与 `bbcall_app.c` 里的开机打印都用 `double` 运算，
+  把 libgcc 的软浮点（`__aeabi_dmul/ddiv/dsub/dcmple...`）拖进固件，约 1.5KB；
+- 处理：改成整数实现：`value = (khz - 137) * ndiv * 2^24 / 21250`（21.25MHz 晶振、137kHz 低中频），
+  四舍五入等价于原来的 `+0.5`；开机打印与设置共用同一个 `bk4802_freq_word_khz()`，API 也从 `_mhz(double)` 改成 `_khz(uint32_t)`；
+- 验证：13 个频点（含 144.640/145.050/437.625/50.000/27.000 以及各频段边界）逐点比对，
+  整数版与原 double 版**完全一致**；144.640MHz -> `0x519A08A0`，与旧日志 `want r0=519A r1=08A0` 吻合；
+- 结果：链接后 `nm` 里软浮点符号 **0 个**，`text=63812 / data=132 / bss=20244`（65536 里余约 1.7KB），0 错误 0 警告。

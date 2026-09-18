@@ -247,31 +247,43 @@ void bk4802_set_rx_audio_mute(uint8_t mute)
   }
 }
 
-static const struct { float lo, hi; uint32_t ndiv; uint16_t reg2; } bands[] = {
-  {384.0f, 512.0f, 4, 0x0002},
-  {128.0f, 170.0f, 12, 0x2004},
-  {43.0f, 57.0f, 36, 0x8008},
-  {35.0f, 46.0f, 44, 0xA00A},
-  {24.0f, 32.0f, 64, 0xC00F},
+/* 频段表（kHz 整数）：ndiv / reg2 与原浮点表一一对应 */
+static const struct { uint32_t lo_khz, hi_khz; uint32_t ndiv; uint16_t reg2; } bands[] = {
+  {384000u, 512000u,  4u, 0x0002u},
+  {128000u, 170000u, 12u, 0x2004u},
+  { 43000u,  57000u, 36u, 0x8008u},
+  { 35000u,  46000u, 44u, 0xA00Au},
+  { 24000u,  32000u, 64u, 0xC00Fu},
 };
 
-void bk4802_set_rx_freq_mhz(double mhz)
+/* 频率字：(khz - 137) * ndiv * 2^24 / 21250
+ * 对应原来的 lo_mhz * ndiv * 2^24 / 21.25：LO = RF - 137kHz、晶振 21.25MHz。
+ * 全部整数运算：原版用 double，会把 libgcc 的软浮点（加减乘除比较，约 1.5KB）拖进固件，
+ * 64KB Flash 的 C103C8 已经放不下；整数版结果与 double 版逐点核对一致（四舍五入都取 +0.5 / +21250/2）。 */
+void bk4802_freq_word_khz(uint32_t khz, uint16_t *reg2, uint32_t *word)
 {
-  const double xtal_mhz = 21.25;   /* BK4802N 数据手册: 21.25MHz */
-  const double if_mhz   = 0.137;   /* FMO BK4802.c: 低中频 137kHz */
-  uint32_t ndiv = 12;
-  uint16_t reg2 = 0x2004;
-  for (uint32_t i = 0; i < sizeof(bands)/sizeof(bands[0]); i++) {
-    if (mhz >= bands[i].lo && mhz <= bands[i].hi) {
+  uint32_t ndiv = 12u;
+  uint16_t r2 = 0x2004u;
+  uint64_t num;
+
+  for (uint32_t i = 0u; i < sizeof(bands) / sizeof(bands[0]); i++) {
+    if (khz >= bands[i].lo_khz && khz <= bands[i].hi_khz) {
       ndiv = bands[i].ndiv;
-      reg2 = bands[i].reg2;
+      r2 = bands[i].reg2;
       break;
     }
   }
-  /* 接收时 PLL 锁定在 LO = RF - IF（FMO nDivCacl/RX 路径同款算法） */
-  double lo = (double)mhz - if_mhz;
-  double d = lo * (double)ndiv * 16777216.0 / xtal_mhz;
-  uint32_t value = (uint32_t)(d + 0.5);
+  if (reg2) *reg2 = r2;
+  if (khz <= 137u) { if (word) *word = 0u; return; }
+  num = (uint64_t)(khz - 137u) * (uint64_t)ndiv * 16777216u;
+  if (word) *word = (uint32_t)((num + 10625u) / 21250u);   /* +21250/2 = 四舍五入 */
+}
+
+void bk4802_set_rx_freq_khz(uint32_t khz)
+{
+  uint16_t reg2 = 0x2004u;
+  uint32_t value = 0u;
+  bk4802_freq_word_khz(khz, &reg2, &value);
   /* 写入顺序与 BG7QKU / MM-Radio DBH_SetRXFreq 一致：reg2 -> reg1(低16) -> reg0(高16) */
   bk4802_write_reg(2, reg2);
   bk4802_write_reg(1, (uint16_t)(value & 0xFFFFu));

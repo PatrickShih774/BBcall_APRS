@@ -170,4 +170,6 @@
 #ifndef BBCALL_DEF_FREQ_MHZ
 #define BBCALL_DEF_FREQ_MHZ 144.64
 #endif
+/* kHz 整数形式：固件内部只用这个（编译期常量折叠，不引入软浮点） */
+#define BBCALL_DEF_FREQ_KHZ ((uint32_t)((BBCALL_DEF_FREQ_MHZ) * 1000.0 + 0.5))
 #endif /* BBCALL_CFG_H */

@@ -6,7 +6,9 @@ void bk4802_write_reg(uint8_t reg, uint16_t data);
 uint16_t bk4802_read_reg(uint8_t reg);
 uint16_t bk4802_i2c_error_count(void);
 void bk4802_enter_rx(void);
-void bk4802_set_rx_freq_mhz(double mhz);
+void bk4802_set_rx_freq_khz(uint32_t khz);   /* 整数运算，避免拖进软浮点库（省 1KB+ Flash） */
+/* 计算频率字：reg2 + 24bit word（reg0=高16 / reg1=低16）；设置与开机打印共用 */
+void bk4802_freq_word_khz(uint32_t khz, uint16_t *reg2, uint32_t *word);
 void bk4802_apply_audio_config(void);
 void bk4802_set_squelch(uint8_t thr);
 /* 自适应中频增益：code 0..7，3dB/级（0=0dB ... 7=21dB） */

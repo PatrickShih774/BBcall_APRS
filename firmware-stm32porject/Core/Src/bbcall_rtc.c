@@ -21,7 +21,8 @@
 
 static uint8_t s_src = RTC_SRC_NONE;
 static int16_t s_trim;   /* ppm：正 = 走快了，分频比按同比例加大 */
-static uint16_t s_lse_ms;  /* 本次上电 LSE 起振用时（诊断用；0 = 未知/非 LSE） */
+static uint16_t s_lse_ms = 0xFFFFu;  /* 本次上电 LSE 起振用时（0xFFFF = 未知：沿用已有备份域时测不到） */
+static uint32_t s_psc;        /* 已写入 PRL 的分频值（F1 的 PRL 只写不能读，读回来是垃圾，所以自己留一份） */
 
 /* 等 RTC 寄存器写完成（RTOFF=1 才能改 CNF） */
 static void rtc_wait_rtoff(void)
@@ -60,6 +61,7 @@ static void rtc_write_prescaler(void)
   RTC->PRLL = (uint16_t)(psc & 0xFFFFu);
   RTC->CRL &= (uint16_t)~RTC_CRL_CNF;
   rtc_wait_rtoff();
+  s_psc = psc;   /* 记住写进去的值：F1 的 PRL 只写，读不回来 */
 }
 static uint8_t rtc_src_from_bdcr(void)
 {
@@ -81,7 +83,8 @@ void bbcall_rtc_init(void)
   if ((BKP->DR2 == RTC_MAGIC_INIT) && (RCC->BDCR & RCC_BDCR_RTCEN) && (rtc_src_from_bdcr() != RTC_SRC_NONE)) {
     s_src = rtc_src_from_bdcr();
     s_trim = (int16_t)BKP->DR5;
-    s_lse_ms = 0u;
+    s_lse_ms = 0xFFFFu;   /* 沿用已有备份域：本次没测起振时间 */
+    s_psc = rtc_prescaler_for(rtc_base_hz(s_src), s_trim);   /* 回显用（F1 的 PRL 读不回来） */
     rtc_wait_rsf();
     return;
   }
@@ -236,8 +239,9 @@ void bbcall_rtc_set_trim(int16_t ppm)
 
 uint32_t bbcall_rtc_divider(void)
 {
-  rtc_wait_rsf();
-  return (((uint32_t)RTC->PRLH << 16) | (uint32_t)RTC->PRLL) + 1u;
+  /* 注意：STM32F1 的 RTC_PRLH/PRLL 是只写寄存器（RM0008），读回来是未定义值
+   * （实测读到 0x8000 之类的垃圾），所以这里返回软件自己记录的写入值。 */
+  return s_psc + 1u;
 }
 uint32_t bbcall_rtc_day_ms(void)
 {
