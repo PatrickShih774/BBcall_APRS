@@ -107,9 +107,21 @@ try {
     if ($outT) { Write-Host "[$portName] $outT" } else { Write-Host "[$portName] TRIM 没有回复" -ForegroundColor Red; $exitCode = 3 }
     if ($outT -match '\[RTC\] err') { $exitCode = 2 }
   }
+  function Show-Drift([string]$text) {
+    # 从 "[RTC] now 2026-09-19 00:07:00 Sat src=LSE" 里取时间，和 PC 现在比一下
+    $m = [regex]::Match($text, '(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})')
+    if (-not $m.Success) { return }
+    try {
+      $dev = [datetime]::ParseExact($m.Groups[1].Value, 'yyyy-MM-dd HH:mm:ss', $null)
+      $d = [int][Math]::Round((New-TimeSpan -Start (Get-Date) -End $dev).TotalSeconds)
+      $sign = if ($d -gt 0) { "快 $d 秒" } elseif ($d -lt 0) { "慢 $(-$d) 秒" } else { "一致" }
+      Write-Host ("[{0}] 与 PC 相差: {1} 秒（设备{2}）" -f $portName, $d, $sign) -ForegroundColor Cyan
+      Write-Host "  提示: 距上次对时 T 小时后测出 Δ 秒，ppm = Δ / (T*3600) * 1e6，用 -TrimPpm 写入" -ForegroundColor DarkGray
+    } catch { }
+  }
   if ($Query) {
     $out = Get-RtcLines (Send-Line $spDev 'TIME?' 1500 -UntilRtc)
-    if ($out) { Write-Host "[$portName] $out" } else { Write-Host "[$portName] 没有回读" -ForegroundColor Red; $exitCode = 3 }
+    if ($out) { Write-Host "[$portName] $out"; Show-Drift $out } else { Write-Host "[$portName] 没有回读" -ForegroundColor Red; $exitCode = 3 }
   } else {
     Write-Host "[$portName] 发送: $line"
     $out = Get-RtcLines (Send-Line $spDev $line 2000 -UntilRtc)
