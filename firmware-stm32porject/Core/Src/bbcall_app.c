@@ -558,7 +558,7 @@ void bbcall_app_loop(void)
     hw_console_puts(" AGC=");  hw_console_u8(s_agc_en);
     hw_console_puts(" SQ=");   hw_console_u8((uint8_t)s_sq_rssi_thr);
     hw_console_puts(" SQN=");  hw_console_u8((uint8_t)s_sq_noise_thr);
-    hw_console_puts(" FREQ="); hw_console_u16((uint16_t)s_rx_khz);
+    hw_console_puts(" FREQ="); hw_console_u32(s_rx_khz);   /* kHz 是 5 位数，必须 u32（144640 装不进 u16） */
     hw_console_puts(" I2CE="); hw_console_u16(bk4802_i2c_error_count());
     hw_console_puts(" ID=");   hw_console_u16(bk4802_read_reg(27));
     hw_console_puts(" RX=");   hw_console_u16((uint16_t)rx_count);

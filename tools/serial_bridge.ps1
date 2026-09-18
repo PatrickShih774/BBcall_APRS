@@ -1,4 +1,4 @@
-﻿<#
+﻿﻿<#
   BBcall_APRS 串口桥（供 Codex/脚本 直接对话设备用）
 
   作用：常驻打开串口，把设备输出实时打印到标准输出；同时监听"命令文件"——
@@ -63,6 +63,9 @@ try {
         [Console]::Out.Write(">>> TX: $cmd`n")
         [Console]::Out.Flush()
         $sp.Write($cmd + "`r`n")
+        # 实测：一次性连发多条时，设备端偶尔会把第一条读坏（DMA 环 + 阻塞打印）；
+        # 每条之间留 200ms，等设备把上一条解析/回复完再收下一条。
+        Start-Sleep -Milliseconds 200
       }
     }
 
