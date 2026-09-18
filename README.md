@@ -10,7 +10,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 固件覆盖 BK4802P 接收配置与增益控制、音频取样、ADC、1200/2200Hz AFSK 判频、NRZI/HDLC/AX.25 解析、APRS 消息/位置/Mic-E 解析，以及 ST7567 三态 UI 和串口诊断。仓库还提供 PC 端 LCD 模拟器、测试音频生成与回归工具，便于在实机烧录前验证界面与解码链路。
 
 **当前状态**：RF → 音频 → ADC → 判频 → NRZI → HDLC → AX.25 → APRS 全链路已打通；实机可解真实 APRS 数据包（见 [docs/DEBUG_LOG.md §10](docs/DEBUG_LOG.md#10-成功解码记录)）；LCD 已点亮、三态 UI 真机联调通过；解码优化（幅度门限 20000→500、16 相位、跳变对齐位时钟）后成功率大幅提升；射频前端无滤波/匹配是当前弱信号解码率的主要瓶颈（改进方案见 [docs/PLAN.md §11](docs/PLAN.md#11-硬件改进方案提升解码率)）。
-**最新发布**：**v0.7**（2026-09-19，[Release](https://github.com/PatrickShih774/BBcall_APRS/releases/tag/BBCall_APRS_v0.7)）：**每次发射都在屏幕留一条**（重复包去重窗口 60s 改成 **2s 可配**，只合并"同一次发射的多路冗余"）+ **运行时调参命令**（`STAT?`/`GAIN=`/`AGC=`/`SQ=`/`FREQ=`…）+ `tools/serial_bridge.ps1` 串口桥；RTC 对时与命令链路已实机验证，强信号实测 **19 发 19 解**。
+**最新发布**：**v0.8**（2026-09-19，[Release](https://github.com/PatrickShih774/BBcall_APRS/releases/tag/BBCall_APRS_v0.8)）：**代码内存优化**（去掉 newlib printf/malloc，**Debug(-O0) 重新可烧**，Release 余约 18KB）；沿用 v0.7 的"每次发射都在屏幕留一条"（去重窗口 2s 可配）+ 运行时调参命令（`STAT?`/`GAIN=`/`AGC=`/`SQ=`/`FREQ=`…）+ 串口桥；RTC 对时与命令链路已实机验证，强信号实测 **19 发 19 解**。
 
 ---
 
