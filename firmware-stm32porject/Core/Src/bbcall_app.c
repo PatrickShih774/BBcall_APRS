@@ -364,8 +364,17 @@ void bbcall_app_init(void)
   /* 片内 RTC：优先 LSE(32.768k 晶振)，没有就退到 HSE/128(主板 8MHz 晶振)，最后 LSI；
    * 掉电（没有 VBAT 电池）后时间会丢，重新上电跑 tools/set_rtc_time.ps1 再对一次 */
   bbcall_rtc_init();
-  hw_console_puts("[RTC] src=");
+  hw_console_puts("[RTC] cfg=");
+  hw_console_u8(bbcall_rtc_clk_cfg());   /* 1 = 只用 LSE（32.768k 晶振） */
+  hw_console_puts(" src=");
   hw_console_puts(bbcall_rtc_clock_src_name());
+  if (bbcall_rtc_clock_src() == RTC_SRC_LSE) {
+    hw_console_puts(" lse=");
+    hw_console_u16(bbcall_rtc_lse_start_ms());
+    hw_console_puts("ms");
+  } else if (bbcall_rtc_clock_src() == RTC_SRC_NONE) {
+    hw_console_puts(" ERR: no RTC clock source (cfg=1 -> check 32.768k crystal / load caps)");
+  }
   rtc_print_trim();   /* 分频比 = 实际走时速率，配指南见 bbcall_cfg.h 的 BBCALL_RTC_TRIM_PPM */
 #if BBCALL_RTC_SEED_BUILD_TIME
   /* 没焊串口也能有真实时间：RTC 还没对过时用编译时间戳兜底（= CubeIDE 点 Build 的那一刻）。

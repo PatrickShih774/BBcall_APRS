@@ -21,6 +21,7 @@
 
 static uint8_t s_src = RTC_SRC_NONE;
 static int16_t s_trim;   /* ppm：正 = 走快了，分频比按同比例加大 */
+static uint16_t s_lse_ms;  /* 本次上电 LSE 起振用时（诊断用；0 = 未知/非 LSE） */
 
 /* 等 RTC 寄存器写完成（RTOFF=1 才能改 CNF） */
 static void rtc_wait_rtoff(void)
@@ -80,6 +81,7 @@ void bbcall_rtc_init(void)
   if ((BKP->DR2 == RTC_MAGIC_INIT) && (RCC->BDCR & RCC_BDCR_RTCEN) && (rtc_src_from_bdcr() != RTC_SRC_NONE)) {
     s_src = rtc_src_from_bdcr();
     s_trim = (int16_t)BKP->DR5;
+    s_lse_ms = 0u;
     rtc_wait_rsf();
     return;
   }
@@ -89,23 +91,31 @@ void bbcall_rtc_init(void)
   for (volatile uint32_t i = 0u; i < 1000u; i++) { }
   RCC->BDCR &= ~RCC_BDCR_BDRST;
 
-  /* 选时钟源：LSE -> HSE/128 -> LSI */
-  RCC->BDCR |= RCC_BDCR_LSEON;
+  /* 时钟源按 bbcall_cfg.h 的 BBCALL_RTC_CLK_SRC 选：
+   *   0 = 自动：LSE -> HSE/128 -> LSI（兼容没焊 32.768k 晶振的板子）
+   *   1 = 只用 LSE（板上确定有 32.768k 晶振时用；起振失败就报错，不偷偷换源）
+   *   2 = 只用 HSE/128；3 = 只用 LSI */
   {
-    uint32_t t0 = HAL_GetTick();
-    while (((RCC->BDCR & RCC_BDCR_LSERDY) == 0u) && ((uint32_t)(HAL_GetTick() - t0) < 1000u)) { }
-  }
-  if (RCC->BDCR & RCC_BDCR_LSERDY) {
-    s_src = RTC_SRC_LSE;
-  } else {
-    RCC->BDCR &= ~RCC_BDCR_LSEON;          /* 没有 32.768k 晶振：别让 LSE 继续扒着 PC14/PC15 */
-    if (RCC->CR & RCC_CR_HSERDY) {
-      s_src = RTC_SRC_HSE;                  /* HSE/128 = 62.5kHz，/62500 = 1Hz */
-    } else {
+    uint8_t cfg = (uint8_t)BBCALL_RTC_CLK_SRC;
+    if (cfg == 0u || cfg == 1u) {
+      uint32_t t0 = HAL_GetTick();
+      RCC->BDCR |= RCC_BDCR_LSEON;
+      while (((RCC->BDCR & RCC_BDCR_LSERDY) == 0u) && ((uint32_t)(HAL_GetTick() - t0) < 2000u)) { }
+      if (RCC->BDCR & RCC_BDCR_LSERDY) {
+        s_src = RTC_SRC_LSE;
+        s_lse_ms = (uint16_t)(HAL_GetTick() - t0);
+      } else {
+        RCC->BDCR &= ~RCC_BDCR_LSEON;   /* 起振失败：别让 LSE 继续扒着 PC14/PC15 */
+      }
+    }
+    if ((s_src == RTC_SRC_NONE) && (cfg == 0u || cfg == 2u)) {
+      if (RCC->CR & RCC_CR_HSERDY) s_src = RTC_SRC_HSE;   /* HSE/128 = 62.5kHz -> 1Hz */
+    }
+    if ((s_src == RTC_SRC_NONE) && (cfg == 0u || cfg == 3u)) {
       RCC->CSR |= RCC_CSR_LSION;
       uint32_t t0 = HAL_GetTick();
       while (((RCC->CSR & RCC_CSR_LSIRDY) == 0u) && ((uint32_t)(HAL_GetTick() - t0) < 300u)) { }
-      s_src = (RCC->CSR & RCC_CSR_LSIRDY) ? RTC_SRC_LSI : RTC_SRC_NONE;
+      if (RCC->CSR & RCC_CSR_LSIRDY) s_src = RTC_SRC_LSI;
     }
   }
   if (s_src == RTC_SRC_NONE) return;        /* 没有任何可用时钟源：RTC 不可用（界面退回开机时长） */
@@ -200,6 +210,15 @@ uint8_t bbcall_rtc_seed_build_time(void)
 }
 #endif /* BBCALL_RTC_SEED_BUILD_TIME */
 
+uint8_t bbcall_rtc_clk_cfg(void)
+{
+  return (uint8_t)BBCALL_RTC_CLK_SRC;
+}
+
+uint16_t bbcall_rtc_lse_start_ms(void)
+{
+  return s_lse_ms;
+}
 int16_t bbcall_rtc_get_trim(void)
 {
   return s_trim;

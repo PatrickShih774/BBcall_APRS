@@ -539,7 +539,8 @@ CubeIDE 工程只把用到的 HAL 源文件加进构建：`Debug/Drivers/STM32F1
 | 3 | LSI ~40kHz | 39999 | F103 的 LSI 实测 30~60kHz，**误差极大**，只兜底 | 停 |
 
 上电会打印实际用的那档，例如 `[RTC] src=HSE/128 no-time (send TIME=YYYY-MM-DD HH:MM:SS)`；对过时则打印 `time=` 与 `wday=`。
-判断逻辑：先试 LSE（等 300ms 起振），起不来就退 HSE/128（HSE 已在跑），再不行才 LSI。
+判断逻辑：先试 LSE（默认等 2000ms 起振），起不来再按 `BBCALL_RTC_CLK_SRC` 决定是否退 HSE/128 或 LSI；
+本工程默认 `BBCALL_RTC_CLK_SRC=1`（只用 LSE，见 §18.5）。
 备份寄存器分工：`DR1` = 时间已对过、`DR2` = 本固件已完成初始化（普通复位后据此跳过重新配置，不会把走时清零）。
 
 ### 16.3 对时链路
@@ -651,3 +652,22 @@ CubeIDE 调试视图里 RCC/BDCR、RTC/PRL 都能直接展开；或者用 Live E
 3. `TRIM=` + round(Δ/86400×1e6)：例如 24h 快 45 秒 -> `TRIM=520`；慢 20 秒 -> `TRIM=-231`；
 4. 再跑一天复核，必要时微调一档（LSE 一档 2.6 秒/天，HSE 一档 1.4 秒/天）；
 5. 记下最终值，写进 `bbcall_cfg.h` 的 `BBCALL_RTC_TRIM_PPM` 作为出厂初值。
+
+### 18.5 锁定外部 32.768k 晶振（2026-09-18 追加，用户确认板上有 LSE）
+
+用户确认板上有外部 32.768k 晶振，要求直接用外部晶振、不要再自动回退。改动：
+
+- `bbcall_cfg.h` 新增 **`BBCALL_RTC_CLK_SRC`**：`0` = 自动（LSE → HSE/128 → LSI，兼容没焊晶振的板子）；
+  **`1` = 只用 LSE（本工程默认值）**；`2` = 只用 HSE/128；`3` = 只用 LSI；
+- 强制 LSE 时，起振失败**不再静默换源**：`s_src = RTC_SRC_NONE`，RTC 不可用，
+  串口打 `[RTC] cfg=1 src=none ERR: no RTC clock source (cfg=1 -> check 32.768k crystal / load caps)`，
+  屏幕退回默认墙钟（一眼能看出晶振没起来）；这段信息在 `bbcall_app_init()` 里打印，便于判断是固件问题还是硬件问题；
+- LSE 起振等待放到 **2000ms**（ST 的 HAL 默认给 5000ms），起振成功会记录用时并打印 `lse=NNNms`：
+  正常板子应是几十到几百毫秒；如果接近 2000ms 才 ready，说明晶振/负载电容余量很小，长期精度也别指望；
+- 备份域已有有效 RTC 时（普通复位/重新烧录）不重新选源，直接沿用 BDCR 里的 RCCSEL，因此不会因为一次上电没起来就把走时清零；
+- 构建：`text=65396 / data=132 / bss=20236`，0 错误 0 警告。
+
+**怎么确认真的跑在 LSE**：上电日志 `src=LSE`；或 ST-Link 读 `RCC->BDCR` 的 RTCSEL=01、LSERDY=1；
+或 `RTC->PRLL` = 0x7FFF（32767）。
+
+下一步（实机）：锁定 LSE 后跑 24h 复核漂移，按 §18.4 用 `TRIM=±ppm` 标定；LSE 一档 30.5ppm（2.6 秒/天）。

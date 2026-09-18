@@ -160,7 +160,8 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 **没焊串口也能有真实时间**：RTC 还没被对过时（首次上电、或掉电后），固件直接用**编译时间戳**（`__DATE__`/`__TIME__`）给 RTC 对时，
 值就是你在 CubeIDE 点 Build 的那一刻：编译完直接烧录，屏幕（锁屏页时钟 + 消息时间戳）就是当前时间，
 误差只有"编译到上电"的这几分钟。开关在 `bbcall_cfg.h` 的 `BBCALL_RTC_SEED_BUILD_TIME`（默认 1，置 0 关闭）。
-上电串口会打 `[RTC] src=HSE/128 seeded=2026-09-18 00:37:12`，其中 `seeded=` 就是写进 RTC 的编译时间。
+上电串口会打 `[RTC] cfg=1 src=LSE lse=142ms trim=+0ppm (eff=+0ppm) div=32767 seeded=2026-09-18 00:37:12`，
+其中 `seeded=` 就是写进 RTC 的编译时间，`lse=` 是这次上电 32.768k 晶振的起振用时。
 
 接上串口后可以改成精确时间（会覆盖设备里 RTC 的值），锁屏页时钟与消息时间戳都跟着走：
 
@@ -173,9 +174,10 @@ powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -List    # 列�
 设备侧命令（串口助手里手敲也一样）：`TIME=2026-09-18 22:30:00` 写入，`TIME?` 回读，
 回复形如 `[RTC] set 2026-09-18 22:30:00 Fri src=HSE/128`。
 
-- 时钟源优先级：**LSE 32.768kHz（板上焊了 32.768k 晶振才有）→ HSE/128 = 62.5kHz（借主板 8MHz 晶振，够准）→ LSI（F103 的 LSI 误差极大，只兜底）**；
-  上电串口会打印实际用的那档：默认（`BBCALL_RTC_SEED_BUILD_TIME 1`）打 `[RTC] src=HSE/128 seeded=2026-09-18 00:37:12 time=2026-09-18 00:37:12 wday=5`；
-  把兜底关掉后打 `[RTC] src=HSE/128 no-time (send TIME=YYYY-MM-DD HH:MM:SS)`，此时只能靠串口对时；
+- **时钟源可配置**（`bbcall_cfg.h` 的 `BBCALL_RTC_CLK_SRC`）：**本工程默认 `1` = 只用 LSE 32.768k 晶振**；`0` = 自动（LSE → HSE/128 = 62.5kHz → LSI，兼容没焊晶振的板子）；`2` = 只用 HSE/128；`3` = 只用 LSI；
+  强制 LSE 时晶振起振失败会**明确报错、不静默换源**：`[RTC] cfg=1 src=none ERR: no RTC clock source (cfg=1 -> check 32.768k crystal / load caps)`，屏幕退回默认墙钟；
+  正常时上电打 `[RTC] cfg=1 src=LSE lse=142ms trim=+0ppm (eff=+0ppm) div=32767 time=... wday=5`，`lse=` 是起振用时、`div` 是当前分频比；
+  （`BBCALL_RTC_SEED_BUILD_TIME` 置 0 时不再自动用编译时间戳兜底，改为 `no-time (send TIME=...)`，只能靠串口对时。）
 - 没有 VBAT 电池时**掉电会丢时间**：下次上电自动回到编译时刻（或跑脚本改成 PC 当前时间）；普通复位/重新烧录不会丢；
 - 串口接收走 **DMA1_Channel3 环形缓冲**：不占 9600Hz 采样中断的时间预算，也不会因为主循环正在打印 `[RAW]` 而丢命令字节；
 - 对时后设备每秒跟 RTC 查一次（跨零点、手动改时间都会立刻反映到屏幕）。

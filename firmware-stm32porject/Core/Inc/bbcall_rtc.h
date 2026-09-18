@@ -12,6 +12,8 @@
 #define RTC_SRC_LSI  3u   /* 内部 LSI ~40kHz：F103 的 LSI 误差极大，仅兜底 */
 
 void        bbcall_rtc_init(void);       /* 备份域 + 时钟源 + 预分频；可重复调用 */
+uint8_t     bbcall_rtc_clk_cfg(void);     /* bbcall_cfg.h 里的 BBCALL_RTC_CLK_SRC（1 = 只用 LSE） */
+uint16_t    bbcall_rtc_lse_start_ms(void); /* 本次上电 LSE 起振用时（0 = 未知/非 LSE，纯诊断） */
 uint8_t     bbcall_rtc_clock_src(void);
 const char *bbcall_rtc_clock_src_name(void);   /* "LSE" / "HSE/128" / "LSI" / "none" */
 uint8_t     bbcall_rtc_valid(void);      /* 1 = 已经对过时（备份寄存器标记） */
