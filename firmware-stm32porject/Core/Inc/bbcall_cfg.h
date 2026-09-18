@@ -117,6 +117,16 @@
 #define KEY_PWR_PIN        GPIO_PIN_2
 #define KEY_PTT_GPIO       GPIOA
 #define KEY_PTT_PIN        GPIO_PIN_4
+/* ---------- 重复包去重窗口 ----------
+ * 同一次发射会被多条解调路径同时解出（实测每次 3 条，间隔 75~220ms），
+ * 所以这个窗口的作用是"把同一次发射的多路冗余合成一条"：
+ *   窗口 < 多路间隔        -> 一次发射在屏幕上变成好几条（不是想要的行为）；
+ *   窗口 >= 两次发射间隔   -> 不同次发射被合并（旧默认 60000 就是这样，屏幕只有"不同内容"那么多条）；
+ * 默认 2000ms：一次发射只留一条，而隔几秒重发同样内容仍会新增条目、计数按实际条数走。
+ * 置 0 = 完全不去重（每条解调路径都新增，仅调试用）。可用串口 DUPMS=<ms> 实时改。 */
+#ifndef BBCALL_DEDUP_MS
+#define BBCALL_DEDUP_MS 2000u
+#endif
 /* ---------- 运行时调参命令（串口） ----------
  * 1 = 打开 GAIN=/AGC=/SQ=/SQN=/FREQ=/MUTE=/STAT?/PING（不重烧就能调，配合 tools/serial_bridge.ps1）；
  *     代码约 2KB，Debug(-O0) 会装不下（64KB 满），需要 Release(-Os) 或换更大 Flash 的型号；

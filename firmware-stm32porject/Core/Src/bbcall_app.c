@@ -31,6 +31,7 @@ static uint16_t s_sq_rssi_thr  = BK4802_SQ_RSSI_THR & 0xFFu;
 static uint16_t s_sq_noise_thr = BK4802_SQ_NOISE_THR;
 static uint32_t s_rx_khz       = BBCALL_DEF_FREQ_KHZ;
 static uint8_t  s_stat_req;      /* STAT? 置位，由主循环（能拿到计数）打印 */
+static uint16_t s_dedup_ms      = (uint16_t)BBCALL_DEDUP_MS;   /* 去重窗口：默认只合并同一次发射的多路冗余 */
 
 static void rtc_apply_to_ui(void)
 {
@@ -143,6 +144,18 @@ static void console_cmd_apply(const char *line)
   }
 #if BBCALL_TUNE_CMDS
   if (strncmp(s, "PING", 4u) == 0) { hw_console_puts("[CFG] pong\r\n"); return; }
+  if (strncmp(s, "DUPMS?", 6u) == 0) {
+    hw_console_puts("[CFG] DUPMS="); hw_console_u16(s_dedup_ms); hw_console_puts("ms\r\n");
+    return;
+  }
+  if (strncmp(s, "DUPMS=", 6u) == 0) {
+    uint16_t v;
+    if (!parse_u16(s + 6, &v)) { hw_console_puts("[CFG] err: DUPMS=<0..60000> ms\r\n"); return; }
+    s_dedup_ms = v;
+    ui_set_dedup_ms(v);      /* UI 层同一个窗口 */
+    hw_console_puts("[CFG] DUPMS="); hw_console_u16(v); hw_console_puts("ms\r\n");
+    return;
+  }
   if (strncmp(s, "STAT?", 5u) == 0) { s_stat_req = 1u; return; }
   if (strncmp(s, "GAIN=", 5u) == 0) {
     uint16_t v;
@@ -500,6 +513,7 @@ void bbcall_app_init(void)
 #if BBCALL_LCD_ENABLED
   /* 三态 UI（design.md v2.0）：ui_init 内含 lcd_init()，模拟器与真机同一份代码 */
   ui_init();
+  ui_set_dedup_ms(s_dedup_ms);   /* 与 DUPMS= 共用同一个窗口 */
   ui_set_mycall(BBCALL_MYCALL);
   ui_set_rx_freq_khz(BBCALL_DEF_FREQ_KHZ);
 #if BBCALL_WALLCLOCK_ENABLE
@@ -558,7 +572,8 @@ void bbcall_app_loop(void)
     hw_console_puts(" AGC=");  hw_console_u8(s_agc_en);
     hw_console_puts(" SQ=");   hw_console_u8((uint8_t)s_sq_rssi_thr);
     hw_console_puts(" SQN=");  hw_console_u8((uint8_t)s_sq_noise_thr);
-    hw_console_puts(" FREQ="); hw_console_u32(s_rx_khz);   /* kHz 是 5 位数，必须 u32（144640 装不进 u16） */
+    hw_console_puts(" FREQ="); hw_console_u32(s_rx_khz);
+    hw_console_puts(" DUPMS="); hw_console_u16(s_dedup_ms);   /* kHz 是 5 位数，必须 u32（144640 装不进 u16） */
     hw_console_puts(" I2CE="); hw_console_u16(bk4802_i2c_error_count());
     hw_console_puts(" ID=");   hw_console_u16(bk4802_read_reg(27));
     hw_console_puts(" RX=");   hw_console_u16((uint16_t)rx_count);
@@ -594,7 +609,7 @@ void bbcall_app_loop(void)
     uint8_t is_dup = 0;
     for (uint8_t i = 0; i < 8u; i++) {
       if (dup_name[i][0] && dup_hash[i] == fh && strcmp(dup_name[i], fname) == 0 &&
-          (now_ms - dup_time[i]) < 60000u) { is_dup = 1; break; }
+          (uint32_t)(now_ms - dup_time[i]) < (uint32_t)s_dedup_ms) { is_dup = 1; break; }
     }
     if (is_dup && !modem_frame_was_repeat()) {
       dup_count++;

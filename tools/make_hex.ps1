@@ -22,7 +22,8 @@ if (-not $objcopy) {
     exit 1
 }
 
-$base = [IO.Path]::ChangeExtension($Elf, $null)
+# 注意：ChangeExtension($Elf,$null) 在 Windows 上会留下结尾的点（BBCall_APRS.），导致生成 BBCall_APRS..hex
+$base = Join-Path ([IO.Path]::GetDirectoryName($Elf)) ([IO.Path]::GetFileNameWithoutExtension($Elf))
 & $objcopy -O ihex   $Elf "$base.hex"
 & $objcopy -O binary $Elf "$base.bin"
 

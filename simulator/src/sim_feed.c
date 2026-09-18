@@ -210,11 +210,21 @@ int sim_feed_log(const char *path)
   fclose(f);
   buf[sz] = 0;
 
+  uint32_t last_t = 0;   /* 真机日志里 [T=...ms] 单独成行，这里继承给后续的 [RAW] 用 */
   line = buf;
   while (*line) {
     char *eol = line;
     while (*eol && *eol != '\n' && *eol != '\r') eol++;
     if (*eol) { *eol = 0; eol++; }
+    {
+      const char *tline = find_sub(line, "[T=");
+      if (tline) {
+        uint32_t v = 0u;
+        const char *d0 = tline + 3;
+        while (*d0 >= '0' && *d0 <= '9') { v = v * 10u + (uint32_t)(*d0 - '0'); d0++; }
+        last_t = v;
+      }
+    }
     {
       /* 顺带解析状态行：S 表 / 静音。
        * 注意：R19 的 RSSI=/SNR= 是 BK4802 原始寄存器读数，未标定为 dBm，
@@ -232,9 +242,8 @@ int sim_feed_log(const char *path)
         uint8_t frame[300];
         uint16_t n = 0;
         const char *q = hx + 4;
-        uint32_t t_ms = 0;
+        uint32_t t_ms = last_t;
         uint8_t fixed = 0, rep = 0;
-        const char *ts = find_sub(line, "[T=");
         while (n < (uint16_t)sizeof(frame)) {
           int hi = hexval((unsigned char)q[0]);
           int lo = hexval((unsigned char)q[1]);
@@ -244,10 +253,6 @@ int sim_feed_log(const char *path)
         }
         if (find_sub(line, "[FIX]")) fixed = 1;
         if (find_sub(line, "[REP]")) rep = 1;
-        if (ts) {
-          const char *d0 = ts + 3;
-          while (*d0 >= '0' && *d0 <= '9') { t_ms = t_ms * 10u + (uint32_t)(*d0 - '0'); d0++; }
-        }
         seen++;
         if (n < 16u) continue;
         if (!ax25_check_frame(frame, n)) {

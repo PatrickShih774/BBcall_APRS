@@ -68,6 +68,7 @@ static uint16_t s_dup_hash[UI_DUP_N];
 static char     s_dup_src[UI_DUP_N][7];
 static uint32_t s_dup_ms[UI_DUP_N];
 static uint8_t  s_dup_pos;
+static uint32_t s_dedup_ms = 2000u;    /* 去重窗口（默认与 BBCALL_DEDUP_MS 一致）；固件由 ui_set_dedup_ms() 覆盖，模拟器沿用此默认 */
 
 /* ------------------------------------------------------------------ */
 /* UTF-8 与字模渲染（与原型 glyph()/text() 逐位一致）                    */
@@ -591,7 +592,7 @@ uint8_t ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
     for (i = 0; i < UI_DUP_N; i++) {
       if (s_dup_src[i][0] && s_dup_hash[i] == fh &&
           strcmp(s_dup_src[i], d.src) == 0 &&
-          (uint32_t)(t_ms - s_dup_ms[i]) < 60000u) {
+          (uint32_t)(t_ms - s_dup_ms[i]) < s_dedup_ms) {
         s_dup_total++;
         s_dup_ms[i] = t_ms;                 /* 去重窗口顺延到本次接收 */
         return ui_bump_duplicate(fh, t_ms); /* 刷新原条目时间戳并提到队首，不再直接丢弃 */
@@ -759,6 +760,7 @@ void ui_set_radio_stats(int16_t rssi_dbm, int16_t snr)
   s_have_rf_next = (uint8_t)((rssi_dbm == (int16_t)-32768) ? 0u : 1u);
 }
 
+void ui_set_dedup_ms(uint32_t ms) { s_dedup_ms = ms; }
 uint16_t ui_inbox_count(void) { return s_count; }
 uint16_t ui_unread_count(void) { return s_unread; }
 uint16_t ui_rx_total(void) { return s_rx_total; }

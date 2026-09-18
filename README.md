@@ -10,7 +10,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 固件覆盖 BK4802P 接收配置与增益控制、音频取样、ADC、1200/2200Hz AFSK 判频、NRZI/HDLC/AX.25 解析、APRS 消息/位置/Mic-E 解析，以及 ST7567 三态 UI 和串口诊断。仓库还提供 PC 端 LCD 模拟器、测试音频生成与回归工具，便于在实机烧录前验证界面与解码链路。
 
 **当前状态**：RF → 音频 → ADC → 判频 → NRZI → HDLC → AX.25 → APRS 全链路已打通；实机可解真实 APRS 数据包（见 [docs/DEBUG_LOG.md §10](docs/DEBUG_LOG.md#10-成功解码记录)）；LCD 已点亮、三态 UI 真机联调通过；解码优化（幅度门限 20000→500、16 相位、跳变对齐位时钟）后成功率大幅提升；射频前端无滤波/匹配是当前弱信号解码率的主要瓶颈（改进方案见 [docs/PLAN.md §11](docs/PLAN.md#11-硬件改进方案提升解码率)）。
-**最新发布**：**v0.6**（2026-09-18，[Release](https://github.com/PatrickShih774/BBcall_APRS/releases/tag/BBCall_APRS_v0.6)）：重复包也上屏（刷新该条时间戳、不新增条目）+ 片内 RTC 对时（没焊串口时用编译时间戳兜底，接上串口可精确对时）；这两项**待实机验证**。
+**最新发布**：**v0.7**（2026-09-19，[Release](https://github.com/PatrickShih774/BBcall_APRS/releases/tag/BBCall_APRS_v0.7)）：**每次发射都在屏幕留一条**（重复包去重窗口 60s 改成 **2s 可配**，只合并"同一次发射的多路冗余"）+ **运行时调参命令**（`STAT?`/`GAIN=`/`AGC=`/`SQ=`/`FREQ=`…）+ `tools/serial_bridge.ps1` 串口桥；RTC 对时与命令链路已实机验证，强信号实测 **19 发 19 解**。
 
 ---
 
@@ -123,7 +123,7 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 | `RSSI/SNR/EXN` | 信号强度/信噪比/带外噪声 |
 | `AFC` | 剩余频偏 |
 | `G` | 自适应中频增益档位（4=12dB、5=15dB、6=18dB） |
-| `RX/U/DUP` | 累计接收帧数 / 独立台站数 / 重复帧数（重复帧刷新屏上该条时间戳，不新增条目） |
+| `RX/U/DUP` | 累计接收帧数 / 独立台站数 / 同一发射的多路冗余数（默认 2 秒窗口内同源同内容，见 §5.2 的 `DUPMS=`） |
 | `FIX/FIX2` | 1-bit / 2-bit CRC 纠错成功帧数 |
 | `REP` | 参考帧辅助恢复（重复包）成功帧数 |
 | `I2CE` | I2C 错误/重试计数 |
@@ -152,7 +152,7 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 
 - `[FRAME]`：新解码帧；`[MICE]`/`[POS]`：Mic-E / 普通位置解析；
 - `path=...`：中继路径，带 `*` 表示该中继已转发；
-- `[DUP]`：60s 内重复帧（短行）：屏上不新增条目，但会把收件箱里这条的时间戳刷新为本次接收时刻、提到队首并重新标为未读；`[FIX]`/`[FIX2]`/`[REP]`：纠错或参考恢复的帧；
+- `[DUP]`：**同一次发射的多路冗余**（默认 2 秒窗口内、同源同内容）：屏上不新增条目，只把已入箱那条的时间戳刷新为本次接收时刻、提到队首并重新标为未读；`[FIX]`/`[FIX2]`/`[REP]`：纠错或参考恢复的帧；
 - 时间戳来自 `HAL_GetTick()`，复位后从 0 开始，便于把解码事件与手工发射时刻一一对应。`[I2C]` 行只在 BK4802 读失败时出现（`scl`/`sda` 是释放后的空闲电平、`ack=1` 表示芯片有应答），排查见 [DEBUG_LOG §19](docs/DEBUG_LOG.md#19-bk4802-i2c-全-0xffff怎么判往哪儿查2026-09-18-晚)。
 
 ### 5.1 对时：把 PC 系统时间写进片内 RTC
@@ -222,6 +222,7 @@ powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
 | `FREQ=<kHz>` | 重新设接收频率，如 `FREQ=144640` |
 | `MUTE=<0/1>` | 接收音频断/通 |
 | `PING` | 探活，回 `[CFG] pong` |
+| `DUPMS=<ms>` / `DUPMS?` | 重复包去重窗口：**默认 2000ms**（只合并同一次发射的多路冗余）；设 0 关闭去重 |
 | `TIME=` / `TIME?` / `TRIM=` | 对时与走时校准（见 §5.1） |
 
 **注意 Flash 预算**：这套命令约 2KB，`Debug` 配置（`-O0`）会超出 64KB（溢出 1484 字节），
@@ -326,6 +327,7 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 3. Build（0 错误即可）。
 4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出；
 5. **构建配置**：`Debug` 是 `-O0`，加了调参命令后会超出 64KB；日常烧录用 **`Release`（`-Os`，省约 15.5KB）**，或把 `BBCALL_TUNE_CMDS` 置 0。
+6. **Release 配置不产出 `.hex`**（只有 elf/list/map）：用 `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或在 CubeIDE 里直接 Run（烧 elf）。
 
 LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用显示。
 

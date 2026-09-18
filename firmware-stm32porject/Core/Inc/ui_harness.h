@@ -49,6 +49,7 @@ void     ui_set_radio_stats(int16_t rssi_dbm, int16_t snr);
 uint8_t  ui_feed_ax25(const uint8_t *frame, uint16_t len, uint32_t t_ms,
                       uint8_t fixed, uint8_t repeat);
 
+void     ui_set_dedup_ms(uint32_t ms);       /* 重复包去重窗口：只合并"同一次发射"的多路冗余（默认 2000ms，0=不去重） */
 uint16_t ui_inbox_count(void);
 uint16_t ui_unread_count(void);
 uint16_t ui_rx_total(void);
