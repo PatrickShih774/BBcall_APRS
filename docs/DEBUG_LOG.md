@@ -763,3 +763,56 @@ ST7567/串口看到的"有波形"不能证明 I2C 是通的。
 现在连 ID 都读不到，属于硬件链路问题。先看 `[I2C] scl/sda/ack` 那一行：
 - 有 0 → 查短路；
 - 全 1 但 ack=0 → 查供电/CE/晶振/模块。
+
+## 20. 让 Codex 直接对接串口实时调参（2026-09-19）
+
+**需求**：不想每次都"改宏 → 重编 → 重烧 → 再看日志"，希望能直接对着串口调参数。
+
+### 20.1 串口桥：一个进程同时"看日志 + 发命令"
+
+新增 `tools/serial_bridge.ps1`：常驻打开串口（串口是独占的，所以必须一个进程同时管收发），
+
+- 设备输出 → 原样打到标准输出（可 `-LogFile` 落盘）；
+- 监听命令文件（默认 `%TEMP%\bbcall_tx.txt`）：文件出现就把每行当命令发出去，然后删掉文件；
+- 这样 Codex（或任何脚本）只要"写文件"就能发命令，不需要额外的库或交互式终端。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
+"STAT?" | Out-File -Encoding ascii "$env:TEMP\bbcall_tx.txt"
+```
+
+实测（2026-09-19 00:14，本机 COM5）：桥启动后能看到 `S=`/`R19=` 实时刷新；
+写 `TRIM?` → 回 `[RTC] src=LSE trim=00000ppm (eff=00000ppm) div=32768`；
+写 `TIME?` → 回 `[RTC] now 2026-09-19 00:14:54 Sat src=LSE`。
+（`PING` 当时回的是旧固件的 "err: use TIME="，因为调参命令还没烧进去，符合预期。）
+
+### 20.2 固件：运行时调参命令（`BBCALL_TUNE_CMDS`，默认开）
+
+| 命令 | 作用 | 实现要点 |
+|---|---|---|
+| `STAT?` | 一行打包：RSSI/SNR、G/AGC/SQ/SQN、FREQ、I2CE、ID、RX/U/DUP/FIX/FIX2/REP、ISR 平均/最大耗时、RTC 时间 | 命令只置 `s_stat_req`，由主循环打印（计数是循环内的局部量） |
+| `GAIN=0..7` | 固定中频增益（3dB/级），同时**关 AGC** | 档位从"2s 块里的 static 局部量"提到文件作用域 `s_if_code` |
+| `AGC=0/1` | 自动增益开/关（编译期初值仍来自 `BBCALL_IF_AGC`） | 2s 块的 AGC 逻辑改成 if (`s_agc_en`) |
+| `SQ=0..255` | reg22 低字节（RSSI 静噪阈值） | 复用 `bk4802_set_squelch()` |
+| `SQN=0..255` | reg23 低字节（噪声阈值） | 直接写 `0x6400 | v` |
+| `FREQ=<kHz>` | 重新设接收频率 | `bk4802_set_rx_freq_khz()` + `ui_set_rx_freq_khz()` |
+| `MUTE=0/1` | 接收音频断/通 | `bk4802_set_rx_audio_mute()` |
+| `PING` | 探活 | 回 `[CFG] pong` |
+
+`R19=` 行同时加了 `AGC=` 字段，便于确认当前是自动还是锁定档位。
+
+### 20.3 坑：加完命令后 Debug(-O0) 装不下了
+
+- 现象：`region FLASH overflowed by 1484 bytes`（64KB 的 C8T6）；
+- 量化：同一份源码 `-O0` 对 `-Os` 的核心文件体积 59390 → 43871 字节，**省 15519 字节**；
+  整镜像 `-Os` 后 `text=49688 / data=124 / bss=20212`，还余约 15.7KB；
+- 结论：**带调参命令的固件用 Release(-Os) 构建**（CubeIDE 里切构建配置；`.cproject` 里 Release 本来就是 `-Os`），
+  或者把 `BBCALL_TUNE_CMDS` 置 0（只留对时/校准命令）后继续用 Debug(-O0)；
+- 附带好处：`-Os` 下 modem 的定点运算更快，9600Hz ISR 的时间余量更大（`STAT?` 里的 `ISRavg/ISRmax` 可复核）。
+
+### 20.4 使用流程（双方约定）
+
+1. 用户关掉串口助手（串口是独占的），必要时告诉 Codex 端口号（本机为 COM5）；
+2. Codex 启 `serial_bridge.ps1` 占用串口，实时读日志；
+3. Codex 通过写 `%TEMP%\bbcall_tx.txt` 发命令（`STAT?` / `GAIN=` / `AGC=` / `SQ=` / `FREQ=` …），并在日志里核对生效情况；
+4. 调完 Codex 停掉桥（`Stop-Process` 匹配 `serial_bridge`），把端口还给用户；最终值再落回 `bbcall_cfg.h` 作为出厂默认。

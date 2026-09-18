@@ -21,6 +21,17 @@
 static char    s_cmd_line[CONSOLE_LINE_MAX];
 static uint8_t s_cmd_len;
 
+/* ---------- 运行时调参（串口命令，不用重烧） ----------
+ * GAIN=0..7 固定中频增益(3dB/级)并关 AGC；AGC=0/1 开关自动增益；
+ * SQ=0..255  reg22 低字节（RSSI 静噪阈值）；SQN=0..255 reg23 低字节（噪声阈值）；
+ * FREQ=<kHz> 重新设接收频率；MUTE=0/1 接收音频断/通；STAT? 打一行状态；PING 探活 */
+static uint8_t  s_if_code      = BK4802_IF_GAIN_CODE;
+static uint8_t  s_agc_en       = (BBCALL_IF_AGC ? 1u : 0u);
+static uint16_t s_sq_rssi_thr  = BK4802_SQ_RSSI_THR & 0xFFu;
+static uint16_t s_sq_noise_thr = BK4802_SQ_NOISE_THR;
+static uint32_t s_rx_khz       = BBCALL_DEF_FREQ_KHZ;
+static uint8_t  s_stat_req;      /* STAT? 置位，由主循环（能拿到计数）打印 */
+
 static void rtc_apply_to_ui(void)
 {
 #if BBCALL_LCD_ENABLED
@@ -64,6 +75,18 @@ static void rtc_print_trim(void)
 }
 
 /* 解析 "±NNNN"（ppm），成功返回 1 */
+/* 解析十进制数（0..65535），成功返回 1；允许首尾空白 */
+static uint8_t parse_u16(const char *s, uint16_t *out)
+{
+  uint32_t v = 0u;
+  uint8_t n = 0u;
+  while (*s == ' ' || *s == '\t') s++;
+  while (*s >= '0' && *s <= '9' && n < 5u) { v = v * 10u + (uint32_t)(*s - '0'); s++; n++; }
+  while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+  if (n == 0u || *s != '\0' || v > 65535u) return 0u;
+  *out = (uint16_t)v;
+  return 1u;
+}
 static uint8_t parse_ppm(const char *s, int16_t *out)
 {
   int32_t v = 0;
@@ -117,7 +140,59 @@ static void console_cmd_apply(const char *line)
     rtc_print_trim();
     hw_console_puts("\r\n");
     return;
-  }  if (strncmp(s, "TIME?", 5u) == 0) {
+  }
+#if BBCALL_TUNE_CMDS
+  if (strncmp(s, "PING", 4u) == 0) { hw_console_puts("[CFG] pong\r\n"); return; }
+  if (strncmp(s, "STAT?", 5u) == 0) { s_stat_req = 1u; return; }
+  if (strncmp(s, "GAIN=", 5u) == 0) {
+    uint16_t v;
+    if (!parse_u16(s + 5, &v) || v > 7u) { hw_console_puts("[CFG] err: GAIN=0..7 (3dB/step)\r\n"); return; }
+    s_if_code = (uint8_t)v; s_agc_en = 0u; bk4802_set_if_gain_code(s_if_code);
+    hw_console_puts("[CFG] gain="); hw_console_u8(s_if_code);
+    hw_console_puts(" ("); hw_console_u8((uint8_t)(s_if_code * 3u)); hw_console_puts("dB) AGC=0\r\n");
+    return;
+  }
+  if (strncmp(s, "AGC=", 4u) == 0) {
+    uint16_t v;
+    if (!parse_u16(s + 4, &v) || v > 1u) { hw_console_puts("[CFG] err: AGC=0/1\r\n"); return; }
+    s_agc_en = (uint8_t)v;
+    hw_console_puts("[CFG] AGC="); hw_console_u8(s_agc_en); hw_console_puts("\r\n");
+    return;
+  }
+  if (strncmp(s, "SQ=", 3u) == 0) {
+    uint16_t v;
+    if (!parse_u16(s + 3, &v) || v > 255u) { hw_console_puts("[CFG] err: SQ=0..255 (reg22 RSSI thr)\r\n"); return; }
+    s_sq_rssi_thr = v; bk4802_set_squelch((uint8_t)v);
+    hw_console_puts("[CFG] SQ="); hw_console_u8((uint8_t)v); hw_console_puts("\r\n");
+    return;
+  }
+  if (strncmp(s, "SQN=", 4u) == 0) {
+    uint16_t v;
+    if (!parse_u16(s + 4, &v) || v > 255u) { hw_console_puts("[CFG] err: SQN=0..255 (reg23 noise thr)\r\n"); return; }
+    s_sq_noise_thr = v;
+    bk4802_write_reg(23, (uint16_t)(0x6400u | v));
+    hw_console_puts("[CFG] SQN="); hw_console_u8((uint8_t)v); hw_console_puts("\r\n");
+    return;
+  }
+  if (strncmp(s, "FREQ=", 5u) == 0) {
+    uint16_t v;
+    if (!parse_u16(s + 5, &v) || v < 24000u) { hw_console_puts("[CFG] err: FREQ=<kHz> e.g. FREQ=144640\r\n"); return; }
+    s_rx_khz = v; bk4802_set_rx_freq_khz(s_rx_khz);
+#if BBCALL_LCD_ENABLED
+    ui_set_rx_freq_khz(s_rx_khz);
+#endif
+    hw_console_puts("[CFG] FREQ="); hw_console_u16(v); hw_console_puts("kHz\r\n");
+    return;
+  }
+  if (strncmp(s, "MUTE=", 5u) == 0) {
+    uint16_t v;
+    if (!parse_u16(s + 5, &v) || v > 1u) { hw_console_puts("[CFG] err: MUTE=0/1\r\n"); return; }
+    bk4802_set_rx_audio_mute((uint8_t)v);
+    hw_console_puts("[CFG] MUTE="); hw_console_u8((uint8_t)v); hw_console_puts("\r\n");
+    return;
+  }
+#endif /* BBCALL_TUNE_CMDS */
+  if (strncmp(s, "TIME?", 5u) == 0) {
     if (bbcall_rtc_get(&dt) && bbcall_rtc_valid()) rtc_print_dt("[RTC] now ", &dt);
     else hw_console_puts("[RTC] no-time (send TIME=YYYY-MM-DD HH:MM:SS)\r\n");
     return;
@@ -175,6 +250,7 @@ static uint32_t s_rf_last_ms, s_rf_pk_ms;
  *   s_rf_ok_cnt / s_rf_fail_cnt  S-meter 采样成功/失败次数，可直接算出读失败率；
  *   s_rf_last_raw                最近一次寄存器 24 原始值（0xFFFF = 读失败）。 */
 static uint16_t s_rf_ok_cnt, s_rf_fail_cnt, s_rf_last_raw = 0xFFFFu;
+
 
 static void rf_smeter_poll(void)
 {
@@ -469,6 +545,39 @@ void bbcall_app_loop(void)
 
   console_poll();   /* 串口命令：TIME=... / TIME?（PC 对时） */
 
+#if BBCALL_TUNE_CMDS
+  if (s_stat_req) {   /* STAT?：一行打包当前所有可调状态 + 计数，便于边调边看 */
+    s_stat_req = 0u;
+    uint16_t st_r24 = bk4802_read_reg(24);
+    uint16_t isr_last, isr_max; uint32_t isr_avg, isr_cnt;
+    hw_isr_stats(&isr_last, &isr_max, &isr_avg, &isr_cnt);
+    hw_console_puts("[STAT] up=");   hw_console_u32(HAL_GetTick()); hw_console_puts("ms");
+    hw_console_puts(" RSSI="); hw_console_u16(st_r24 & 0x00FFu);
+    hw_console_puts(" SNR=");  hw_console_u16((st_r24 & 0x3F00u) >> 8);
+    hw_console_puts(" G=");    hw_console_u8(s_if_code);
+    hw_console_puts(" AGC=");  hw_console_u8(s_agc_en);
+    hw_console_puts(" SQ=");   hw_console_u8((uint8_t)s_sq_rssi_thr);
+    hw_console_puts(" SQN=");  hw_console_u8((uint8_t)s_sq_noise_thr);
+    hw_console_puts(" FREQ="); hw_console_u16((uint16_t)s_rx_khz);
+    hw_console_puts(" I2CE="); hw_console_u16(bk4802_i2c_error_count());
+    hw_console_puts(" ID=");   hw_console_u16(bk4802_read_reg(27));
+    hw_console_puts(" RX=");   hw_console_u16((uint16_t)rx_count);
+    hw_console_puts(" U=");    hw_console_u8(n_uniq);
+    hw_console_puts(" DUP=");  hw_console_u16((uint16_t)dup_count);
+    hw_console_puts(" FIX=");  hw_console_u16(modem_get_fix_count());
+    hw_console_puts(" FIX2="); hw_console_u16(modem_get_fix2_count());
+    hw_console_puts(" REP=");  hw_console_u16(modem_get_rep_count());
+    hw_console_puts(" ISRavg="); hw_console_u16((uint16_t)(isr_avg / 100u));
+    hw_console_putc('.');       hw_console_u8((uint8_t)(isr_avg % 100u));
+    hw_console_puts("us ISRmax="); hw_console_u16(isr_max);
+    hw_console_puts("us T=");
+    { rtc_dt_t sdt; char stbuf[20];
+      if (bbcall_rtc_get(&sdt)) { rtc_format_dt(&sdt, stbuf, (uint8_t)sizeof(stbuf)); hw_console_puts(stbuf); }
+      else hw_console_puts("--"); }
+    hw_console_puts("\r\n");
+  }
+#endif /* BBCALL_TUNE_CMDS */
+
   if (modem_get_frame(&fr)) {
     if (modem_frame_was_fixed()) hw_console_puts("[FIX] ");
     else if (modem_frame_was_repeat()) hw_console_puts("[REP] ");
@@ -651,21 +760,17 @@ void bbcall_app_loop(void)
       s_rf_valid = 1u;
     }
     uint8_t can_adjust = rssi_ok && ((HAL_GetTick() - last_frame_tick) > 1000u);
-    static uint8_t if_code = BK4802_IF_GAIN_CODE;
-    uint8_t new_code = if_code;
-#if BBCALL_IF_AGC
-    /* 范围 + 双阈值（带滞回）：RSSI 太低就升档、太高就降档，档位夹在 [MIN, MAX]。
-     * 换档范围与阈值都在 bbcall_cfg.h，改那里即可（含"固定增益"开关）。 */
-    if (can_adjust) {
-      if ((rssi_now < BK4802_AGC_UP_RSSI) && (if_code < BK4802_IF_GAIN_MAX))
-        new_code = (uint8_t)(if_code + 1u);
-      else if ((rssi_now > BK4802_AGC_DN_RSSI) && (if_code > BK4802_IF_GAIN_MIN))
-        new_code = (uint8_t)(if_code - 1u);
+    uint8_t new_code = s_if_code;
+    /* AGC 默认值来自 bbcall_cfg.h 的 BBCALL_IF_AGC，运行时可用 AGC=0/1 改；
+     * GAIN=n 会关掉 AGC 并锁死档位。阈值/范围仍在 bbcall_cfg.h。 */
+    if (s_agc_en && can_adjust) {
+      if ((rssi_now < BK4802_AGC_UP_RSSI) && (s_if_code < BK4802_IF_GAIN_MAX))
+        new_code = (uint8_t)(s_if_code + 1u);
+      else if ((rssi_now > BK4802_AGC_DN_RSSI) && (s_if_code > BK4802_IF_GAIN_MIN))
+        new_code = (uint8_t)(s_if_code - 1u);
     }
-#else
-    (void)can_adjust;   /* 固定增益：不做任何自动调整 */
-#endif
-    if (new_code != if_code) { if_code = new_code; bk4802_set_if_gain_code(if_code); }
+    (void)can_adjust;
+    if (new_code != s_if_code) { s_if_code = new_code; bk4802_set_if_gain_code(s_if_code); }
     if (r24 == 0xFFFFu) {   /* 读失败：顺带打总线电平，便于抓"线被拉死/芯片不应答" */
       uint8_t ps, pd, pa, pr8;
       bk4802_bus_probe(&ps, &pd, &pa, &pr8);
@@ -682,7 +787,9 @@ void bbcall_app_loop(void)
     hw_console_puts(" SNR=");
     hw_console_u16((r24 & 0x3F00u) >> 8);
     hw_console_puts(" G=");
-    hw_console_u8(if_code);
+    hw_console_u8(s_if_code);
+    hw_console_puts(" AGC=");
+    hw_console_u8(s_agc_en);
     hw_console_puts(" RX="); hw_console_u16((uint16_t)rx_count);
     hw_console_puts(" U="); hw_console_u8(n_uniq);
     hw_console_puts(" DUP="); hw_console_u16((uint16_t)dup_count);

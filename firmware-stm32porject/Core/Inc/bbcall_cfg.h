@@ -117,6 +117,14 @@
 #define KEY_PWR_PIN        GPIO_PIN_2
 #define KEY_PTT_GPIO       GPIOA
 #define KEY_PTT_PIN        GPIO_PIN_4
+/* ---------- 运行时调参命令（串口） ----------
+ * 1 = 打开 GAIN=/AGC=/SQ=/SQN=/FREQ=/MUTE=/STAT?/PING（不重烧就能调，配合 tools/serial_bridge.ps1）；
+ *     代码约 2KB，Debug(-O0) 会装不下（64KB 满），需要 Release(-Os) 或换更大 Flash 的型号；
+ * 0 = 只保留 TIME=/TIME?/TRIM=（对时与校准），回到 -O0 也能放下的体积。 */
+#ifndef BBCALL_TUNE_CMDS
+#define BBCALL_TUNE_CMDS 1u
+#endif
+
 /* ---------- 调试串口 USART3（PB10=TX, PB11=RX, 寄存器级） ---------- */
 #define BBCALL_CONSOLE_ENABLED 1u
 #define CONSOLE_GPIO      GPIOB

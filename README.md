@@ -201,6 +201,33 @@ powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -TrimPpm 520  # 
   `div` 是实际写进 RTC 的分频比（LSE 应为 32768、HSE/128 为 62500），`eff` 是量化后实际生效的 ppm；`TRIM?` 可随时回读。
   注意 `div` 来自软件记录：STM32F1 的 RTC 预分频寄存器是**只写**的，读回来的值无意义（曾经因此显示出 32769）。
 
+### 5.2 运行时调参命令（串口，不用重烧）
+
+配合 `tools/serial_bridge.ps1`（常驻串口 + 从命令文件发命令），可以让 Codex 或脚本直接对接设备实时调参：
+
+```powershell
+# 终端 A：占用串口，实时打印设备输出（Ctrl+C 退出）
+powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
+# 终端 B / 任何进程：把命令写进这个文件即发送（每行一条，发完自动删除）
+"STAT?" | Out-File -Encoding ascii "$env:TEMP\bbcall_tx.txt"
+```
+
+| 命令 | 作用 |
+|---|---|
+| `STAT?` | 一行打包 RSSI/SNR、G/AGC/SQ、FREQ、I2CE/ID、RX/U/DUP/FIX/REP、ISR 耗时、RTC 时间 |
+| `GAIN=<0..7>` | 固定中频增益（3dB/级 → 0..21dB），并**关掉 AGC** |
+| `AGC=<0/1>` | 自动增益开/关（默认值来自 `bbcall_cfg.h` 的 `BBCALL_IF_AGC`） |
+| `SQ=<0..255>` | reg22 低字节：RSSI 静噪阈值 |
+| `SQN=<0..255>` | reg23 低字节：噪声阈值 |
+| `FREQ=<kHz>` | 重新设接收频率，如 `FREQ=144640` |
+| `MUTE=<0/1>` | 接收音频断/通 |
+| `PING` | 探活，回 `[CFG] pong` |
+| `TIME=` / `TIME?` / `TRIM=` | 对时与走时校准（见 §5.1） |
+
+**注意 Flash 预算**：这套命令约 2KB，`Debug` 配置（`-O0`）会超出 64KB（溢出 1484 字节），
+所以带调参命令的固件请用 **`Release` 配置（`-Os`）** 构建（同一份源码省约 15.5KB），
+或者把 `bbcall_cfg.h` 的 `BBCALL_TUNE_CMDS` 置 0 只保留对时命令。
+
 ---
 
 ## 6. 主机验证工具
@@ -254,7 +281,8 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 2. 确认 `Core/Src`、`Core/Inc` 已加入构建（**新增的 `bbcall_rtc.c`、`rtc_math.c` 也要在构建里**：CubeIDE 里按 F5 刷新工程即会自动扫描到，`Debug/` 是生成目录、不入库）；`main.c` 的 USER CODE 区已调用
    `hw_delay_init()/hw_clock_try_72mhz()`、`bbcall_app_init()`、`bbcall_app_loop()`。
 3. Build（0 错误即可）。
-4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出。
+4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出；
+5. **构建配置**：`Debug` 是 `-O0`，加了调参命令后会超出 64KB；日常烧录用 **`Release`（`-Os`，省约 15.5KB）**，或把 `BBCALL_TUNE_CMDS` 置 0。
 
 LCD 焊好后把 `bbcall_cfg.h` 的 `BBCALL_LCD_ENABLED` 改成 1 即可启用显示。
 
