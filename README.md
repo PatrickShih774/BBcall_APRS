@@ -169,6 +169,7 @@ R19=36879 RSSI=00127 SNR=00063 G=006 RX=00012 U=00003 DUP=00005 FIX=00000 FIX2=0
 powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1          # 自动找串口并对时
 powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -Query   # 只回读设备时间
 powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -List    # 列出可用串口
+powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -TrimPpm 520  # 只设走时校准（正=走快）
 ```
 
 设备侧命令（串口助手里手敲也一样）：`TIME=2026-09-18 22:30:00` 写入，`TIME?` 回读，

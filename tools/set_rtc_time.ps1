@@ -7,10 +7,12 @@
     powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -Query       # 只回读设备时间
     powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -List        # 列出可用串口
     powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -DryRun      # 只打印要发的命令
+    powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -TrimPpm 520  # 只设走时校准（正=走快）
+    powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -Query -TrimPpm  # 回读时间 + 当前校准
 
   说明:
   - 串口助手（SSCOM 等）必须先关掉，否则串口被占用打不开；
-  - 设备回复形如 [RTC] set 2026-09-18 22:30:00 Fri src=HSE/128；
+  - 设备回复形如 [RTC] set 2026-09-19 00:12:34 Sat src=LSE（时钟源现在是锁定的 LSE 32.768k）；
   - 掉电（没有 VBAT 电池）后设备时间会丢，重新上电再跑一次本脚本即可。
 #>
 [CmdletBinding()]
@@ -19,6 +21,7 @@ param(
   [switch]$Query,
   [switch]$List,
   [switch]$DryRun,
+  [int]$TrimPpm = 0,
   [int]$Baud = 115200,
   [int]$TimeoutMs = 2500
 )
@@ -99,6 +102,11 @@ if (-not $spDev) {
 
 $exitCode = 0
 try {
+  if ($PSBoundParameters.ContainsKey('TrimPpm')) {
+    $outT = Get-RtcLines (Send-Line $spDev ("TRIM=" + $TrimPpm) 1500 -UntilRtc)
+    if ($outT) { Write-Host "[$portName] $outT" } else { Write-Host "[$portName] TRIM 没有回复" -ForegroundColor Red; $exitCode = 3 }
+    if ($outT -match '\[RTC\] err') { $exitCode = 2 }
+  }
   if ($Query) {
     $out = Get-RtcLines (Send-Line $spDev 'TIME?' 1500 -UntilRtc)
     if ($out) { Write-Host "[$portName] $out" } else { Write-Host "[$portName] 没有回读" -ForegroundColor Red; $exitCode = 3 }
