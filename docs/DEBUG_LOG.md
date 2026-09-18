@@ -854,3 +854,17 @@ powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
 - 结果：**19 次发射 → 19 次解出（100%）**；每次都是 3 条冗余解码事件（19×3=57 条）；
 - 强度：每次 `RSSI=127`（打满）、`SNR=52~63`（满值 63）；`FIX=0 FIX2=0 REP=0`（完全不用纠错）；
 - 说明：这是"强信号/近距离"条件下的结果，与之前 5km 弱信号仍会漏包不矛盾：解调与软件链路没有瓶颈。
+
+## 22. v0.7 发布记录（2026-09-19）
+
+| 项 | 值 |
+|---|---|
+| tag / release | `BBCall_APRS_v0.7`（代码提交 `3579122`，[release 页](https://github.com/PatrickShih774/BBcall_APRS/releases/tag/BBCall_APRS_v0.7)） |
+| 构建 | **Release / -Os**：`text=49900 / data=132 / bss=20212`；Debug(-O0) 装不下（溢出 1484 字节） |
+| 附件 | `BBCall_APRS_v0.7.hex / .bin / .elf / .map` |
+| 本版新增 | ① 去重窗口 60s 改成 **2s 可配**（`BBCALL_DEDUP_MS` / 串口 `DUPMS=`）：每次发射在屏幕留一条、重复内容如实计数；② **运行时调参命令**（`STAT?`/`GAIN=`/`AGC=`/`SQ=`/`SQN=`/`FREQ=`/`MUTE=`/`PING`）；③ `tools/serial_bridge.ps1` 串口桥 + README §6 调试工具/工作流/排障套路；④ 频率字整数化（去软浮点，省约 1.5KB）；⑤ 模拟器 replay 支持真机日志那种单独成行的 `[T=]`；⑥ `make_hex.ps1` 文件名 bug、`set_rtc_time.ps1 -Query/-TrimPpm` |
+| 实机验证（本版前） | 片内 RTC（LSE 锁定、串口对时与回读同秒、`div=32768`）；BK4802 I2C 短路排查与恢复；调参/对时命令与串口桥；**强信号 19 发 19 解**（`docs/logs/decode_test_20260919.log`） |
+| 仍待验证 | **弱信号/长距离漏包率（P0 基线）**；RTC 24 小时漂移与 `TRIM` 标定；SunSDR VOX 发射链路的成功率 |
+
+注意：发布用的 hex 内嵌编译时间戳 = 本版构建时刻（2026-09-19 00:56 北京时间），直接烧该 hex 设备初始时间即为那一刻；
+用 CubeIDE 的 Release 配置自行 Build 时，**Release 配置不产出 .hex**（只有 elf/list/map），可用 `tools/make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或直接 Run 烧 elf。
