@@ -23,7 +23,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 | 3 | [软件结构](#3-软件结构) | 文件表 / 架构图；信号链 → [docs/PLAN.md §3](docs/PLAN.md#3-软件架构) |
 | 4 | [调试过程记录](#4-调试过程记录) | 概要 → [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md)（完整 bring-up / 实测） |
 | 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出 / §5.1 对时（RTC） |
-| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频 / UI 校验 / 串口桥与实时调参 / 现场排障套路 |
+| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频 / UI 校验 / 串口桥与实时调参 / 现场排障套路 / **§6.4 复用指南（其他项目可直接抄）** |
 | 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
 | 8 | [待办 / 下一步](#8-待办--下一步) | → [docs/PLAN.md](docs/PLAN.md)（路线图 / 验收标准） |
 | 9 | [PC 端 LCD 模拟器（SDL2）](#9-pc-端-lcd-模拟器sdl2) | 概要 → [simulator/SIMULATOR.md](simulator/SIMULATOR.md) |
@@ -320,6 +320,54 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 
 ---
 
+### 6.4 复用指南：把"模拟器 + 串口桥 + 主机自测"搬到别的项目（2026-09-19）
+
+这套调试工具**不依赖任何 BBcall 业务代码**，换个工程也能直接抄。下面写清：每个工具解决什么、依赖什么、
+移植要改哪几处、以及本次真实踩过的坑。
+
+| 工具 | 解决什么问题 | 外部依赖 | 移植时要改的 |
+|---|---|---|---|
+| `simulator/`（SDL2 + TinyCC） | 不烧板子就能看 UI / 跑协议链路：把**固件源码**直接编成 PC 程序 | SDL2 头/库、TinyCC（都可放 `third_party/`，不入库） | ① 写一层 `sim_hal.c` 提供 `HAL_*`/GPIO/SPI/延时 stub；② 在 `build_win.ps1` / `CMakeLists.txt` 里换成你的源文件清单；③ 保留 `--selftest --out x.bmp` 这类"一条命令出一张图"的入口 |
+| `tools/verify_ui.py` | 屏幕内容**逐像素**校验（字模模板匹配，自动判定正/反显） | 纯 Python 标准库 | 把字模表导出成页面/JSON，并按 `SPEC` 列出每个屏的期望文本与坐标 |
+| `tools/serial_bridge.ps1` | 让脚本 / AI **独占串口**：实时打日志 + 从"命令文件"发命令 | Windows PowerShell 5.1（.NET SerialPort，免安装） | 只改 `-Port`；命令文件路径已参数化 |
+| 纯模块主机自测（`tools/test_rtc_math.c` 模式） | 把不碰寄存器的逻辑（日期换算、协议编解码）拉到 PC 上单测 | TinyCC 或任意 C 编译器 | 把纯逻辑单独成文件（本项目 `rtc_math.c`），测试文件直接 `#include` 它 |
+| 回归素材生成（`tools/gen_afsk_wav.py` + `tools/regression_baud.ps1`） | 造可控输入（频偏 / 噪声 / 变长帧）批量回归 | Python | 换成你自己的信号生成器；关键是"素材参数化 + 结果打印帧数/路径数" |
+| `tools/make_hex.ps1` | ELF → HEX/BIN（CubeIDE 的 Release 配置不产出 hex） | arm-none-eabi-objcopy | 一般不用改 |
+
+**落地顺序（按依赖排）**
+
+1. **让固件"可被 PC 编译"**：把硬件访问集中到一层（本项目 `bbcall_hw.c` + HAL 宏），
+   PC 侧只实现这一层（GPIO 读写、位敲 SPI、延时、日志输出），其余业务代码原样编；
+   好处是屏幕布局、协议解析、状态机在 PC 与真机上跑的是**同一份源码**，改完立刻能看效果。
+2. **加一个 `--selftest --out x.bmp`**：固定时钟/数据源 → 渲染一屏 → 存 BMP（放大 4 倍便于肉眼）。
+   这样"改 UI"变成"跑一条命令 + 看一张图"，不依赖板子和串口。
+3. **写 golden 校验**：把期望文本按坐标列成表（本项目 `verify_ui.py` 的 `SPEC`）逐像素比对。
+   比"人眼看截图"可靠得多，改字库/改布局时能立刻发现回归。
+4. **串口桥**：一个进程独占串口，RX 直接写 stdout（可选 `-LogFile` 落盘），TX 从"命令文件"读
+   （文件出现 → 发出去 → 删文件）。这样任何脚本/agent 只要会写文件就能发命令，不用引入串口库，
+   也不会出现"两个进程抢串口"。
+5. **纯逻辑单测**：日期/校验/编解码等纯函数单独成文件，主机上 `#include "xxx.c"` 直接跑断言。
+
+**踩坑清单（都是本次真实遇到的）**
+
+| 坑 | 现象 | 处理 |
+|---|---|---|
+| PowerShell 5.1 脚本编码 | 中文注释导致 `Unexpected token` / `Missing expression after unary operator` | 脚本一律保存为 **UTF-8 with BOM**；用脚本改脚本时先 `TrimStart([char]0xFEFF)` 再写回，否则出现**双 BOM**，PS 5.1 直接语法错 |
+| 串口独占 | `Access to the port 'COM5' is denied` | 关掉 SSCOM/串口助手；同一时刻只允许一个程序打开该串口 |
+| 背靠背发多条命令 | 设备偶尔把**第一条**读坏（回 `err`） | 每条之间留 **200ms**（`serial_bridge.ps1` 已内置）；手动在终端敲不受影响 |
+| Debug(-O0) 装不下 | `region FLASH overflowed by N bytes` | 先查 **newlib printf/malloc**：nano.specs 下约 2.2KB，还会拖进 malloc/realloc/_sbrk。本项目用自写 `strfmt.c` 替换全部 `snprintf` 后 Debug 就能装下；退路是 Release(-Os) 或换更大 Flash |
+| CubeIDE Release 不产 hex | `Release/` 里只有 elf/list/map | 用 `tools/make_hex.ps1 -Elf ...` 生成；注意 `[IO.Path]::ChangeExtension($Elf,$null)` 在 Windows 会留下结尾的点（生成 `xxx..hex`），要用 `GetFileNameWithoutExtension` |
+| 回放时间戳全为 0 | 模拟器 replay 时所有帧 `t_ms=0`，去重/时间显示都不对 | 真机日志里 `[T=...ms]` 与 `[RAW] ...` 常常**分成两行**，解析器要"继承上一行的时间戳" |
+| golden 图对不上 | 单独跑 `--selftest` 就 FAIL | 截图必须用**同一套参数**（`--clock/--wallclock/--mycall/--batt/--demo`），建议固化成脚本；少一个参数（如 `--clock`）时间行就会差 |
+| 只验证"能编译" | 改了格式化/字库，功能悄悄坏 | 必须有 golden 校验；本项目把 `snprintf` 换成自写格式化时，就是用"四态 golden + 改动前 HEAD 的 worktree 对照（逐像素 0 差异）"确认行为中性的 |
+
+**给 AI / agent 参与调试的最小约定**
+
+- 串口**只允许一个持有者**：由桥进程独占，agent 通过"写命令文件"发指令、通过桥的 stdout/`-LogFile` 看结果；
+- 固件日志用**固定、可解析**的前缀（本项目：`S=` / `R19=` / `[FRAME]` / `[RTC]` / `[CFG]` / `[I2C]`），
+  这样模型才能逐行读懂状态，而不是靠猜；
+- 每个可调项都要有**回读命令**（`TIME?` / `TRIM?` / `STAT?` / `DUPMS?` / `PING`），形成"发命令 → 回读确认"闭环；
+- 改动类命令要能**一键恢复**（本项目：`AGC=1` 回到自动增益、`DUPMS=2000` 回到默认去重、重发 `TIME=` 复位时间）。
 ## 7. STM32CubeIDE 编译与烧录
 
 1. 打开 `firmware-stm32porject/` 工程（用户手动建的 STM32F103C8Tx 工程）。
