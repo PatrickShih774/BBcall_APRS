@@ -165,7 +165,7 @@ void bk4802_write_reg(uint8_t reg, uint16_t data)
 /* 总线诊断：先释放 SCL/SDA（输入 + 上拉）读空闲电平，再试一次"写地址"看从机 ACK。
  * 用途：I2C 全 0xFFFF 时区分"总线被拉死（scl/sda=0）"和"线是好的但芯片不应答（ack=0）"。
  * 探测本身产生的 NACK 不计进 I2CE（否则每探一次都涨）。 */
-void bk4802_bus_probe(uint8_t *scl, uint8_t *sda, uint8_t *ack)
+void bk4802_bus_probe(uint8_t *scl, uint8_t *sda, uint8_t *ack, uint8_t *scl_rel_pa8)
 {
   GPIO_InitTypeDef g = {0};
   uint16_t saved = s_i2c_err;
@@ -179,6 +179,21 @@ void bk4802_bus_probe(uint8_t *scl, uint8_t *sda, uint8_t *ack)
   hw_delay_us(50);
   if (scl) *scl = (HAL_GPIO_ReadPin(BK4802_I2C_GPIO, BK4802_SCL_PIN) == GPIO_PIN_SET) ? 1u : 0u;
   if (sda) *sda = (HAL_GPIO_ReadPin(BK4802_I2C_GPIO, BK4802_SDA_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+
+  /* 额外测试：把 DIO1(PA8) 也放开，看 SCL 会不会恢复高。
+   * 固件把 PA8 驱动为低，LQFP48 上 PA8/PA9 相邻，连锡时 SCL 会被永久拉低。 */
+  if (scl_rel_pa8) {
+    g.Pin = BK4802_DIO1_PIN;
+    g.Mode = GPIO_MODE_INPUT;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(BK4802_DIO1_GPIO, &g);
+    hw_delay_us(50);
+    *scl_rel_pa8 = (HAL_GPIO_ReadPin(BK4802_I2C_GPIO, BK4802_SCL_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    HAL_GPIO_Init(BK4802_DIO1_GPIO, &g);
+    HAL_GPIO_WritePin(BK4802_DIO1_GPIO, BK4802_DIO1_PIN, GPIO_PIN_RESET);   /* 恢复 DIO1 = 低 */
+  }
 
   /* SCL 恢复推挽输出（与原来用法一致），再试地址 */
   g.Pin = BK4802_SCL_PIN;

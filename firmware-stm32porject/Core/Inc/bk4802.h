@@ -17,5 +17,6 @@ void bk4802_set_if_gain_code(uint8_t code);
 void bk4802_set_rx_audio_mute(uint8_t mute);
 uint8_t bk4802_get_smeter(void);
 /* 总线诊断：返回 scl/sda 释放后的空闲电平（1=高），ack=1 表示从机回了 ACK（芯片是活的） */
-void bk4802_bus_probe(uint8_t *scl, uint8_t *sda, uint8_t *ack);
+/* scl_rel_pa8：临时放开 DIO1(PA8) 后再读的 SCL 电平；=1 说明 SCL 是被 PA8 拉低的（连锡） */
+void bk4802_bus_probe(uint8_t *scl, uint8_t *sda, uint8_t *ack, uint8_t *scl_rel_pa8);
 #endif

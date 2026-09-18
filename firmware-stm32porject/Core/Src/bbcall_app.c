@@ -368,10 +368,11 @@ void bbcall_app_init(void)
     hw_console_puts("\r\n");
     if (rr2 == 0xFFFFu && rr0 == 0xFFFFu && rr1 == 0xFFFFu) {
       /* 重试后还是全 FFFF：打总线电平，区分"线被拉死"和"线好但芯片不应答" */
-      uint8_t ps, pd, pa;
-      bk4802_bus_probe(&ps, &pd, &pa);
+      uint8_t ps, pd, pa, pr8;
+      bk4802_bus_probe(&ps, &pd, &pa, &pr8);
       hw_console_puts("[I2C] no response: scl="); hw_console_u8(ps);
       hw_console_puts(" sda="); hw_console_u8(pd);
+      hw_console_puts(" relPA8="); hw_console_u8(pr8);
       hw_console_puts(" ack="); hw_console_u8(pa);
       hw_console_puts(" (1=high; ack=1 means chip answers)\r\n");
     }
@@ -666,10 +667,11 @@ void bbcall_app_loop(void)
 #endif
     if (new_code != if_code) { if_code = new_code; bk4802_set_if_gain_code(if_code); }
     if (r24 == 0xFFFFu) {   /* 读失败：顺带打总线电平，便于抓"线被拉死/芯片不应答" */
-      uint8_t ps, pd, pa;
-      bk4802_bus_probe(&ps, &pd, &pa);
+      uint8_t ps, pd, pa, pr8;
+      bk4802_bus_probe(&ps, &pd, &pa, &pr8);
       hw_console_puts("[I2C] scl="); hw_console_u8(ps);
       hw_console_puts(" sda="); hw_console_u8(pd);
+      hw_console_puts(" relPA8="); hw_console_u8(pr8);
       hw_console_puts(" ack="); hw_console_u8(pa);
       hw_console_puts("\r\n");
     }
