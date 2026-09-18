@@ -16,4 +16,6 @@ void bk4802_set_if_gain_code(uint8_t code);
 /* 软件静噪：mute=1 关闭接收音频通路并把音量归零，mute=0 恢复 */
 void bk4802_set_rx_audio_mute(uint8_t mute);
 uint8_t bk4802_get_smeter(void);
+/* 总线诊断：返回 scl/sda 释放后的空闲电平（1=高），ack=1 表示从机回了 ACK（芯片是活的） */
+void bk4802_bus_probe(uint8_t *scl, uint8_t *sda, uint8_t *ack);
 #endif

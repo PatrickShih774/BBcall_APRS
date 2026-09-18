@@ -162,6 +162,36 @@ void bk4802_write_reg(uint8_t reg, uint16_t data)
   hw_delay_us(50);
 }
 
+/* 总线诊断：先释放 SCL/SDA（输入 + 上拉）读空闲电平，再试一次"写地址"看从机 ACK。
+ * 用途：I2C 全 0xFFFF 时区分"总线被拉死（scl/sda=0）"和"线是好的但芯片不应答（ack=0）"。
+ * 探测本身产生的 NACK 不计进 I2CE（否则每探一次都涨）。 */
+void bk4802_bus_probe(uint8_t *scl, uint8_t *sda, uint8_t *ack)
+{
+  GPIO_InitTypeDef g = {0};
+  uint16_t saved = s_i2c_err;
+  uint8_t bad;
+
+  g.Pin = (uint32_t)(BK4802_SCL_PIN | BK4802_SDA_PIN);
+  g.Mode = GPIO_MODE_INPUT;
+  g.Pull = GPIO_PULLUP;
+  g.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(BK4802_I2C_GPIO, &g);
+  hw_delay_us(50);
+  if (scl) *scl = (HAL_GPIO_ReadPin(BK4802_I2C_GPIO, BK4802_SCL_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+  if (sda) *sda = (HAL_GPIO_ReadPin(BK4802_I2C_GPIO, BK4802_SDA_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+
+  /* SCL 恢复推挽输出（与原来用法一致），再试地址 */
+  g.Pin = BK4802_SCL_PIN;
+  g.Mode = GPIO_MODE_OUTPUT_PP;
+  g.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BK4802_I2C_GPIO, &g);
+  scl_hi();
+  i2c_start();
+  bad = i2c_byte(BK4802_I2C_ADDR_W);
+  i2c_stop();
+  if (ack) *ack = bad ? 0u : 1u;
+  s_i2c_err = saved;
+}
 uint16_t bk4802_read_reg(uint8_t reg)
 {
   for (uint8_t attempt = 0; attempt < 3u; attempt++) {

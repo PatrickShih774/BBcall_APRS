@@ -366,6 +366,15 @@ void bbcall_app_init(void)
     hw_console_puts(" r1=");
     hw_console_hex16(rr1);
     hw_console_puts("\r\n");
+    if (rr2 == 0xFFFFu && rr0 == 0xFFFFu && rr1 == 0xFFFFu) {
+      /* 重试后还是全 FFFF：打总线电平，区分"线被拉死"和"线好但芯片不应答" */
+      uint8_t ps, pd, pa;
+      bk4802_bus_probe(&ps, &pd, &pa);
+      hw_console_puts("[I2C] no response: scl="); hw_console_u8(ps);
+      hw_console_puts(" sda="); hw_console_u8(pd);
+      hw_console_puts(" ack="); hw_console_u8(pa);
+      hw_console_puts(" (1=high; ack=1 means chip answers)\r\n");
+    }
   }
 
   /* 片内 RTC：优先 LSE(32.768k 晶振)，没有就退到 HSE/128(主板 8MHz 晶振)，最后 LSI；
@@ -656,6 +665,14 @@ void bbcall_app_loop(void)
     (void)can_adjust;   /* 固定增益：不做任何自动调整 */
 #endif
     if (new_code != if_code) { if_code = new_code; bk4802_set_if_gain_code(if_code); }
+    if (r24 == 0xFFFFu) {   /* 读失败：顺带打总线电平，便于抓"线被拉死/芯片不应答" */
+      uint8_t ps, pd, pa;
+      bk4802_bus_probe(&ps, &pd, &pa);
+      hw_console_puts("[I2C] scl="); hw_console_u8(ps);
+      hw_console_puts(" sda="); hw_console_u8(pd);
+      hw_console_puts(" ack="); hw_console_u8(pa);
+      hw_console_puts("\r\n");
+    }
     hw_console_puts("R19=");
     hw_console_u16(bk4802_read_reg(19));
     hw_console_puts(" RSSI=");
