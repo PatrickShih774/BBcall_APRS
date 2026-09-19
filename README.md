@@ -364,6 +364,8 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 | 回放时间戳全为 0 | 模拟器 replay 时所有帧 `t_ms=0`，去重/时间显示都不对 | 真机日志里 `[T=...ms]` 与 `[RAW] ...` 常常**分成两行**，解析器要"继承上一行的时间戳" |
 | golden 图对不上 | 单独跑 `--selftest` 就 FAIL | 截图必须用**同一套参数**（`--clock/--wallclock/--mycall/--batt/--demo`），建议固化成脚本；少一个参数（如 `--clock`）时间行就会差 |
 | 只验证"能编译" | 改了格式化/字库，功能悄悄坏 | 必须有 golden 校验；本项目把 `snprintf` 换成自写格式化时，就是用"四态 golden + 改动前 HEAD 的 worktree 对照（逐像素 0 差异）"确认行为中性的 |
+| 串口桥"发命令没反应" | 命令文件写进去了，设备不回 | 桥有 `-DurationSec` 窗口：**超时退出的桥不会再消费命令文件**（文件会留在原地，别误判成固件死机）。先看桥进程是否还在（stdout 有 `[bridge] ... 已打开`），重开并留足窗口 |
+| 长行导出偶发丢字 | `LOG?` 里出现 `rssi=0 TEST3/...` 这种断行 | 串口刷屏时**采集侧**丢字节（不是 Flash 数据坏）：权威数据在设备里，**再导一次即完整**；导出后先核对行数是否等于 `n=` |
 
 **给 AI / agent 参与调试的最小约定**
 
@@ -372,7 +374,7 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
   这样模型才能逐行读懂状态，而不是靠猜；
 - 每个可调项都要有**回读命令**（`TIME?` / `TRIM?` / `STAT?` / `DUPMS?` / `PING`），形成"发命令 → 回读确认"闭环；
 - 改动类命令要能**一键恢复**（本项目：`AGC=1` 回到自动增益、`DUPMS=2000` 回到默认去重、重发 `TIME=` 复位时间）。
-### 6.5 挂机 10 小时：设备端累计解码日志（`LOG?`，掉电不丢）
+### 6.5 长时间挂机（6~10 小时）：设备端累计解码日志（`LOG?`，掉电不丢）
 
 `INBOX?`（§5.2）只导"当前收件箱里那几条"：上限 16 条、只有屏上那份内容、掉电就没了。
 要"**挂一夜不接串口，最后连一次就能和网络侧包清单对比解码率**"，得让设备自己把每一包写进不挥发存储：
@@ -384,13 +386,13 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 - **写入节流**：只记"新内容"（DUP 不占记录，口径同 `RX=`）；写 Flash 会停机 20~40ms（页擦除），所以记录**先暂存、延后 200ms** 再落盘，避开"一包刚收完又来下一包"的窗口。
 
 ```text
-[LOG] n=13 cap=112 seq_last=13 lost=0 order=old2new
-[LOG] i=1/13 t=2026-09-19 08:12:33 src=BG5BLB-12 rssi=75 snr=20 f=OK h=1A2B info=!3952.49N/12028.55E>有内鬼
+[LOG] n=00009 cap=00182 seq_last=00008 lost=0 order=old2new
+[LOG] i=00009/00009 t=2026-09-19 13:26:49 src=BG5BLH-7 rssi=127 snr=63 f=OK h=6D6F info==2945.58N/12137.26E[BBcall TEST3/A=000022
 ```
 
 | 字段 | 含义 |
 |---|---|
-| `n` / `cap` | 当前有效条数 / 容量上限（112） |
+| `n` / `cap` | 当前有效条数 / 容量上限（**Debug 112 / Release 182**） |
 | `seq_last` | 累计写入条数（16 位回绕）；`lost = seq_last+1-n` = 被挤掉的旧条数，`lost>0` 说明跑太久（加大 `BBCALL_PKTLOG_PAGES` 或缩短观测） |
 | `t=` | RTC 绝对时间；RTC 没对过时退化成 `UP+12345s`（上电秒数） |
 | `src=` | 呼号-SSID |
@@ -413,7 +415,15 @@ python tools\aprs_log_report.py aprs_10h.log --mode log --ref 网络包清单.tx
 ```
 
 掉电/复位安全：开机扫描最大序号续写，**半条记录（`seq` 未写成）会被忽略**；想清空重记发 `LOG0`。
-实现细节与验证见 [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md) §26。
+
+**已实测（2026-09-19，板子实测）**
+
+- Release 版开机行：`[LOG] init pages=013 record=72B cap=00182 n=00009 seq_last=00008 base=0800CC00`；
+- **烧录不清日志**：Debug 与 Release 两种布局来回烧，9 条记录照样读出来（`_image_end` 两者都是页对齐的，page 序虽不同但按 seq 排序导出）；
+- `TIME=` 对时（`[RTC] set ...`）、`LOG0` 清空（`[LOG] erased n=00009 -> 0`）、`LOG?` 导出都在串口桥上跑通过；
+- 6 小时全覆盖建议烧 **Release（182 条）**，Debug 只有 112 条；导出头行的 `lost=` 会如实报被覆盖的条数。
+
+实现细节与验证见 [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md) §26 / §28。
 
 ## 7. STM32CubeIDE 编译与烧录
 
