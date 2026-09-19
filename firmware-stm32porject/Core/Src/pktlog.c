@@ -9,7 +9,7 @@
 #include "bbcall_cfg.h"
 #else
 #ifndef BBCALL_PKTLOG_PAGES
-#define BBCALL_PKTLOG_PAGES 8u      /* 主机回归：默认 8 页，与 bbcall_cfg.h 一致 */
+#define BBCALL_PKTLOG_PAGES 16u     /* 主机回归：页数上限，与 bbcall_cfg.h 一致 */
 #endif
 #endif
 #include "bbcall_hw.h"
@@ -22,25 +22,33 @@
 uint16_t pktlog_host_rd16(uint32_t addr);
 uint8_t  pktlog_host_program(uint32_t addr, uint16_t val);
 void     pktlog_host_erase(uint32_t addr);
+#ifndef PKTLOG_HOST_BASE
+#define PKTLOG_HOST_BASE 0x0800E000u    /* 主机回归：内存数组里日志区的起点 */
+#endif
+#ifndef PKTLOG_HOST_PAGES
+#define PKTLOG_HOST_PAGES 8u            /* 主机回归：8 页 = 112 条 */
+#endif
 #endif
 
 #define PKTLOG_PAGE_BYTES     1024u
 #define PKTLOG_SLOT_BYTES     72u
 #define PKTLOG_WORDS          (PKTLOG_SLOT_BYTES / 2u)                    /* 36 个半字 */
 #define PKTLOG_SLOTS_PER_PAGE (PKTLOG_PAGE_BYTES / PKTLOG_SLOT_BYTES)     /* 14 槽/页 */
-#define PKTLOG_CAP            ((uint16_t)(BBCALL_PKTLOG_PAGES * PKTLOG_SLOTS_PER_PAGE))
 
 #define PKTLOG_FLASH_TOP 0x08010000u                                      /* STM32F103C8 = 64KB Flash */
-#define PKTLOG_BASE      (PKTLOG_FLASH_TOP - ((uint32_t)BBCALL_PKTLOG_PAGES * PKTLOG_PAGE_BYTES))
 
 #define PKTLOG_MAGIC 0x5Au
 #define PKTLOG_EMPTY 0xFFFFu
 
-#if BBCALL_PKTLOG_PAGES > 8u
-#error "BBCALL_PKTLOG_PAGES > 8: STM32F103C8TX_FLASH.ld 只预留 8KB，改这里必须同步改 .ld 的 FLASH LENGTH"
-#endif
+/* 日志区放在**固件映像之后**（链接脚本导出 _image_end），不再从尾部硬扣固定 8KB：
+ * 容量 = 剩余页数（上限 BBCALL_PKTLOG_PAGES），于是固件变大时日志自动缩小，
+ * Release(-Os) 比 Debug(-Og) 能多存上百条；也免掉了"改 PAGES 必须同步改 .ld"的坑。
+ * 约束：日志区必须落在固件映像之后，所以 _image_end 的取值由链接脚本保证（见 .ld 注释）。 */
 
 static uint8_t  s_ready;      /* pktlog_init 完成后才允许写 */
+static uint32_t s_base;       /* 日志区起始地址（init 时按 _image_end 之后第一页算） */
+static uint16_t s_pages;      /* 日志区页数 */
+static uint16_t s_cap;        /* 容量 = s_pages x 14 条 */
 static uint16_t s_count;      /* 当前有效记录数 */
 static uint16_t s_seq_next;   /* 下一条的序号 = 累计写入条数（16bit 回绕） */
 static uint16_t s_page;       /* 当前写入页 */
@@ -57,7 +65,7 @@ static uint16_t rd16(uint32_t addr)
 
 static uint32_t slot_addr_of(uint16_t page, uint16_t slot)
 {
-  return PKTLOG_BASE + ((uint32_t)page * PKTLOG_PAGE_BYTES) + ((uint32_t)slot * PKTLOG_SLOT_BYTES);
+  return s_base + ((uint32_t)page * PKTLOG_PAGE_BYTES) + ((uint32_t)slot * PKTLOG_SLOT_BYTES);
 }
 
 /* 线性下标 -> Flash 地址：槽不跨页，所以必须按"页 x 1024 + 槽 x 72"换算（不能拿 72 直接乘下标） */
@@ -128,14 +136,14 @@ static uint8_t flash_program_half(uint32_t addr, uint16_t val)
 static uint8_t page_erase(uint16_t page)
 {
 #ifdef PKTLOG_HOST
-  pktlog_host_erase(PKTLOG_BASE + ((uint32_t)page * PKTLOG_PAGE_BYTES));
+  pktlog_host_erase(s_base + ((uint32_t)page * PKTLOG_PAGE_BYTES));
   return 1u;
 #else
   FLASH_EraseInitTypeDef ei;
   uint32_t page_err = 0u;
   HAL_StatusTypeDef st;
   ei.TypeErase   = FLASH_TYPEERASE_PAGES;
-  ei.PageAddress = PKTLOG_BASE + ((uint32_t)page * PKTLOG_PAGE_BYTES);
+  ei.PageAddress = s_base + ((uint32_t)page * PKTLOG_PAGE_BYTES);
   ei.NbPages     = 1u;
   flash_unlock();
   st = HAL_FLASHEx_Erase(&ei, &page_err);
@@ -210,7 +218,23 @@ void pktlog_init(void)
 
   s_ready = 0u; s_count = 0u; s_seq_next = 0u; s_page = 0u; s_slot = 0u;
 
-  for (uint16_t idx = 0u; idx < PKTLOG_CAP; idx++) {
+#ifdef PKTLOG_HOST
+  s_base  = PKTLOG_HOST_BASE;                       /* 主机回归：内存数组里的固定区间 */
+  s_pages = PKTLOG_HOST_PAGES;
+#else
+  {
+    extern uint32_t _image_end;                     /* 链接脚本导出：固件映像在 Flash 里的结束地址 */
+    uint32_t base  = ((uint32_t)&_image_end + (PKTLOG_PAGE_BYTES - 1u)) & ~(PKTLOG_PAGE_BYTES - 1u);
+    uint32_t pages = (PKTLOG_FLASH_TOP - base) / PKTLOG_PAGE_BYTES;
+    if (pages > (uint32_t)BBCALL_PKTLOG_PAGES) pages = (uint32_t)BBCALL_PKTLOG_PAGES;
+    s_base  = base;
+    s_pages = (uint16_t)pages;
+  }
+#endif
+  s_cap = (uint16_t)(s_pages * PKTLOG_SLOTS_PER_PAGE);
+  if (s_cap == 0u) return;                          /* 没有剩余页：日志功能停用（正常固件不会走到这） */
+
+  for (uint16_t idx = 0u; idx < s_cap; idx++) {
     uint16_t seq;
     if (!slot_probe(idx_addr(idx), &seq)) continue;
     n++;
@@ -250,7 +274,7 @@ uint8_t pktlog_append(const pktlog_rec_t *r)
 
   if (s_slot >= PKTLOG_SLOTS_PER_PAGE) {
     /* 当前页写满：前进一页，擦掉的这一页装的是最旧数据 */
-    uint16_t nxt = (uint16_t)((s_page + 1u) % BBCALL_PKTLOG_PAGES);
+    uint16_t nxt = (uint16_t)((s_page + 1u) % s_pages);
     uint16_t old = page_valid_count(nxt);
     if (!page_erase(nxt)) return 0u;
     s_page = nxt;
@@ -273,13 +297,15 @@ uint8_t pktlog_append(const pktlog_rec_t *r)
 
   if (!ok) return 0u;
   s_slot++;
-  if (s_count < PKTLOG_CAP) s_count++;
+  if (s_count < s_cap) s_count++;
   s_seq_next++;
   return 1u;
 }
 
 uint16_t pktlog_count(void)     { return s_count; }
-uint16_t pktlog_capacity(void)  { return PKTLOG_CAP; }
+uint16_t pktlog_capacity(void)  { return s_cap; }
+uint16_t pktlog_pages(void)     { return s_pages; }
+uint32_t pktlog_base(void)      { return s_base; }
 uint16_t pktlog_seq_last(void)  { return s_seq_next ? (uint16_t)(s_seq_next - 1u) : 0u; }
 
 static void dump_item(uint16_t i, uint16_t n, const pktlog_rec_t *r)
@@ -333,7 +359,7 @@ void pktlog_dump(void)
   lost = ((uint32_t)s_seq_next >= (uint32_t)n) ? ((uint32_t)s_seq_next - (uint32_t)n) : 0u;
 
   hw_console_puts("[LOG] n=");   hw_console_u16(n);
-  hw_console_puts(" cap=");      hw_console_u16(PKTLOG_CAP);
+  hw_console_puts(" cap=");      hw_console_u16(s_cap);
   hw_console_puts(" seq_last="); hw_console_u16(seq_last);
   hw_console_puts(" lost=");     hw_console_u32(lost);
   hw_console_puts(" order=old2new\r\n");
@@ -342,7 +368,7 @@ void pktlog_dump(void)
   for (uint16_t k = 0u; k < n; k++) {
     uint16_t want = (uint16_t)(oldest + k);
     pktlog_rec_t rec;
-    for (uint16_t idx = 0u; idx < PKTLOG_CAP; idx++) {
+    for (uint16_t idx = 0u; idx < s_cap; idx++) {
       uint16_t seq;
       if (!slot_probe(idx_addr(idx), &seq) || seq != want) continue;
       if (rec_load(idx, &rec)) dump_item((uint16_t)(k + 1u), n, &rec);
@@ -356,7 +382,7 @@ void pktlog_clear(void)
 {
   uint16_t old_n = s_count;
   if (!s_ready) return;
-  for (uint16_t p = 0u; p < (uint16_t)BBCALL_PKTLOG_PAGES; p++) (void)page_erase(p);
+  for (uint16_t p = 0u; p < s_pages; p++) (void)page_erase(p);
   s_count = 0u; s_seq_next = 0u; s_page = 0u; s_slot = 0u;
   hw_console_puts("[LOG] erased n="); hw_console_u16(old_n);
   hw_console_puts(" -> 0\r\n");

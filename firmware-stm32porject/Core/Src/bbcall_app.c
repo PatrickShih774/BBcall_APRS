@@ -595,12 +595,12 @@ void bbcall_app_init(void)
 
   /* 设备端解码日志：扫描 Flash 尾部环形区（掉电/复位都不丢），打印已有条数 */
   pktlog_init();
-  hw_console_puts("[LOG] init pages="); hw_console_u8((uint8_t)BBCALL_PKTLOG_PAGES);
+  hw_console_puts("[LOG] init pages="); hw_console_u8((uint8_t)pktlog_pages());   /* 实际页数：固件映像之后到 Flash 末尾 */
   hw_console_puts(" record=72B cap=");  hw_console_u16(pktlog_capacity());
   hw_console_puts(" n=");               hw_console_u16(pktlog_count());
   hw_console_puts(" seq_last=");        hw_console_u16(pktlog_seq_last());
   hw_console_puts(" base=0800");
-  hw_console_hex16((uint16_t)(0x08010000u - ((uint32_t)BBCALL_PKTLOG_PAGES * 1024u)));
+  hw_console_hex16((uint16_t)(pktlog_base() & 0xFFFFu));
   hw_console_puts("\r\n");
 
 #if BBCALL_LCD_ENABLED

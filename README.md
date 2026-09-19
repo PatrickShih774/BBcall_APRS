@@ -229,9 +229,9 @@ powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
 | `LOG0` | 清空累计日志（重记），用于"本次观测从 0 开始" |
 | `TIME=` / `TIME?` / `TRIM=` | 对时与走时校准（见 §5.1） |
 
-**注意 Flash 预算**：带调参命令 + 设备端日志（`pktlog`，占 8KB）的固件，现在是
-`Debug`(-Og) `text=56204`（余 1.1KB）、`Release`(-Os) `text=51520`（余 5.6KB）。
-Debug 余量已经很紧：加新功能前先看 [§7](#7-stm32cubeide-编译与烧录) 的余量表，或把 `bbcall_cfg.h` 的 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）。
+**注意 Flash 预算**：现在是 `Debug`(-Og) `text=56384`、`Release`(-Os) `text=51696`；
+**日志区不再从尾部硬扣**（见 §6.5）：它跟在固件映像之后，容量自动 = 剩余页数，固件变大时日志自动变小，永远不会和固件区重叠。
+Debug 余量仍旧很紧：加新功能前先看 [§7](#7-stm32cubeide-编译与烧录) 的余量表，或把 `bbcall_cfg.h` 的 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）。
 
 ---
 
@@ -377,8 +377,10 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 `INBOX?`（§5.2）只导"当前收件箱里那几条"：上限 16 条、只有屏上那份内容、掉电就没了。
 要"**挂一夜不接串口，最后连一次就能和网络侧包清单对比解码率**"，得让设备自己把每一包写进不挥发存储：
 
-- **存储**：STM32F103C8 内部 Flash 的**最后 8KB** 当环形日志区（`pktlog.c`）；1KB 一页 = 14 槽，每槽 72 字节，**容量上限 112 条**（页擦除粒度决定实际在 99~112 之间：刚擦完一页 99 条、写满当前页 112 条）；
-- **固件区收窄**：链接脚本 `FLASH LENGTH = 64K - PAGES*1K`（现在 56K）：改 `BBCALL_PKTLOG_PAGES` 必须同步改 `.ld`；
+- **存储**：内部 Flash 的**固件映像之后到 Flash 末尾**全给环形日志（`pktlog.c`）；1KB 一页 = 14 槽，每槽 72 字节。
+  日志区起点来自链接脚本导出的 `_image_end`（**跟着固件大小走**），页数上限由 `BBCALL_PKTLOG_PAGES` 限定（默认 16）：
+  **Debug(-Og) 8 页 = 112 条；Release(-Os) 13 页 = 182 条**（页擦除粒度会让实际条数比上限少最多 13 条，`n=` 如实报）；
+- **不用再改链接脚本**：早期版本从 Flash 尾部硬扣 8KB、改页数必须同步改 `.ld`；现在 `.ld` 放开 64KB、容量自动算（验证方法：`_image_end` 与 `objcopy` 出来的 `.bin` 大小逐字节吻合）；
 - **写入节流**：只记"新内容"（DUP 不占记录，口径同 `RX=`）；写 Flash 会停机 20~40ms（页擦除），所以记录**先暂存、延后 200ms** 再落盘，避开"一包刚收完又来下一包"的窗口。
 
 ```text
@@ -421,8 +423,8 @@ python tools\aprs_log_report.py aprs_10h.log --mode log --ref 网络包清单.tx
 3. Build（0 错误即可）。
 4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出；
 5. **构建配置**：`Debug` 现在用 **`-Og`**（工程 `.cproject` 已改）：保留调试信息的优化档，比 -O0 小 12.8KB，
-   工具栏直接选 Debug 就能烧（含 `pktlog` 8KB 后 `text=56204 / data=56 / bss=19600`，**余 1.1KB**）；`Release` 仍是 `-Os`（`text=51520 / data=52 / bss=19568`，余约 **5.7KB**）。
-   注意 **8KB 已留给设备端日志**（`BBCALL_PKTLOG_PAGES=8`）：改这个值时链接脚本 `STM32F103C8TX_FLASH.ld` 的 `FLASH LENGTH = 64K - PAGES*1K` 必须同步改，否则日志区会和固件区重叠。
+   工具栏直接选 Debug 就能烧（`text=56384 / data=56 / bss=19608`）；`Release` 仍是 `-Os`（`text=51696 / data=52 / bss=19576`，余约 **5.6KB**）。
+   注意**几小时无人值守的长跑建议烧 Release**：日志区跟在固件映像之后，`Release` 能拿 13 页 = **182 条**，`Debug` 只有 8 页 = 112 条。
    加新功能前先看余量：Debug 快满时把 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）或改用 Release；
    另外固件已不用 newlib printf/malloc（见 [DEBUG_LOG §23](docs/DEBUG_LOG.md#23-代码内存优化去掉-newlib-printf让-debug-o0-也能装下2026-09-19)），别再引入 `printf/snprintf/malloc`。
 6. **Release 配置不产出 `.hex`**（只有 elf/list/map）：用 `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或在 CubeIDE 里直接 Run（烧 elf）。

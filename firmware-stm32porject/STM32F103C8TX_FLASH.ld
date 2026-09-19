@@ -45,9 +45,10 @@ _Min_Stack_Size = 0x600; /* required amount of stack：实测最大单帧 576B�
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 20K
-  /* 尾部 8KB（0x0800E000..0x0800FFFF）留给设备端解码日志 pktlog（见 bbcall_cfg.h 的
-   * BBCALL_PKTLOG_PAGES=8）。改 PAGES 时这里必须同步：LENGTH = 64K - PAGES*1K。 */
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 56K
+  /* Flash 全部 64KB 开放给固件：设备端解码日志区不再从尾部硬扣，而是放在固件映像之后
+   * （符号 _image_end，见 Core/Src/pktlog.c）：容量随固件大小自适应，
+   * 改 bbcall_cfg.h 的 BBCALL_PKTLOG_PAGES（页数上限）不需要再改本文件。 */
+  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 64K
 }
 
 /* Sections */
@@ -150,6 +151,12 @@ SECTIONS
     _edata = .;        /* define a global symbol at data end */
 
   } >RAM AT> FLASH
+
+  /* 固件映像在 Flash 里的结束地址：pktlog.c 从它的下一页开始放设备端解码日志。
+   * .data 的 LMA（_sidata）是落在 Flash 里的最后一段内容，其后没有别的带 LMA 的段，
+   * 所以 "LOADADDR(.data) + SIZEOF(.data)" 就是映像的 Flash 末尾（可与 objcopy 出来的
+   * .bin 文件大小互相校验）。 */
+  _image_end = LOADADDR(.data) + SIZEOF(.data);
 
   /* Uninitialized data section into "RAM" Ram type memory */
   . = ALIGN(4);

@@ -1097,3 +1097,32 @@ Debug 余量已经很紧；再加功能前先看这里的余量表，或把 `BBC
   **五态 golden（idle / unread / inbox / inbox2 / inbox_read）全部通过**（退出码 0）；
 - 证据截图：`docs/logs/idle_unread_ratio.png`（模拟器自检输出，512x256 = 4 倍放大）；
 - 固件尺寸：Debug(-Og) `text=56224 / data=56 / bss=19600`（Flash 余 1064 B）、Release(-Os) `text=51540`（余 5752 B）。
+## 28. 解码日志区改成"跟着固件走"：Release 能存 182 条（2026-09-19）
+
+v0.10 的日志区是从 Flash 尾部**硬扣 8KB**（链接脚本 `FLASH LENGTH = 56K`）：容量 112 条，
+按常见流量跑 6 小时会绕圈；而且"改 `BBCALL_PKTLOG_PAGES` 必须同步改 `.ld`"是个容易踩的坑。
+
+改法：
+
+- 链接脚本放开 64KB（`FLASH LENGTH = 64K`），新增符号
+  `_image_end = LOADADDR(.data) + SIZEOF(.data)`（固件映像在 Flash 里的真实结束地址；
+  `.data` 的 LMA 是最后一个落在 Flash 里的段）；
+- `pktlog.c` 的 `pktlog_init()` 现场算日志区：起点 = `_image_end` 上取整到 1KB 页，
+  页数 = 到 Flash 末尾的剩余页数，上限 = `BBCALL_PKTLOG_PAGES`（默认 16，语义从"固定页数"变成"页数上限"）；
+- 开机行与导出头行打**实际值**（例：`[LOG] init pages=013 record=72B cap=00182 ... base=0800CC00`），
+  一眼能看出这块固件到底能存多少条；
+- 主机回归（`PKTLOG_HOST`）仍固定用 `0x0800E000 / 8 页`，8 个用例行为不变（回绕 300 条那组就是 8 页模型）。
+
+实测（同一份源码的两个配置）：
+
+| 配置 | text | `_image_end` | 日志区 base | 页数 | 容量上限 |
+|---|---|---|---|---|---|
+| Debug(-Og) | 56384 | 0x0800DC78 | 0x0800E000 | 8 | 112 条 |
+| Release(-Os) | 51696 | 0x0800CA24 | 0x0800CC00 | 13 | **182 条** |
+
+验证：
+
+- `_image_end` 与 `objcopy -O binary` 出来的 `.bin` 大小**逐字节吻合**（Debug 56440 B、Release 51748 B）
+  → 符号算得对，日志区不会压到固件映像上；
+- 主机回归 8 用例全过；
+- 附带好处：以后固件变大，日志区自动缩小，**永远不会和固件区重叠**（旧方案必须人工同步两处）。

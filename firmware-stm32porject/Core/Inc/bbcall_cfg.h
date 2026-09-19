@@ -117,16 +117,17 @@
 #define KEY_PWR_PIN        GPIO_PIN_2
 #define KEY_PTT_GPIO       GPIOA
 #define KEY_PTT_PIN        GPIO_PIN_4
-/* ---------- 解码日志（内部 Flash 环形缓冲） ----------
- * 把每次"新内容解出"的帧记进 Flash 尾部，掉电不丢，10 小时无人值守后连一次串口
- * 用 `LOG?` 一次性导出，和网络侧包清单对比算解码率（tools/aprs_log_report.py）。
- * 布局：1KB 一页、每页 14 条（每条 72 字节）→ 容量上限 = PAGES×14 条
- *       （页擦除粒度决定实际条数在 99~112 之间：刚擦完一页 99、写满当前页 112）。
- * 注意：这块会从固件可用 Flash 里扣掉（链接脚本 STM32F103C8TX_FLASH.ld 的 FLASH 已按
- *       64KB-PAGES×1KB 收窄到 56K）→ 改 PAGES 必须同步改 .ld，否则日志区与固件区重叠。
- *       实测 Debug(-Og) 含本模块 text=56204（限 57344，余 1084 B）、Release(-Os) text=51520（余 5772 B）。 */
+/* ---------- 解码日志（内部 Flash 环形缓冲，2026-09-19 改成"跟着固件走"） ----------
+ * 把每次"新内容解出"的帧记进 Flash，掉电不丢；长时间无人值守后连一次串口
+ * 用 `LOG?` 一次性导出（含时间戳/RSSI/SNR/正文），和网络侧包清单对比算解码率
+ * （tools/aprs_log_report.py --mode log）。
+ * 布局：1KB 一页、每页 14 条（每条 72 字节），**日志区跟在固件映像之后**（链接脚本导出
+ *       _image_end），页数 = 剩余 Flash 页数，上限 = 本宏。所以固件越大日志越小，
+ *       Release(-Os) 比 Debug(-Og) 多存上百条；改本宏不再需要同步改 .ld。
+ * 实测（2026-09-19）：Debug(-Og) 映像 56.2KB → 9 页（上限 126 条）；Release(-Os) 51.5KB → 13 页（上限 182 条）。
+ * 页擦除粒度决定实际条数比上限少最多 13 条（刚擦完一页时最少）。 */
 #ifndef BBCALL_PKTLOG_PAGES
-#define BBCALL_PKTLOG_PAGES 8u
+#define BBCALL_PKTLOG_PAGES 16u
 #endif
 
 /* ---------- 每帧详细解析打印（[MICE]/[POS]/[MSG] 行） ----------

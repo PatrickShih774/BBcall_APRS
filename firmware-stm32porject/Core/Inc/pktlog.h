@@ -16,7 +16,9 @@
  *   18   1    ssid
  *   19   1    magic = 0x5A（把"旧固件残留在本区的字节"挡在门外）
  *   20   52   info（正文，超出 PKTLOG_INFO_MAX 截断）
- * 环形写入：当前页写满后擦下一页（那一页装的是最旧数据）。容量 = PAGES x 14 条。 */
+ * 环形写入：当前页写满后擦下一页（那一页装的是最旧数据）。
+ * 日志区位置：**固件映像之后**（链接脚本导出 _image_end）到 Flash 末尾；页数 = 剩余页数，
+ * 上限由 bbcall_cfg.h 的 BBCALL_PKTLOG_PAGES 决定（实测 Debug 约 9 页、Release 约 13 页）。 */
 #ifndef PKTLOG_H
 #define PKTLOG_H
 
@@ -40,7 +42,9 @@ typedef struct {
 void     pktlog_init(void);                    /* 上电扫描（不擦除有效记录） */
 uint8_t  pktlog_append(const pktlog_rec_t *r); /* 追加一条（满则擦掉最旧一页）；1 = 成功 */
 uint16_t pktlog_count(void);                   /* 当前有效记录数 */
-uint16_t pktlog_capacity(void);                /* 容量 = PAGES x 14 */
+uint16_t pktlog_capacity(void);                /* 容量 = 实际页数 x 14 条 */
+uint16_t pktlog_pages(void);                   /* 实际页数（日志区跟在固件映像之后算出来的） */
+uint32_t pktlog_base(void);                    /* 日志区起始地址（开机行 base= 就是它） */
 uint16_t pktlog_seq_last(void);                /* 最后一条的序号（= 累计写入条数-1；16bit 会回绕） */
 void     pktlog_dump(void);                    /* 串口打印（旧 -> 新，格式见 DEBUG_LOG.md） */
 void     pktlog_clear(void);                   /* 擦除整个日志区并复位序号 */
