@@ -946,3 +946,48 @@ powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
   `收件箱 16 条（未读 16，满箱丢弃未读 2）/ 累计收到 18 帧（重复抑制 0）`，与上限、未读计数一致；
   模拟器输出也新增了"满箱丢弃未读"字段，方便以后回归；
 - 构建：Debug(-Og) `text=51932`、Release(-Os) `text=47772`，均 0 错误 0 警告。
+
+## 25. 导出解出的包、与参考清单对比算解码率（2026-09-19）
+
+用户要"看具体解了哪几条、能导出与网络上的包对比，分析解码率"。做了两件：
+
+### 25.1 固件：`INBOX?` 命令（导出收件箱）
+
+`ui_harness.c` 新增 `ui_get_item(idx, ui_item_view_t*)`（把第 idx 条的可打印视图拷出来，含已格式化的 `HH:MM:SS`）；
+`bbcall_app.c` 新增串口命令：
+
+```text
+[INBOX] n=13 unread=0 dropn=0
+[INBOX] i=1/13 t=14:25:58 src=BG5BLB dst=APRS path=- rssi=-92 snr=12 f=OK r=1 h=3F2A info=有内鬼 停止交易
+...
+```
+
+字段：`i=n/N` 序号（1 = 最新）、`t` 时刻、`src/dst/path`、`rssi/snr`（无采样为 `--`）、
+`f=OK/FIX/REP`、`r=0/1` 已读、`h=` 整帧哈希（与去重同一个算法）、`info=` 正文。
+体积代价：Debug(-Og) 后 `text=52688 / bss=19472`（余约 2.8KB），Release `text=48520`。
+
+### 25.2 主机：`tools/aprs_log_report.py`（导出 + 对比）
+
+```powershell
+# 1) 抓日志（同时可发 INBOX? 把屏上那几条也导出）
+powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5 -LogFile test.log
+"INBOX?" | Out-File -Encoding ascii "$env:TEMP\bbcall_tx.txt"
+
+# 2) 出报告
+python tools\aprs_log_report.py test.log --mode inbox --ref 网络包清单.txt --out 报告.md
+python tools\aprs_log_report.py test.log --ref 网络包清单.txt        # 用 [FRAME]/[DUP] 统计（含"发射聚簇"次数）
+```
+
+- 参考清单每行一个包：直接写 info 内容，或 `呼号|内容`（`#` 开头忽略）；
+- 报告含：解码事件数 / 唯一包数 / 台站 / FIX/REP / **按时间聚簇的"发射次数"**，
+  以及与参考清单的 `命中/漏/多` 和 **解码率 = 命中/参考**；
+- 本仓库自测：`docs/logs/decode_test_20260919.log` -> 事件 57（FRAME 7 + DUP 50）、聚簇 **19 次**、唯一包 **7** 个，
+  与当时手工统计完全一致；`INBOX?` 样例 -> `2/3 = 66.7%`（含漏包与多余包清单）。
+
+### 25.3 典型用法（解码率分析）
+
+1. 让设备持续接收（串口桥挂着，日志落盘）；
+2. 用网络侧（APRS-IS / 另一台接收机）导出"对方实际发了哪些包"，存成参考清单；
+3. 跑 `aprs_log_report.py <日志> --ref <参考清单> --out 报告.md`，得到"命中/漏/多 + 解码率"；
+4. 要核对**屏幕上的那 13 条**，先发 `INBOX?`，再用 `--mode inbox`（两种口径可以互相印证：
+   `[FRAME]` 口径含历史全部解出，`INBOX?` 口径是当前收件箱里的条目）。

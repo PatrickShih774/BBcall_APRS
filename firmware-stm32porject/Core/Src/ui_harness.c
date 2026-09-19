@@ -806,6 +806,28 @@ void ui_set_dedup_ms(uint32_t ms) { s_dedup_ms = ms; }
 uint16_t ui_inbox_count(void) { return s_count; }
 uint16_t ui_unread_count(void) { return s_unread; }
 uint16_t ui_unread_dropped(void) { return s_unread_dropped; }   /* 满箱被迫丢掉的未读条数 */
+
+/* 串口导出：把第 idx 条（0 = 最新）拷进调用方给的视图里（含格式化好的 HH:MM:SS）。 */
+uint8_t ui_get_item(uint8_t idx, ui_item_view_t *out)
+{
+  const ui_item_t *it;
+  if (!out || idx >= s_count) return 0u;
+  it = &s_box[idx];
+  fmt_hhmmss(it->rx_ms, out->time, (uint8_t)sizeof(out->time));
+  memcpy(out->src, it->src, sizeof(out->src));
+  memcpy(out->dst, it->dst, sizeof(out->dst));
+  memcpy(out->path, it->path, sizeof(out->path));
+  memcpy(out->body, it->body, sizeof(out->body));
+  out->hash    = it->hash;
+  out->rssi    = it->rssi;
+  out->snr     = it->snr;
+  out->have_rf = it->have_rf;
+  out->fixed   = it->fixed;
+  out->repeat  = it->repeat;
+  out->read    = it->read;
+  out->kind    = it->kind;
+  return 1u;
+}
 uint16_t ui_rx_total(void) { return s_rx_total; }
 uint16_t ui_dup_total(void) { return s_dup_total; }
 uint32_t ui_clock_ms(void) { return s_now_ms; }

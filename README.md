@@ -224,6 +224,7 @@ powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
 | `MUTE=<0/1>` | 接收音频断/通 |
 | `PING` | 探活，回 `[CFG] pong` |
 | `DUPMS=<ms>` / `DUPMS?` | 重复包去重窗口：**默认 2000ms**（只合并同一次发射的多路冗余）；设 0 关闭去重 |
+| `INBOX?` | 把收件箱逐条导出（`[INBOX] i=n/N t=HH:MM:SS src=.. dst=.. path=.. rssi=.. snr=.. f=OK/FIX/REP r=0/1 h=哈希 info=正文`），配合 `tools/aprs_log_report.py` 做解码率对比 |
 | `TIME=` / `TIME?` / `TRIM=` | 对时与走时校准（见 §5.1） |
 
 **注意 Flash 预算**：这套命令约 2KB，`Debug` 配置（`-O0`）会超出 64KB（溢出 1484 字节），
@@ -329,6 +330,7 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 |---|---|---|---|
 | `simulator/`（SDL2 + TinyCC） | 不烧板子就能看 UI / 跑协议链路：把**固件源码**直接编成 PC 程序 | SDL2 头/库、TinyCC（都可放 `third_party/`，不入库） | ① 写一层 `sim_hal.c` 提供 `HAL_*`/GPIO/SPI/延时 stub；② 在 `build_win.ps1` / `CMakeLists.txt` 里换成你的源文件清单；③ 保留 `--selftest --out x.bmp` 这类"一条命令出一张图"的入口 |
 | `tools/verify_ui.py` | 屏幕内容**逐像素**校验（字模模板匹配，自动判定正/反显） | 纯 Python 标准库 | 把字模表导出成页面/JSON，并按 `SPEC` 列出每个屏的期望文本与坐标 |
+| `tools/aprs_log_report.py` | 从串口日志/`INBOX?` 导出"解了哪些包"，并与参考清单对比算解码率 | 纯 Python 标准库 | 参考清单每行一个包（info 内容或 `呼号\|内容`） |
 | `tools/serial_bridge.ps1` | 让脚本 / AI **独占串口**：实时打日志 + 从"命令文件"发命令 | Windows PowerShell 5.1（.NET SerialPort，免安装） | 只改 `-Port`；命令文件路径已参数化 |
 | 纯模块主机自测（`tools/test_rtc_math.c` 模式） | 把不碰寄存器的逻辑（日期换算、协议编解码）拉到 PC 上单测 | TinyCC 或任意 C 编译器 | 把纯逻辑单独成文件（本项目 `rtc_math.c`），测试文件直接 `#include` 它 |
 | 回归素材生成（`tools/gen_afsk_wav.py` + `tools/regression_baud.ps1`） | 造可控输入（频偏 / 噪声 / 变长帧）批量回归 | Python | 换成你自己的信号生成器；关键是"素材参数化 + 结果打印帧数/路径数" |

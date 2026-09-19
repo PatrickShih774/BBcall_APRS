@@ -53,6 +53,22 @@ void     ui_set_dedup_ms(uint32_t ms);       /* 重复包去重窗口：只合�
 uint16_t ui_inbox_count(void);
 uint16_t ui_unread_count(void);
 uint16_t ui_unread_dropped(void);   /* 满箱且全为未读时被迫丢掉的未读条数（诊断） */
+
+/* 串口导出用：一条消息的"可打印视图"（由 ui_get_item() 填充；含已格式化的 HH:MM:SS） */
+typedef struct {
+  char     time[10];      /* HH:MM:SS（按设备时钟折算） */
+  char     src[12];       /* 呼号 + -SSID */
+  char     dst[10];
+  char     path[22];
+  char     body[64];      /* 正文：与 UI_BODY_MAX 一致（超长消息在入箱时已被截断） */
+  uint16_t hash;          /* 整帧哈希（与去重用的同一个） */
+  int16_t  rssi, snr;
+  uint8_t  have_rf;       /* 0 = 本帧没有 RSSI/SNR 采样 */
+  uint8_t  fixed, repeat, read, kind;
+} ui_item_view_t;
+
+/* idx: 0 = 最新。返回 1 = 成功填充；0 = 越界 */
+uint8_t  ui_get_item(uint8_t idx, ui_item_view_t *out);
 uint16_t ui_rx_total(void);
 uint16_t ui_dup_total(void);
 uint8_t  ui_current_screen(void); /* 状态机当前页：UI_SCREEN_IDLE/UNREAD/INBOX */

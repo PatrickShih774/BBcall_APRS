@@ -144,7 +144,32 @@ static void console_cmd_apply(const char *line)
   }
 #if BBCALL_TUNE_CMDS
   if (strncmp(s, "PING", 4u) == 0) { hw_console_puts("[CFG] pong\r\n"); return; }
-  if (strncmp(s, "DUPMS?", 6u) == 0) {
+  if (strncmp(s, "INBOX?", 6u) == 0) {
+    /* 导出收件箱：一行摘要 + 每条一行（机器可解析，配合 tools/aprs_log_report.py 做解码率对比）。
+     * 用静态视图避免占主循环栈（这个命令很少用）。 */
+    static ui_item_view_t iv;
+    uint16_t nn = ui_inbox_count();
+    hw_console_puts("[INBOX] n=");  hw_console_u8((uint8_t)nn);
+    hw_console_puts(" unread=");    hw_console_u8((uint8_t)ui_unread_count());
+    hw_console_puts(" dropn=");     hw_console_u8((uint8_t)ui_unread_dropped());
+    hw_console_puts("\r\n");
+    for (uint8_t i = 0u; i < (uint8_t)nn; i++) {
+      if (!ui_get_item(i, &iv)) break;
+      hw_console_puts("[INBOX] i="); hw_console_u8((uint8_t)(i + 1u)); hw_console_putc('/'); hw_console_u8((uint8_t)nn);
+      hw_console_puts(" t=");    hw_console_puts(iv.time);
+      hw_console_puts(" src=");  hw_console_puts(iv.src);
+      hw_console_puts(" dst=");  hw_console_puts(iv.dst);
+      hw_console_puts(" path="); hw_console_puts(iv.path);
+      hw_console_puts(" rssi="); if (iv.have_rf) console_i16(iv.rssi); else hw_console_puts("--");
+      hw_console_puts(" snr=");  if (iv.have_rf) console_i16(iv.snr);  else hw_console_puts("--");
+      hw_console_puts(" f=");    hw_console_puts(iv.repeat ? "REP" : (iv.fixed ? "FIX" : "OK"));
+      hw_console_puts(" r=");    hw_console_u8(iv.read ? 1u : 0u);
+      hw_console_puts(" h=");    hw_console_hex16(iv.hash);
+      hw_console_puts(" info="); hw_console_puts(iv.body);
+      hw_console_puts("\r\n");
+    }
+    return;
+  }  if (strncmp(s, "DUPMS?", 6u) == 0) {
     hw_console_puts("[CFG] DUPMS="); hw_console_u16(s_dedup_ms); hw_console_puts("ms\r\n");
     return;
   }
