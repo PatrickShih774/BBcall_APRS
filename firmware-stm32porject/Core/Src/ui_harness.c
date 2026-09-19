@@ -332,8 +332,16 @@ static void draw_idle(void)
   }
   fp_text(fp_cx(buf, 12, 0, 63, 1u), 41, buf, 12, 0u, 1u);
 
-  /* 上格：本机呼号 */
-  cell_label_value(65, 127, 2, 18, "本机", s_mycall, 0u);
+  /* 上格：本机呼号（2026-09-19 用户要求：标签小、呼号大）
+   * 呼号用 10px 档 2 倍放大（每字符 10px、字高 20px）：BG5BLH = 60px，塞得进 63px 格宽。
+   * 12px 档 2 倍要 12px/字符（BG5BLH = 72px）放不下，所以"大号呼号"走 10px 档。
+   * 带 SSID 太长（>63px）时回退 12px 档 x1：信息完整优先，不裁字。 */
+  if (fp_width(s_mycall, 10, 2u) <= 63u) {
+    fp_text(fp_cx("本机", 10, 65, 127, 1u), 1, "本机", 10, 1u, 1u);
+    fp_text(fp_cx(s_mycall, 10, 65, 127, 2u), 11, s_mycall, 10, 1u, 2u);
+  } else {
+    cell_label_value(65, 127, 2, 18, "本机", s_mycall, 0u);
+  }
   /* 左下：电量三挡（无采样显示 --） */
   cell_label_value(65, 95, 34, 50, "电量",
                    (s_batt < 0) ? "--" : (s_batt == 0) ? "低" : (s_batt == 1) ? "中" : "高", 0u);
