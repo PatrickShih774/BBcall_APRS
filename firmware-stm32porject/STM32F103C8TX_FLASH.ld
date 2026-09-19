@@ -45,7 +45,9 @@ _Min_Stack_Size = 0x600; /* required amount of stack：实测最大单帧 576B�
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 20K
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 64K
+  /* 尾部 8KB（0x0800E000..0x0800FFFF）留给设备端解码日志 pktlog（见 bbcall_cfg.h 的
+   * BBCALL_PKTLOG_PAGES=8）。改 PAGES 时这里必须同步：LENGTH = 64K - PAGES*1K。 */
+  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 56K
 }
 
 /* Sections */

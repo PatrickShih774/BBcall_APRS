@@ -23,7 +23,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 | 3 | [软件结构](#3-软件结构) | 文件表 / 架构图；信号链 → [docs/PLAN.md §3](docs/PLAN.md#3-软件架构) |
 | 4 | [调试过程记录](#4-调试过程记录) | 概要 → [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md)（完整 bring-up / 实测） |
 | 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出 / §5.1 对时（RTC） |
-| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频 / UI 校验 / 串口桥与实时调参 / 现场排障套路 / **§6.4 复用指南（其他项目可直接抄）** |
+| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频 / UI 校验 / 串口桥与实时调参 / 现场排障套路 / **§6.4 复用指南（其他项目可直接抄）** / **§6.5 设备端累计日志（跑 10 小时连一次导出）** |
 | 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
 | 8 | [待办 / 下一步](#8-待办--下一步) | → [docs/PLAN.md](docs/PLAN.md)（路线图 / 验收标准） |
 | 9 | [PC 端 LCD 模拟器（SDL2）](#9-pc-端-lcd-模拟器sdl2) | 概要 → [simulator/SIMULATOR.md](simulator/SIMULATOR.md) |
@@ -225,11 +225,13 @@ powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5
 | `PING` | 探活，回 `[CFG] pong` |
 | `DUPMS=<ms>` / `DUPMS?` | 重复包去重窗口：**默认 2000ms**（只合并同一次发射的多路冗余）；设 0 关闭去重 |
 | `INBOX?` | 把收件箱逐条导出（`[INBOX] i=n/N t=HH:MM:SS src=.. dst=.. path=.. rssi=.. snr=.. f=OK/FIX/REP r=0/1 h=哈希 info=正文`），配合 `tools/aprs_log_report.py` 做解码率对比 |
+| `LOG?` | **导出设备端累计解码日志**（Flash 尾部 8KB 环形缓冲，掉电不丢）：先一行汇总 `[LOG] n=.. cap=.. seq_last=.. lost=.. order=old2new`，再每条一行 `[LOG] i=n/N t=.. src=.. rssi=.. snr=.. f=.. h=.. info=..`；挂 10 小时不用接串口，连一次就能和网络侧包清单对比解码率（见 §6.5） |
+| `LOG0` | 清空累计日志（重记），用于"本次观测从 0 开始" |
 | `TIME=` / `TIME?` / `TRIM=` | 对时与走时校准（见 §5.1） |
 
-**注意 Flash 预算**：这套命令约 2KB，`Debug` 配置（`-O0`）会超出 64KB（溢出 1484 字节），
-所以带调参命令的固件请用 **`Release` 配置（`-Os`）** 构建（同一份源码省约 15.5KB），
-或者把 `bbcall_cfg.h` 的 `BBCALL_TUNE_CMDS` 置 0 只保留对时命令。
+**注意 Flash 预算**：带调参命令 + 设备端日志（`pktlog`，占 8KB）的固件，现在是
+`Debug`(-Og) `text=56204`（余 1.1KB）、`Release`(-Os) `text=51520`（余 5.6KB）。
+Debug 余量已经很紧：加新功能前先看 [§7](#7-stm32cubeide-编译与烧录) 的余量表，或把 `bbcall_cfg.h` 的 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）。
 
 ---
 
@@ -370,6 +372,47 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
   这样模型才能逐行读懂状态，而不是靠猜；
 - 每个可调项都要有**回读命令**（`TIME?` / `TRIM?` / `STAT?` / `DUPMS?` / `PING`），形成"发命令 → 回读确认"闭环；
 - 改动类命令要能**一键恢复**（本项目：`AGC=1` 回到自动增益、`DUPMS=2000` 回到默认去重、重发 `TIME=` 复位时间）。
+### 6.5 挂机 10 小时：设备端累计解码日志（`LOG?`，掉电不丢）
+
+`INBOX?`（§5.2）只导"当前收件箱里那几条"：上限 16 条、只有屏上那份内容、掉电就没了。
+要"**挂一夜不接串口，最后连一次就能和网络侧包清单对比解码率**"，得让设备自己把每一包写进不挥发存储：
+
+- **存储**：STM32F103C8 内部 Flash 的**最后 8KB** 当环形日志区（`pktlog.c`）；1KB 一页 = 14 槽，每槽 72 字节，**容量上限 112 条**（页擦除粒度决定实际在 99~112 之间：刚擦完一页 99 条、写满当前页 112 条）；
+- **固件区收窄**：链接脚本 `FLASH LENGTH = 64K - PAGES*1K`（现在 56K）：改 `BBCALL_PKTLOG_PAGES` 必须同步改 `.ld`；
+- **写入节流**：只记"新内容"（DUP 不占记录，口径同 `RX=`）；写 Flash 会停机 20~40ms（页擦除），所以记录**先暂存、延后 200ms** 再落盘，避开"一包刚收完又来下一包"的窗口。
+
+```text
+[LOG] n=13 cap=112 seq_last=13 lost=0 order=old2new
+[LOG] i=1/13 t=2026-09-19 08:12:33 src=BG5BLB-12 rssi=75 snr=20 f=OK h=1A2B info=!3952.49N/12028.55E>有内鬼
+```
+
+| 字段 | 含义 |
+|---|---|
+| `n` / `cap` | 当前有效条数 / 容量上限（112） |
+| `seq_last` | 累计写入条数（16 位回绕）；`lost = seq_last+1-n` = 被挤掉的旧条数，`lost>0` 说明跑太久（加大 `BBCALL_PKTLOG_PAGES` 或缩短观测） |
+| `t=` | RTC 绝对时间；RTC 没对过时退化成 `UP+12345s`（上电秒数） |
+| `src=` | 呼号-SSID |
+| `rssi=` / `snr=` | 解码当刻采到的原始值；没采到打 `--` |
+| `f=` | `OK` / `FIX`（1bit 纠错）/ `REP`（参考帧恢复） |
+| `h=` | 整帧哈希（和去重、`INBOX?` 同一算法，可与其它记录对齐） |
+| `info=` | 正文，**最多 52 字节**（超出截断） |
+
+推荐流程：
+
+```powershell
+# ① 出发前对时（时间戳是和网络清单对齐的唯一依据）
+powershell -ExecutionPolicy Bypass -File tools\set_rtc_time.ps1 -Port COM5
+# ② 挂机 10 小时（不接串口、不用电脑）
+# ③ 回来连一次，导出全部累计记录
+powershell -ExecutionPolicy Bypass -File tools\serial_bridge.ps1 -Port COM5 -LogFile aprs_10h.log
+"LOG?" | Out-File -Encoding ascii "$env:TEMP\bbcall_tx.txt"
+# ④ 和网络侧包清单对比（APRS-IS / aprs.fi / 另一台接收机）
+python tools\aprs_log_report.py aprs_10h.log --mode log --ref 网络包清单.txt --out 报告.md
+```
+
+掉电/复位安全：开机扫描最大序号续写，**半条记录（`seq` 未写成）会被忽略**；想清空重记发 `LOG0`。
+实现细节与验证见 [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md) §26。
+
 ## 7. STM32CubeIDE 编译与烧录
 
 1. 打开 `firmware-stm32porject/` 工程（用户手动建的 STM32F103C8Tx 工程）。
@@ -378,7 +421,8 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 3. Build（0 错误即可）。
 4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出；
 5. **构建配置**：`Debug` 现在用 **`-Og`**（工程 `.cproject` 已改）：保留调试信息的优化档，比 -O0 小 12.8KB，
-   工具栏直接选 Debug 就能烧（`text=51932 / data=56 / bss=19344`，余 13.5KB）；`Release` 仍是 `-Os`（`text=47772`，余约 17.7KB）。
+   工具栏直接选 Debug 就能烧（含 `pktlog` 8KB 后 `text=56204 / data=56 / bss=19600`，**余 1.1KB**）；`Release` 仍是 `-Os`（`text=51520 / data=52 / bss=19568`，余约 **5.7KB**）。
+   注意 **8KB 已留给设备端日志**（`BBCALL_PKTLOG_PAGES=8`）：改这个值时链接脚本 `STM32F103C8TX_FLASH.ld` 的 `FLASH LENGTH = 64K - PAGES*1K` 必须同步改，否则日志区会和固件区重叠。
    加新功能前先看余量：Debug 快满时把 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）或改用 Release；
    另外固件已不用 newlib printf/malloc（见 [DEBUG_LOG §23](docs/DEBUG_LOG.md#23-代码内存优化去掉-newlib-printf让-debug-o0-也能装下2026-09-19)），别再引入 `printf/snprintf/malloc`。
 6. **Release 配置不产出 `.hex`**（只有 elf/list/map）：用 `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或在 CubeIDE 里直接 Run（烧 elf）。

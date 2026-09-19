@@ -117,6 +117,18 @@
 #define KEY_PWR_PIN        GPIO_PIN_2
 #define KEY_PTT_GPIO       GPIOA
 #define KEY_PTT_PIN        GPIO_PIN_4
+/* ---------- 解码日志（内部 Flash 环形缓冲） ----------
+ * 把每次"新内容解出"的帧记进 Flash 尾部，掉电不丢，10 小时无人值守后连一次串口
+ * 用 `LOG?` 一次性导出，和网络侧包清单对比算解码率（tools/aprs_log_report.py）。
+ * 布局：1KB 一页、每页 14 条（每条 72 字节）→ 容量上限 = PAGES×14 条
+ *       （页擦除粒度决定实际条数在 99~112 之间：刚擦完一页 99、写满当前页 112）。
+ * 注意：这块会从固件可用 Flash 里扣掉（链接脚本 STM32F103C8TX_FLASH.ld 的 FLASH 已按
+ *       64KB-PAGES×1KB 收窄到 56K）→ 改 PAGES 必须同步改 .ld，否则日志区与固件区重叠。
+ *       实测 Debug(-Og) 含本模块 text=56204（限 57344，余 1084 B）、Release(-Os) text=51520（余 5772 B）。 */
+#ifndef BBCALL_PKTLOG_PAGES
+#define BBCALL_PKTLOG_PAGES 8u
+#endif
+
 /* ---------- 每帧详细解析打印（[MICE]/[POS]/[MSG] 行） ----------
  * 0 = 不打（默认）：[FRAME] 行已经含 src/dest/path/ctrl/info 与 RSSI/SNR，屏幕也会显示内容；
  * 1 = 打开：额外打 [MICE]/[POS]/[MSG] 的逐字段解析结果，bring-up/排障时用。

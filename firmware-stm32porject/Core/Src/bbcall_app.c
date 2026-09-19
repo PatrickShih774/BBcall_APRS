@@ -7,6 +7,7 @@
 #include "bbcall_rtc.h"
 #include "lcd_st7567.h"
 #include "ui_harness.h"
+#include "pktlog.h"
 
 #include "modem.h"
 #include "ax25.h"
@@ -32,6 +33,19 @@ static uint16_t s_sq_noise_thr = BK4802_SQ_NOISE_THR;
 static uint32_t s_rx_khz       = BBCALL_DEF_FREQ_KHZ;
 static uint8_t  s_stat_req;      /* STAT? 置位，由主循环（能拿到计数）打印 */
 static uint16_t s_dedup_ms      = (uint16_t)BBCALL_DEDUP_MS;   /* 去重窗口：默认只合并同一次发射的多路冗余 */
+
+/* ---------- 设备端解码日志（pktlog.c）：掉电不丢的累计日志 ----------
+ * 解出"新内容"（非 DUP）时先把记录放暂存区，延后 200ms 再写 Flash：
+ * 写 Flash 的页擦除会阻塞 CPU 20~40ms，等这一包彻底收完再写，避免停顿吃掉下一包。
+ * 拿串口的一次 `LOG?` 就能把这 10 小时里解出的所有包（含时间戳/RSSI/SNR/内容）导出来对比。 */
+static pktlog_rec_t s_log_stg;
+static uint8_t  s_log_pend;
+static uint32_t s_log_at_ms;
+
+/* 前置声明：console_cmd_apply 里的 LOG? 要先落盘再导出 */
+static void pktlog_flush_pending(void);
+static void pktlog_flush_force(void);
+
 
 static void rtc_apply_to_ui(void)
 {
@@ -142,6 +156,9 @@ static void console_cmd_apply(const char *line)
     hw_console_puts("\r\n");
     return;
   }
+  /* 设备端解码日志（掉电不丢）：LOG? 整段导出（旧 -> 新），LOG0 清空重记 */
+  if (strncmp(s, "LOG?", 4u) == 0) { pktlog_flush_force(); pktlog_dump(); return; }
+  if (strncmp(s, "LOG0", 4u) == 0) { s_log_pend = 0u; pktlog_clear(); return; }
 #if BBCALL_TUNE_CMDS
   if (strncmp(s, "PING", 4u) == 0) { hw_console_puts("[CFG] pong\r\n"); return; }
   if (strncmp(s, "INBOX?", 6u) == 0) {
@@ -351,6 +368,47 @@ static uint8_t rf_apply_for_frame(void)
   return 0u;
 }
 
+/* 立即落盘（不等 200ms 窗口）：LOG? 导出前调用，保证"刚解出的那条"也在导出里 */
+static void pktlog_flush_force(void)
+{
+  if (!s_log_pend) return;
+  s_log_pend = 0u;
+  if (!pktlog_append(&s_log_stg)) hw_console_puts("[LOG] append failed\r\n");
+}
+
+/* 到点把暂存记录写进 Flash 尾部环形区；主循环每圈调用一次 */
+static void pktlog_flush_pending(void)
+{
+  if (!s_log_pend) return;
+  if ((int32_t)(HAL_GetTick() - s_log_at_ms) < 0) return;
+  pktlog_flush_force();
+}
+
+/* 把刚解出的一帧存进暂存区（时间戳优先用 RTC，没对过时退回上电秒数） */
+static void pktlog_stage(const ax25_decoded_t *d, uint16_t hash)
+{
+  rtc_dt_t dt;
+
+  if (s_log_pend) pktlog_flush_pending();      /* 上一条还没落盘：先写掉，别丢 */
+
+  s_log_stg.t = 0u;
+  s_log_stg.time_kind = 1u;
+  if (bbcall_rtc_get(&dt)) { s_log_stg.t = rtc_dt_to_epoch2000(&dt); s_log_stg.time_kind = 0u; }
+  else                     { s_log_stg.t = HAL_GetTick() / 1000u; }
+  s_log_stg.flags = (uint8_t)((modem_frame_was_fixed() ? 0x01u : 0u) |
+                              (modem_frame_was_repeat() ? 0x02u : 0u));
+  s_log_stg.have_rf = s_rf_valid ? 1u : 0u;
+  s_log_stg.rssi = s_rf_rssi;
+  s_log_stg.snr  = s_rf_snr;
+  s_log_stg.hash = hash;
+  for (uint8_t i = 0u; i < 6u; i++) s_log_stg.call[i] = d->src[i];
+  s_log_stg.ssid = d->src_ssid;
+  s_log_stg.info_len = (uint8_t)((d->info_len > PKTLOG_INFO_MAX) ? PKTLOG_INFO_MAX : d->info_len);
+  for (uint8_t i = 0u; i < s_log_stg.info_len; i++) s_log_stg.info[i] = (char)d->info[i];
+  s_log_pend = 1u;
+  s_log_at_ms = HAL_GetTick() + 200u;
+}
+
 static void ui_backlight_wake(void)
 {
   lcd_backlight(1u);
@@ -535,6 +593,16 @@ void bbcall_app_init(void)
   }
   hw_console_puts("\r\n");
 
+  /* 设备端解码日志：扫描 Flash 尾部环形区（掉电/复位都不丢），打印已有条数 */
+  pktlog_init();
+  hw_console_puts("[LOG] init pages="); hw_console_u8((uint8_t)BBCALL_PKTLOG_PAGES);
+  hw_console_puts(" record=72B cap=");  hw_console_u16(pktlog_capacity());
+  hw_console_puts(" n=");               hw_console_u16(pktlog_count());
+  hw_console_puts(" seq_last=");        hw_console_u16(pktlog_seq_last());
+  hw_console_puts(" base=0800");
+  hw_console_hex16((uint16_t)(0x08010000u - ((uint32_t)BBCALL_PKTLOG_PAGES * 1024u)));
+  hw_console_puts("\r\n");
+
 #if BBCALL_LCD_ENABLED
   /* 三态 UI（design.md v2.0）：ui_init 内含 lcd_init()，模拟器与真机同一份代码 */
   ui_init();
@@ -688,6 +756,8 @@ void bbcall_app_loop(void)
         ui_backlight_wake();
       }
 #endif
+      /* 设备端解码日志：只记"新内容"（非 DUP），内容/时间戳/RSSI/SNR 全部带走 */
+      pktlog_stage(&d, fh);
       hw_console_puts("\r\n[FRAME] src=");
       hw_console_puts(d.src);
       if (d.src_ssid != 0u) { hw_console_putc('-'); hw_console_u16((uint16_t)d.src_ssid); }
@@ -888,6 +958,8 @@ void bbcall_app_loop(void)
     s_bl_off_at = 0u;
   }
 #endif
+
+  pktlog_flush_pending();   /* 解码日志：到点把暂存的一条写进 Flash 尾部环形区 */
 
   hw_watchdog_feed();
 #if BBCALL_SW_SQUELCH
