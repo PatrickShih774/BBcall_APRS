@@ -337,8 +337,10 @@ static void draw_idle(void)
   /* 左下：电量三挡（无采样显示 --） */
   cell_label_value(65, 95, 34, 50, "电量",
                    (s_batt < 0) ? "--" : (s_batt == 0) ? "低" : (s_batt == 1) ? "中" : "高", 0u);
-  /* 右下：未读数 */
-  { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf)); sfb_u32(&b, s_unread); }
+  /* 右下：未读/总条数（`1/5` = 1 条未读、共 5 条；2026-09-19 由"只显示未读数"改成比例形式）。
+   * 分母用收件箱当前条数 s_count（不是容量 16）：一眼能看出"有几条新消息 / 一共存了几条"。 */
+  { sfb_t b; sfb_init(&b, buf, (uint8_t)sizeof(buf));
+    sfb_u32(&b, s_unread); sfb_ch(&b, '/'); sfb_u32(&b, s_count); }
   cell_label_value(97, 127, 34, 50, "未读", buf, 0u);
 
   tile_frame();
