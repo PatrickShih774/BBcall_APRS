@@ -23,7 +23,7 @@ BBcall_APRS 是一个面向 2m 业余无线电频段的 APRS 寻呼机（BB 机�
 | 3 | [软件结构](#3-软件结构) | 文件表 / 架构图；信号链 → [docs/PLAN.md §3](docs/PLAN.md#3-软件架构) |
 | 4 | [调试过程记录](#4-调试过程记录) | 概要 → [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md)（完整 bring-up / 实测） |
 | 5 | [串口诊断字段说明](#5-串口诊断字段说明) | 0.5s / 2s 周期字段 / [FRAME] 帧输出 / §5.1 对时（RTC） |
-| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频 / UI 校验 / 串口桥与实时调参 / 现场排障套路 / **§6.4 复用指南（其他项目可直接抄）** / **§6.5 设备端累计日志（跑 10 小时连一次导出）** |
+| 6 | [主机验证工具](#6-主机验证工具) | AX.25 参考 / 测试音频 / UI 校验 / 串口桥与实时调参 / 现场排障套路 / **§6.4 复用指南（其他项目可直接抄）** / **§6.5 设备端累计日志（跑 6~10 小时连一次导出）** / **§6.6 PC 串口调试助手（GUI，单文件 HTML）** |
 | 7 | [STM32CubeIDE 编译与烧录](#7-stm32cubeide-编译与烧录) | 编译步骤 / 启用 LCD |
 | 8 | [待办 / 下一步](#8-待办--下一步) | → [docs/PLAN.md](docs/PLAN.md)（路线图 / 验收标准） |
 | 9 | [PC 端 LCD 模拟器（SDL2）](#9-pc-端-lcd-模拟器sdl2) | 概要 → [simulator/SIMULATOR.md](simulator/SIMULATOR.md) |
@@ -290,6 +290,7 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 | `tools/gen_afsk_wav.py` | 生成标准 / VOX / 位置 / 消息测试音频（`--baud-bias` 造频偏） | 见本节上方 |
 | `tools/make_hex.ps1` | ELF → HEX/BIN（手编后出烧录文件） | `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1` |
 | `simulator/` | PC 端 ST7567 模拟器，与固件共用 `ui_harness.c`，不烧录就能验 UI 与解码 | `powershell -ExecutionPolicy Bypass -File simulator\build_win.ps1 -Run` |
+| `bbcall-serial-assistant/` | **GUI 串口调试助手**（单文件 HTML + Web Serial）：连接/状态/调参/对时/日志导出/128×64 屏幕镜像/无硬件模拟器 | 浏览器打开 `bbcall-serial-assistant/docs/bbcall-serial-assistant.html` |
 
 ### 6.2 让 AI / 脚本直接驱动设备（串口桥工作流）
 
@@ -424,6 +425,30 @@ python tools\aprs_log_report.py aprs_10h.log --mode log --ref 网络包清单.tx
 - 6 小时全覆盖建议烧 **Release（182 条）**，Debug 只有 112 条；导出头行的 `lost=` 会如实报被覆盖的条数。
 
 实现细节与验证见 [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md) §26 / §28。
+
+### 6.6 PC 端串口调试助手（GUI：单文件 HTML + Web Serial）
+
+`bbcall-serial-assistant/` 是本项目的**图形化串口助手**：一个 HTML 文件双击即用（Chrome/Edge），
+不用装 Python、不用记命令：
+
+- 连接设备（Web Serial，PB10/PB11，115200 8N1），连上自动 `PING` 探活；`STAT?` 全字段解析成状态表，`S=` / `R19=` 周期刷新（含 S-meter）；
+- 控制台：帧 / 状态 / 记录 / 错误 五组过滤 + 检索 + 跟随滚动 + 一键导出 `.log` + 命令历史；
+- 右栏三页：**调参**（`FREQ/GAIN/AGC/SQ/SQN/MUTE/DUPMS` + 恢复默认）、**对时**（`TIME=`/`TIME?`/`TRIM=`）、**工具**（`PING`/`INBOX?`/`LOG?`/`LOG0`）；
+- **128×64 屏幕镜像**（Canvas 整数倍放大，与设备 `docs/design.md` 的 1-bit 规范一致）；
+- **无硬件也能用**：内置模拟器伪造固件回包，全部交互可演示。
+
+| 入口 | 说明 |
+|---|---|
+| `bbcall-serial-assistant/docs/bbcall-serial-assistant.html` | 助手本体（单文件、无依赖、无构建） |
+| `bbcall-serial-assistant/docs/design-reference.html` | 设计规范（色彩/排版/点阵/栅格/组件/交互状态），助手 UI 的唯一权威 |
+| `bbcall-serial-assistant/docs/serial-protocol.md` | 串口协议参考（命令表/周期输出/字段索引/解析要点） |
+| `bbcall-serial-assistant/docs/user-guide.md` | 操作手册（连接/面板/快捷键/排障） |
+
+> 注意：Web Serial 需要安全上下文，`file://` 直接双击打不开串口，请用本地静态服务器
+> （`npx serve` / VS Code Live Server）或先点「模拟设备」。
+> **改本机呼号 / 历史库图表 / 打包成 exe 的路线见 [docs/PLAN.md §13](docs/PLAN.md#13-bbcall-小助手pc-端-gui-管理与调试工具2026-09-20html-原型已完成规划更新)。**
+
+---
 
 ## 7. STM32CubeIDE 编译与烧录
 

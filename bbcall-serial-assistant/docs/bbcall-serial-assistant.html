@@ -1,0 +1,1587 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BBcall 串口调试助手 · BBcall_APRS</title>
+<style>
+  /* ─── tokens ─────────────────────────────────────────────────────────
+     方向：tech-utility（Datadog / GitHub）暗色衍生。
+     设备屏 ink/paper 取自 docs/design.md §2，仅用于 128×64 屏幕镜像。 */
+  :root {
+    --bg:        oklch(16% 0.012 250);
+    --surface:   oklch(20% 0.014 250);
+    --surface-2: oklch(24% 0.014 250);
+    --fg:        oklch(95% 0.005 250);
+    --muted:     oklch(67% 0.015 245);
+    --border:    oklch(31% 0.014 250);
+    --accent:    oklch(76% 0.16 145);
+
+    --ok:     oklch(72% 0.14 150);
+    --warn:   oklch(80% 0.15 78);
+    --danger: oklch(68% 0.19 25);
+    --info:   oklch(74% 0.11 240);
+
+    /* 设备屏（design.md §2） */
+    --lcd-ink-oled:   oklch(19% 0.015 250);
+    --lcd-paper-oled: oklch(100% 0 0);
+    --lcd-ink-lcd:    oklch(28% 0.03 250);
+    --lcd-paper-lcd:  oklch(76% 0.012 155);
+
+    --font-ui:   -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Microsoft YaHei UI', monospace;
+    --font-display: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Microsoft YaHei UI', monospace;
+    --font-lcd:  'Microsoft YaHei UI', 'PingFang SC', ui-monospace, monospace;
+
+    --gap-1: 4px; --gap-2: 8px; --gap-3: 12px; --gap-4: 16px; --gap-5: 24px;
+    --radius: 0px; --radius-lg: 0px;
+    --row: 32px;
+
+    /* 点阵底板：4px 栅格上的单像素点，全页唯一装饰母题 */
+    --dot:        oklch(25% 0.014 250);
+    --dot-soft:   oklch(24% 0.013 250);
+    --dottex:      radial-gradient(circle, var(--dot) 1px, transparent 1.2px);
+    --dottex-soft: radial-gradient(circle, var(--dot-soft) 1px, transparent 1.2px);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    background-image: var(--dottex);
+    background-size: 4px 4px;
+    color: var(--fg);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.45;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; background: none; border: 0; }
+  h1, h2, h3 { margin: 0; font-weight: 600; }
+  p { margin: 0; }
+  table { border-collapse: collapse; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  /* ─── app bar ─────────────────────────────────────────────────────── */
+  .appbar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: var(--gap-4);
+    padding: 0 var(--gap-4);
+    height: 58px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+  .brand b { font-family: var(--font-display); font-size: 17px; letter-spacing: .01em; white-space: nowrap; }
+  .brand b::before { content: ''; display: inline-block; width: 8px; height: 8px; background: var(--accent); margin-right: 9px; }
+  .brand span { color: var(--muted); font-size: 12px; font-family: var(--font-mono); white-space: nowrap; }
+  .appbar .spacer { flex: 1 1 auto; }
+  .appbar-fields { display: flex; align-items: center; gap: var(--gap-2); flex-wrap: wrap; }
+  .appbar-fields label { color: var(--muted); font-size: 12px; }
+  #portSel { max-width: 232px; }
+
+  .linkstate { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .dot { width: 9px; height: 9px; background: var(--muted); flex: none; }
+  .linkstate.on { color: var(--accent); }
+  .linkstate.on .dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent); }
+  .linkstate.warn { color: var(--warn); }
+  .linkstate.warn .dot { background: var(--warn); }
+
+  /* ─── controls ────────────────────────────────────────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 34px; padding: 0 13px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface-2); color: var(--fg);
+    font-family: var(--font-mono); font-size: 13px; font-weight: 500; white-space: nowrap;
+    box-shadow: 2px 2px 0 oklch(0% 0 0 / .38);
+    transition: background .1s steps(2, end), border-color .1s steps(2, end), color .1s steps(2, end);
+  }
+  .btn:hover { border-color: oklch(45% 0.018 250); background: oklch(29% 0.015 250); }
+  .btn:active { transform: translate(2px, 2px); box-shadow: none; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; box-shadow: none; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: oklch(18% 0.03 150); font-weight: 600; }
+  .btn-primary:hover { background: oklch(83% 0.16 145); border-color: oklch(83% 0.16 145); }
+  .btn-danger { background: transparent; border-color: color-mix(in oklch, var(--danger) 55%, var(--border)); color: var(--danger); }
+  .btn-danger:hover { background: color-mix(in oklch, var(--danger) 16%, transparent); border-color: var(--danger); }
+  .btn-quiet { background: transparent; border-color: var(--border); }
+  .btn-sm { height: 30px; padding: 0 10px; font-size: 12px; box-shadow: 1px 1px 0 oklch(0% 0 0 / .35); }
+
+  .input, .select {
+    height: 34px; padding: 0 9px;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 13px; font-family: var(--font-mono);
+  }
+  .select { font-family: var(--font-ui); }
+  .input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent); }
+  .input.w-sm { width: 86px; }
+  .input.w-md { width: 120px; }
+
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 22px; background: transparent;
+  }
+  input[type="range"]::-webkit-slider-runnable-track { height: 6px; background: var(--surface-2); border: 1px solid var(--border); }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 16px; margin-top: -6px;
+    background: var(--fg); border: 0;
+  }
+  input[type="range"]:hover::-webkit-slider-thumb { background: var(--accent); }
+  input[type="range"]::-moz-range-track { height: 6px; background: var(--surface-2); border: 1px solid var(--border); }
+  input[type="range"]::-moz-range-thumb { width: 14px; height: 16px; background: var(--fg); border: 0; border-radius: 0; }
+
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .track { width: 40px; height: 20px; background: var(--surface-2); border: 1px solid var(--border); position: relative; transition: background .1s steps(2, end), border-color .1s steps(2, end); flex: none; }
+  .switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: var(--muted); transition: transform .1s steps(3, end), background .1s steps(2, end); }
+  .switch input:checked + .track { background: color-mix(in oklch, var(--accent) 26%, transparent); border-color: var(--accent); }
+  .switch input:checked + .track::after { transform: translateX(20px); background: var(--accent); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ─── workspace ───────────────────────────────────────────────────── */
+  .workspace {
+    flex: 1 1 auto; min-height: 0;
+    display: grid;
+    /* 侧栏按比例分走富余宽度，中栏不再独自吃掉全部余量而显得空 */
+    grid-template-columns: minmax(320px, 1fr) minmax(420px, 1.6fr) minmax(300px, 1fr);
+  }
+  .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .pane-left  { border-right: 1px solid var(--border); overflow-y: auto; font-size: 15px; }
+  .pane-right { border-left: 1px solid var(--border); overflow-y: auto; font-size: 15px; }
+  .pane-center {
+    background-color: var(--surface);
+    background-image: var(--dottex-soft);
+    background-size: 4px 4px;
+  }
+  .pane-left, .pane-right { scrollbar-width: thin; }
+  .pane::-webkit-scrollbar { width: 10px; }
+  .pane::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 6px; border: 3px solid var(--bg); }
+
+  .panel { border-bottom: 1px solid var(--border); }
+  .panel:last-child { border-bottom: 0; }
+  .panel-head {
+    display: flex; align-items: center; gap: var(--gap-2);
+    padding: 12px var(--gap-4);
+    min-height: 46px;
+  }
+  .panel-head h2 {
+    font-size: 13.5px; letter-spacing: .1em; color: var(--muted);
+    font-family: var(--font-display); font-weight: 500;
+  }
+  .panel-head h2::before {
+    content: ''; display: inline-block; width: 7px; height: 7px;
+    background: var(--muted); margin-right: 9px; vertical-align: 1px;
+  }
+  .panel-head .spacer { flex: 1 1 auto; }
+  .panel-body { padding: 0 var(--gap-4) var(--gap-4); }
+  .panel-body.tight { padding: 0 var(--gap-4) 10px; }
+
+  /* ─── tabs (right pane) ───────────────────────────────────────────── */
+  .tabs {
+    display: flex; gap: 2px; flex: none;
+    padding: 8px var(--gap-4) 0;
+    border-bottom: 1px solid var(--border);
+    background-color: var(--bg);
+    background-image: var(--dottex);
+    background-size: 4px 4px;
+    position: sticky; top: 0; z-index: 2;
+  }
+  .tab {
+    position: relative;
+    height: 40px; padding: 0 13px;
+    font-size: 13.5px; color: var(--muted); font-family: var(--font-mono);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color .1s steps(2, end), background .1s steps(2, end);
+  }
+  .tab:hover { color: var(--fg); background: var(--surface); }
+  .tab[aria-selected="true"] { color: var(--fg); font-weight: 600; }
+  .tab[aria-selected="true"]::after {
+    content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 3px;
+    background-image: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px);
+  }
+  .tabpanel { display: none; }
+  .tabpanel[data-active="true"] { display: block; }
+
+  /* ─── collapsible detail ──────────────────────────────────────────── */
+  .more { margin-top: var(--gap-3); border-top: 1px solid var(--border); }
+  .more > summary {
+    list-style: none; cursor: pointer; padding: 11px 0 0;
+    font-family: var(--font-mono); font-size: 12.5px; color: var(--muted);
+  }
+  .more > summary::-webkit-details-marker { display: none; }
+  .more > summary::before { content: '+ '; }
+  .more[open] > summary::before { content: '\2013 '; }
+  .more > summary:hover { color: var(--fg); }
+  .more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ─── device status ───────────────────────────────────────────────── */
+  .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-2); margin-bottom: var(--gap-3); }
+  .kpi-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 12px; }
+  .kpi-card::after { content: ''; position: absolute; top: 0; left: 0; width: 5px; height: 5px; background: var(--border); }
+  .kpi-card .k { font-size: 11px; color: var(--muted); font-family: var(--font-mono); letter-spacing: .1em; }
+  .kpi-card .v { font-family: var(--font-mono); font-size: 27px; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .kpi-card .u { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .kpi-card.wide { grid-column: span 2; }
+  .kpi-card.wide .v { font-size: 23px; }
+
+  .smeter { display: flex; gap: 3px; margin-top: 9px; }
+  .smeter i { flex: 1; height: 7px; background: var(--border); }
+  .smeter i.on { background: var(--ok); }
+  .smeter i.on.hi { background: var(--warn); }
+
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; font-size: 14.5px; }
+  .kv > div { display: contents; }
+  .kv dt { color: var(--muted); padding: 5px 0; border-bottom: 1px dotted var(--border); }
+  .kv dd { margin: 0; padding: 5px 0; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; border-bottom: 1px dotted var(--border); }
+  .kv dd.zero { color: var(--muted); }
+  .kv dd.hot { color: var(--warn); }
+  .kv dd.bad { color: var(--danger); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
+  }
+  .pill::before { content: ''; width: 5px; height: 5px; background: currentColor; flex: none; }
+  .pill.ok { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 45%, var(--border)); background: color-mix(in oklch, var(--ok) 12%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 45%, var(--border)); background: color-mix(in oklch, var(--warn) 12%, transparent); }
+  .pill.bad { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 45%, var(--border)); background: color-mix(in oklch, var(--danger) 12%, transparent); }
+  .pill.info { color: var(--info); border-color: color-mix(in oklch, var(--info) 45%, var(--border)); background: color-mix(in oklch, var(--info) 12%, transparent); }
+
+  /* ─── LCD mirror ──────────────────────────────────────────────────── */
+  .lcd-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .lcd-shell {
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 10px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .lcd-stage { display: grid; place-items: center; padding: 6px; background: var(--bg); border: 1px solid var(--border); }
+  canvas#lcd {
+    width: 384px; max-width: 100%; height: auto; display: block;
+    image-rendering: pixelated;
+    box-shadow: 0 6px 20px oklch(0% 0 0 / .45);
+  }
+  .seg { display: inline-flex; border: 1px solid var(--border); overflow: hidden; background: var(--surface-2); }
+  .seg button {
+    height: 28px; padding: 0 11px; font-size: 12px; color: var(--muted); font-family: var(--font-mono);
+    border-right: 1px solid var(--border);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { color: var(--fg); background: oklch(27% 0.015 250); }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
+  .lcd-note { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+
+  /* ─── console ─────────────────────────────────────────────────────── */
+  .console-tools { display: flex; align-items: center; gap: var(--gap-2); padding: 8px var(--gap-4); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  /* 检索框可变宽，避免工具行在窄中栏里把「清空」挤到第二行 */
+  .console-tools #search { flex: 0 1 168px; min-width: 92px; width: auto; }
+  .chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .chip {
+    height: 30px; padding: 0 11px; font-size: 12.5px; font-family: var(--font-mono);
+    border: 1px solid var(--border); color: var(--muted); background: transparent;
+  }
+  .chip:hover { color: var(--fg); border-color: oklch(45% 0.018 250); }
+  .chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  .chip .n { font-family: var(--font-mono); opacity: .75; margin-left: 4px; }
+
+  .log {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    padding: 0 0 10px;
+    font-family: var(--font-mono); font-size: 13.5px; line-height: 1.62;
+    scrollbar-width: thin;
+  }
+  .log::-webkit-scrollbar { width: 10px; }
+  .log::-webkit-scrollbar-thumb { background: var(--surface-2); border: 3px solid var(--surface); }
+  .ln { display: flex; gap: 10px; padding: 2px var(--gap-4); white-space: pre-wrap; word-break: break-word; border-bottom: 1px dotted oklch(27% 0.013 250); }
+  .ln:hover { background: oklch(26% 0.014 250); }
+  .ln .t { color: oklch(71% 0.014 245); flex: 0 0 102px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ln .tag {
+    flex: 0 0 auto; font-size: 11px; letter-spacing: .05em; padding: 0 6px; height: 19px; line-height: 19px;
+    white-space: nowrap;
+    align-self: flex-start; margin-top: 2px; color: var(--muted); background: var(--surface-2);
+    border: 1px solid color-mix(in oklch, currentColor 32%, transparent);
+  }
+  .ln .m { flex: 1 1 auto; min-width: 0; color: oklch(88% 0.008 250); }
+  .ln.k-frame .tag { color: var(--ok); background: color-mix(in oklch, var(--ok) 16%, transparent); }
+  .ln.k-frame .m { color: var(--fg); }
+  .ln.k-raw   .m { color: oklch(72% 0.012 245); }
+  .ln.k-stat  .m { color: oklch(74% 0.02 245); }
+  .ln.k-cfg   .tag { color: var(--info); background: color-mix(in oklch, var(--info) 16%, transparent); }
+  .ln.k-rtc   .tag { color: var(--warn); background: color-mix(in oklch, var(--warn) 16%, transparent); }
+  .ln.k-rec   .tag { color: var(--info); background: color-mix(in oklch, var(--info) 14%, transparent); }
+  .ln.k-err   .tag { color: var(--danger); background: color-mix(in oklch, var(--danger) 16%, transparent); }
+  .ln.k-err   .m { color: color-mix(in oklch, var(--danger) 82%, var(--fg)); }
+  .ln.k-tx    { background: color-mix(in oklch, var(--accent) 8%, transparent); }
+  .ln.k-tx .tag { color: var(--accent); background: color-mix(in oklch, var(--accent) 18%, transparent); }
+  .ln.k-tx .m { color: var(--fg); font-weight: 600; }
+  .log .empty { padding: 24px var(--gap-4); color: var(--muted); }
+
+  .cmdbar { border-top: 1px solid var(--border); padding: 10px var(--gap-4) 12px; display: flex; flex-direction: column; gap: 9px; background: var(--surface); }
+  .cmd-row { display: flex; gap: var(--gap-2); align-items: center; }
+  .cmd-row .prompt {
+    color: var(--accent); font-family: var(--font-mono); font-size: 15px; flex: none;
+    width: 22px; height: 22px; line-height: 22px; text-align: center;
+  }
+  .cmd-input {
+    flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 12px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    font-family: var(--font-mono); font-size: 14px; color: var(--fg);
+  }
+  .cmd-input::placeholder { color: oklch(66% 0.012 245); }
+  .cmd-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent); }
+  .quick { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* ─── config ──────────────────────────────────────────────────────── */
+  .cfg { display: flex; flex-direction: column; gap: var(--gap-3); }
+  .cfg-row { display: flex; flex-direction: column; gap: 6px; padding-bottom: var(--gap-3); border-bottom: 1px dotted var(--border); }
+  .cfg-row:last-child { padding-bottom: 0; border-bottom: 0; }
+  .cfg-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+  .cfg-top .lab { font-size: 13.5px; color: var(--muted); }
+  .cfg-top .val { font-family: var(--font-mono); font-size: 14.5px; font-variant-numeric: tabular-nums; }
+  .cfg-top .val b { color: var(--fg); }
+  .hint { font-size: 13px; color: var(--muted); line-height: 1.45; }
+  .hint code { font-family: var(--font-mono); color: oklch(82% 0.01 250); }
+  .row-inline { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .row-inline .btn { flex: none; }
+
+  /* ─── statusbar ───────────────────────────────────────────────────── */
+  .statusbar {
+    flex: 0 0 auto; height: 32px;
+    display: flex; align-items: center; gap: var(--gap-4);
+    padding: 0 var(--gap-4);
+    background: var(--surface); border-top: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 12.5px; color: var(--muted);
+  }
+  .statusbar .spacer { flex: 1 1 auto; }
+  .statusbar b { color: var(--fg); font-weight: 500; }
+
+  /* ─── toast ───────────────────────────────────────────────────────── */
+  .toasts { position: fixed; right: 16px; bottom: 42px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+  .toast {
+    background: var(--surface-2); border: 1px solid var(--border); border-top: 3px solid var(--accent);
+    padding: 9px 13px; font-size: 13px; max-width: 340px;
+    box-shadow: 4px 4px 0 oklch(0% 0 0 / .45);
+    animation: toast-in .18s steps(3, end);
+  }
+  .toast.bad { border-top-color: var(--danger); }
+  .toast.warn { border-top-color: var(--warn); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } .btn:active { transform: none; } }
+
+  /* ─── responsive ──────────────────────────────────────────────────── */
+  @media (max-width: 1280px) {
+    .workspace { grid-template-columns: minmax(296px, 1fr) minmax(380px, 1.45fr) minmax(276px, 1fr); }
+  }
+  @media (max-width: 980px) {
+    body { overflow: auto; }
+    .workspace { grid-template-columns: 1fr; }
+    .pane-left, .pane-right { border: 0; border-top: 1px solid var(--border); overflow: visible; }
+    .pane-center { min-height: 70vh; }
+    .appbar { height: auto; padding: 10px var(--gap-3); flex-wrap: wrap; }
+    .log { max-height: 60vh; }
+  }
+</style>
+</head>
+<body>
+
+<header class="appbar" data-od-id="appbar">
+  <div class="brand">
+    <b>BBcall 串口调试助手</b>
+    <span>BBcall_APRS · USART3 115200 8N1</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="appbar-fields">
+    <label for="portSel">串口</label>
+    <select class="select" id="portSel" data-od-id="port-select"></select>
+    <label for="baudSel">波特率</label>
+    <select class="select" id="baudSel" data-od-id="baud-select">
+      <option>115200</option><option>57600</option><option>38400</option><option>9600</option>
+    </select>
+    <button class="btn btn-quiet btn-sm" id="simBtn" data-od-id="simulate-toggle">模拟设备</button>
+    <button class="btn btn-primary" id="connectBtn" data-od-id="connect-cta">连接设备</button>
+  </div>
+  <div class="linkstate" id="linkState" data-od-id="link-state"><span class="dot"></span><span id="linkText">未连接</span></div>
+</header>
+
+<main class="workspace">
+
+  <!-- ═══ 左栏：设备状态 + 屏幕镜像 ═══ -->
+  <aside class="pane pane-left" data-od-id="pane-device">
+
+    <section class="panel" data-od-id="device-status">
+      <div class="panel-head">
+        <h2>设备状态</h2>
+        <div class="spacer"></div>
+        <span class="pill" id="statAge">未读取</span>
+      </div>
+      <div class="panel-body">
+        <div class="kpi">
+          <div class="kpi-card" data-od-id="stat-rssi">
+            <div class="k">RSSI</div>
+            <div class="v" id="vRssi">--</div>
+            <div class="smeter" id="sMeter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <div class="kpi-card" data-od-id="stat-snr">
+            <div class="k">SNR</div>
+            <div class="v" id="vSnr">--</div>
+          </div>
+          <div class="kpi-card wide" data-od-id="stat-freq">
+            <div class="k">接收频率 FREQ</div>
+            <div class="v" id="vFreq">144.640<span class="u">MHz</span></div>
+          </div>
+        </div>
+
+        <dl class="kv" id="statTable" data-od-id="stat-table"></dl>
+
+        <details class="more" data-od-id="stat-diagnostics">
+          <summary>更多诊断计数</summary>
+          <dl class="kv" id="statTableMore" style="margin-top:7px"></dl>
+        </details>
+      </div>
+    </section>
+
+    <section class="panel" data-od-id="lcd-mirror">
+      <div class="panel-head">
+        <h2>屏幕镜像</h2>
+        <div class="spacer"></div>
+        <span class="pill info">128 × 64 · 1-bit</span>
+      </div>
+      <div class="panel-body">
+        <div class="lcd-shell">
+          <div class="lcd-head">
+            <div class="seg" role="group" aria-label="屏幕状态">
+              <button data-lcd-state="standby" aria-pressed="true">待机</button>
+              <button data-lcd-state="unread" aria-pressed="false">有未读</button>
+              <button data-lcd-state="inbox" aria-pressed="false">收件箱</button>
+            </div>
+            <div class="spacer" style="flex:1 1 auto"></div>
+            <div class="seg" role="group" aria-label="面板主题">
+              <button data-lcd-theme="lcd" aria-pressed="true">LCD</button>
+              <button data-lcd-theme="oled" aria-pressed="false">OLED</button>
+            </div>
+          </div>
+          <div class="lcd-stage">
+            <canvas id="lcd" width="384" height="192" role="img" aria-label="BBcall 128×64 屏幕镜像预览"></canvas>
+          </div>
+          <p class="lcd-note">版面取自 docs/design.md §5–§6；字模以固件内 Fusion Pixel 为准</p>
+        </div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ═══ 中栏：实时控制台 ═══ -->
+  <section class="pane pane-center" data-od-id="console">
+    <div class="panel-head console-head" data-od-id="console-head">
+      <h2>实时控制台</h2>
+      <div class="spacer"></div>
+      <span class="lcd-note">CRLF 行分隔 · UTF-8 · ↑↓ 取历史</span>
+    </div>
+    <div class="console-tools">
+      <div class="chips" id="chips" data-od-id="console-filters"></div>
+      <div class="spacer" style="flex:1 1 auto"></div>
+      <input class="input w-md" id="search" data-od-id="console-search" placeholder="检索输出…" aria-label="检索输出" />
+      <label class="switch" title="自动滚动到最新">
+        <input type="checkbox" id="follow" checked /><span class="track"></span><span style="font-size:11px;color:var(--muted)">跟随</span>
+      </label>
+      <button class="btn btn-sm" id="exportBtn" data-od-id="console-export">导出日志</button>
+      <button class="btn btn-sm btn-danger" id="clearBtn" data-od-id="console-clear">清空</button>
+    </div>
+
+    <div class="log" id="log" data-od-id="console-stream" aria-live="polite" aria-label="串口输出"></div>
+
+    <div class="cmdbar" data-od-id="console-commandbar">
+      <div class="quick" id="quick"></div>
+      <div class="cmd-row">
+        <span class="prompt">&gt;</span>
+        <input class="cmd-input" id="cmd" data-od-id="command-input" autocomplete="off" spellcheck="false"
+               placeholder="输入设备命令，回车发送 —— 例如 STAT? / GAIN=6 / FREQ=144640 / TIME=2026-09-20 14:26:00" />
+        <button class="btn btn-primary" id="sendBtn" data-od-id="command-send">发送</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 右栏：调参 + 对时 ═══ -->
+  <aside class="pane pane-right" data-od-id="pane-config">
+
+    <div class="tabs" role="tablist" aria-label="配置与工具" data-od-id="config-tabs">
+      <button class="tab" role="tab" data-tab="cfg" aria-selected="true">调参</button>
+      <button class="tab" role="tab" data-tab="time" aria-selected="false">对时</button>
+      <button class="tab" role="tab" data-tab="tools" aria-selected="false">工具</button>
+    </div>
+
+    <section class="tabpanel" data-tabpanel="cfg" data-active="true" data-od-id="config-panel">
+      <div class="panel-head">
+        <h2>运行时调参</h2>
+        <div class="spacer"></div>
+        <button class="btn btn-sm" id="resetBtn" data-od-id="config-reset">恢复默认</button>
+      </div>
+      <div class="panel-body">
+        <div class="cfg">
+
+          <div class="cfg-row" data-od-id="cfg-freq">
+            <div class="cfg-top"><span class="lab">接收频率 <code>FREQ=</code></span><span class="val" id="valFreq">144640 <span style="color:var(--muted)">kHz</span></span></div>
+            <div class="row-inline">
+              <input class="input w-md" id="freqIn" type="number" min="24000" step="5" value="144640" aria-label="接收频率 kHz" />
+              <span style="color:var(--muted);font-size:11px">kHz</span>
+            </div>
+            <div class="row-inline" role="group" aria-label="常用频点预设">
+              <button class="btn btn-sm" data-freq="144640">144.640</button>
+              <button class="btn btn-sm" data-freq="144390">144.390</button>
+              <button class="btn btn-sm" data-freq="145825">145.825</button>
+            </div>
+            <p class="hint" title="144.640 中国 APRS 标准；144.390 北美；145.825 卫星/ISS。写入后锁屏页频点同步刷新。">144.640 中国 · 144.390 北美 · 145.825 ISS</p>
+          </div>
+
+          <div class="cfg-row" data-od-id="cfg-gain">
+            <div class="cfg-top">
+              <span class="lab">中频增益 <code>GAIN=</code></span>
+              <span class="val"><b id="valGain">4</b> 档 · <span id="valGainDb">12</span> dB</span>
+            </div>
+            <input type="range" id="gainIn" min="0" max="7" step="1" value="4" aria-label="中频增益档位" title="3dB/级，0…7 档；写入时固件会自动关闭 AGC" />
+            <p class="hint">3dB/级；写入会自动关 AGC</p>
+          </div>
+
+          <div class="cfg-row" data-od-id="cfg-agc">
+            <div class="cfg-top"><span class="lab">自动增益 <code>AGC=</code></span><span class="val" id="valAgc">开</span></div>
+            <label class="switch"><input type="checkbox" id="agcIn" checked /><span class="track"></span><span class="hint">12–18dB 自动换档</span></label>
+          </div>
+
+          <div class="cfg-row" data-od-id="cfg-sq">
+            <div class="cfg-top"><span class="lab">静噪阈值 <code>SQ=</code></span><span class="val" id="valSq">0</span></div>
+            <input type="range" id="sqIn" min="0" max="255" step="1" value="0" aria-label="静噪 RSSI 阈值" title="reg22 低字节。默认 0 = 不靠 RSSI 关门；无信号实测 RSSI≈59，可试 70~90" />
+            <p class="hint">默认 0；无信号 RSSI≈59</p>
+          </div>
+
+          <div class="cfg-row" data-od-id="cfg-sqn">
+            <div class="cfg-top"><span class="lab">噪声阈值 <code>SQN=</code></span><span class="val" id="valSqn">255</span></div>
+            <input type="range" id="sqnIn" min="0" max="255" step="1" value="255" aria-label="带外噪声阈值" title="reg23 低字节。越小越难开喇叭；默认 255 = 始终满足开喇叭条件" />
+            <p class="hint">越小越难开喇叭，默认 255</p>
+          </div>
+
+          <div class="cfg-row" data-od-id="cfg-mute">
+            <div class="cfg-top"><span class="lab">接收音频 <code>MUTE=</code></span><span class="val" id="valMute">通</span></div>
+            <label class="switch"><input type="checkbox" id="muteIn" /><span class="track"></span><span class="hint">仅断喇叭，不影响解码</span></label>
+          </div>
+
+          <div class="cfg-row" data-od-id="cfg-dupms">
+            <div class="cfg-top"><span class="lab">去重窗口 <code>DUPMS=</code></span><span class="val"><span id="valDup">2000</span> ms</span></div>
+            <div class="row-inline">
+              <input type="range" id="dupIn" min="0" max="6000" step="100" value="2000" aria-label="重复包去重窗口" style="flex:1 1 120px" />
+              <input class="input w-sm" id="dupNum" type="number" min="0" max="60000" step="100" value="2000" aria-label="去重窗口毫秒" />
+            </div>
+            <p class="hint" title="窗口须大于一次发射的多路间隔（实测 75–220ms）；0 = 不去重，仅调试用。">须大于多路间隔 75–220ms</p>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <section class="tabpanel" data-tabpanel="time" data-od-id="time-panel">
+      <div class="panel-head"><h2>片内 RTC 对时</h2><div class="spacer"></div><span class="pill" id="rtcPill">未知</span></div>
+      <div class="panel-body">
+        <div class="cfg">
+          <div class="cfg-row">
+            <div class="cfg-top"><span class="lab">设备时间</span><span class="val" id="rtcNow">--</span></div>
+            <p class="hint">时钟源 <code id="rtcSrc">--</code>，无 VBAT 掉电退回编译时刻</p>
+          </div>
+          <div class="row-inline">
+            <button class="btn btn-sm" id="syncNow" data-od-id="rtc-sync">用本机时间对时</button>
+            <button class="btn btn-sm" id="timeQuery">TIME?</button>
+            <button class="btn btn-sm" id="trimQuery">TRIM?</button>
+          </div>
+          <div class="cfg-row">
+            <div class="cfg-top"><span class="lab">走时校准 <code>TRIM=</code></span><span class="val"><span id="valTrim">+0</span> ppm</span></div>
+            <div class="row-inline">
+              <input class="input w-sm" id="trimIn" type="number" step="16" value="0" aria-label="ppm 校准" />
+              <span style="color:var(--muted);font-size:11px">ppm</span>
+              <span class="hint">正 = 走快了</span>
+              <div class="spacer" style="flex:1 1 auto"></div>
+              <button class="btn btn-sm" id="trimSet">写入</button>
+            </div>
+            <p class="hint" title="24h 快 4.3 秒 → 4300/86400 ≈ 50ppm；LSE 一档 30.5ppm。">24h 快 4.3s ≈ 50ppm · LSE 一档 30.5ppm</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tabpanel" data-tabpanel="tools" data-od-id="tools-panel">
+      <div class="panel-head"><h2>设备工具</h2></div>
+      <div class="panel-body">
+        <div class="row-inline" style="margin-bottom:8px">
+          <button class="btn btn-sm" id="pingBtn" data-od-id="tool-ping">PING 探活</button>
+          <button class="btn btn-sm" id="inboxBtn" data-od-id="tool-inbox">INBOX? 收件箱</button>
+        </div>
+        <div class="row-inline" style="margin-bottom:14px">
+          <button class="btn btn-sm" id="logBtn" data-od-id="tool-log">LOG? 累计日志</button>
+          <button class="btn btn-sm btn-danger" id="log0Btn" data-od-id="tool-log0">LOG0 清空重记</button>
+        </div>
+        <dl class="kv">
+          <div><dt>日志容量</dt><dd id="logCap">--</dd></div>
+          <div><dt>已记录</dt><dd id="logN">--</dd></div>
+          <div><dt>被覆盖</dt><dd id="logLost">--</dd></div>
+        </dl>
+        <p class="hint" style="margin-top:8px">日志区跟在固件映像之后，掉电不丢</p>
+      </div>
+    </section>
+
+  </aside>
+</main>
+
+<footer class="statusbar" data-od-id="statusbar">
+  <span>已收 <b id="sbLines">0</b> 行</span>
+  <span>帧 <b id="sbFrames">0</b></span>
+  <span>满箱丢弃 <b id="sbDrops">0</b></span>
+  <span class="spacer"></span>
+  <span id="sbTime">--</span>
+</footer>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ═══════════════════════════════════════════════════════════════════
+     0. 工具函数
+     ═══════════════════════════════════════════════════════════════════ */
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var pad = function (n, w) { return String(n).padStart(w, '0'); };
+  var clamp = function (v, a, b) { return Math.min(b, Math.max(a, v)); };
+
+  var store = {
+    get: function (k, d) {
+      try { var v = localStorage.getItem('bbcall.' + k); return v === null ? d : JSON.parse(v); }
+      catch (e) { return d; }
+    },
+    set: function (k, v) { try { localStorage.setItem('bbcall.' + k, JSON.stringify(v)); } catch (e) {} }
+  };
+
+  function nowStamp() {
+    var d = new Date();
+    return pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2) + '.' + pad(d.getMilliseconds(), 3);
+  }
+  function toast(msg, kind) {
+    var el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.textContent = msg;
+    $('#toasts').appendChild(el);
+    setTimeout(function () {
+      el.style.transition = 'opacity .2s ease';
+      el.style.opacity = '0';
+      setTimeout(function () { el.remove(); }, 220);
+    }, 2800);
+  }
+  function resetFirmwareDefaults() {
+    setFreq(144640); setGain(4); setAgc(true); setSq(0); setSqn(255); setMute(false); setDup(2000);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     1. 设备状态模型
+     ═══════════════════════════════════════════════════════════════════ */
+  var S = {
+    connected: false, mode: 'idle',           // idle | serial | sim
+    rssi: null, snr: null, smeter: null,
+    g: 4, agc: 1, sq: 0, sqn: 255, freq: 144640, dupms: 2000, mute: 0,
+    i2ce: 0, id: null, rx: 0, uniq: 0, dup: 0, unread: 0, inbox: 0, dropn: 0,
+    fix: 0, fix2: 0, rep: 0, isrAvg: null, isrMax: null,
+    upMs: 0, rtc: null, rtcSrc: null, trim: 0,
+    logCap: null, logN: null, logLost: null,
+    mycall: store.get('mycall', 'BG5BLH'),
+    lastFrame: null, inboxItems: [],
+    frames: 0, lines: 0
+  };
+  var DIAG_KEYS = ['g', 'agc', 'sq', 'sqn', 'freq', 'dupms', 'i2ce', 'id', 'rx', 'uniq', 'dup',
+                   'unread', 'inbox', 'dropn', 'fix', 'fix2', 'rep', 'isrAvg', 'isrMax', 'upMs',
+                   'rtcSrc', 'trim', 'logCap', 'logN', 'logLost'];
+
+  /* ═══════════════════════════════════════════════════════════════════
+     2. 日志流
+     ═══════════════════════════════════════════════════════════════════ */
+  var CAP = 1200;
+  var entries = [];               // {t, kind, tag, text}
+  var filter = 'all';
+  var searchTerm = '';
+  var counts = { all: 0, frame: 0, raw: 0, stat: 0, cfg: 0, rtc: 0, rec: 0, err: 0 };
+
+  var FILTERS = [
+    { id: 'all',   label: '全部', group: null },
+    { id: 'frame', label: '帧',   group: ['frame', 'raw'] },
+    { id: 'stat',  label: '状态', group: ['stat', 'cfg', 'rtc'] },
+    { id: 'rec',   label: '记录', group: ['rec'] },
+    { id: 'err',   label: '错误', group: ['err'] }
+  ];
+  function filterOf(id) {
+    for (var i = 0; i < FILTERS.length; i++) if (FILTERS[i].id === id) return FILTERS[i];
+    return FILTERS[0];
+  }
+  var TAG_NAME = { frame: 'FRAME', raw: 'RAW', stat: 'STAT', cfg: 'CFG', rtc: 'RTC', rec: 'REC', err: 'ERR', tx: 'TX' };
+
+  function classify(line) {
+    if (/\[FRAME\]|\[MICE\]|\[POS\]|\[MSG\]|\[DUP\]|\[FIX2?\]|\[REP\]/.test(line)) return 'frame';
+    if (/\[RAW\]/.test(line)) return 'raw';
+    if (/\[INBOX\]|\[LOG\]/.test(line)) return 'rec';
+    if (/\[STAT\]/.test(line)) return 'stat';
+    if (/\[CFG\]/.test(line)) return 'cfg';
+    if (/\[RTC\]/.test(line)) return 'rtc';
+    if (/\[I2C\]|err:|\[LOG\] append failed/.test(line)) return 'err';
+    if (/\[LCD\]|\[FREQ\]/.test(line)) return 'stat';
+    if (/^R19=|^S=/.test(line)) return 'stat';
+    return 'stat';
+  }
+  function push(kind, text, tagOverride) {
+    var e = { t: nowStamp(), kind: kind, tag: tagOverride || TAG_NAME[kind] || 'LOG', text: text };
+    entries.push(e);
+    if (entries.length > CAP) entries.splice(0, entries.length - CAP);
+    counts[e.kind] = (counts[e.kind] || 0) + 1;
+    counts.all++;
+    S.lines++;
+    if (kind === 'frame' && /\[FRAME\]/.test(text)) S.frames++;
+    if (matches(e)) appendLine(e);
+    renderCounts();
+    updateStatusbar();
+  }
+  function matches(e) {
+    if (filter !== 'all') {
+      var f = filterOf(filter);
+      if (f.group && f.group.indexOf(e.kind) === -1) return false;
+    }
+    if (searchTerm && e.text.toLowerCase().indexOf(searchTerm) === -1) return false;
+    return true;
+  }
+  function logEl() { return $('#log'); }
+  function appendLine(e) {
+    var box = logEl();
+    var emptyEl = $('.empty', box);
+    if (emptyEl) emptyEl.remove();
+    var d = document.createElement('div');
+    d.className = 'ln k-' + e.kind;
+    d.innerHTML = '<span class="t">' + e.t + '</span><span class="tag">' + e.tag + '</span><span class="m"></span>';
+    $('.m', d).textContent = e.text;
+    box.appendChild(d);
+    if ($('#follow').checked) box.scrollTop = box.scrollHeight;
+  }
+  function renderLog() {
+    var box = logEl();
+    box.innerHTML = '';
+    var list = entries.filter(matches);
+    if (!list.length) {
+      box.innerHTML = '<p class="empty">' +
+        (entries.length ? '当前筛选下没有输出。' : '尚无串口输出。点击「连接设备」，或点「模拟设备」在无硬件的情况下完整走一遍配置流程。') +
+        '</p>';
+      return;
+    }
+    var frag = document.createDocumentFragment();
+    list.forEach(function (e) {
+      var d = document.createElement('div');
+      d.className = 'ln k-' + e.kind;
+      d.innerHTML = '<span class="t">' + e.t + '</span><span class="tag">' + e.tag + '</span><span class="m"></span>';
+      $('.m', d).textContent = e.text;
+      frag.appendChild(d);
+    });
+    box.appendChild(frag);
+    if ($('#follow').checked) box.scrollTop = box.scrollHeight;
+  }
+  function renderCounts() {
+    $$('#chips .chip').forEach(function (b) {
+      var f = filterOf(b.dataset.f);
+      var n = $('.n', b);
+      if (f.id === 'all') { n.textContent = counts.all; return; }
+      if (!f.group) { n.textContent = 0; return; }
+      n.textContent = f.group.reduce(function (a, k) { return a + (counts[k] || 0); }, 0);
+    });
+  }
+  function buildChips() {
+    var wrap = $('#chips');
+    FILTERS.forEach(function (f) {
+      var b = document.createElement('button');
+      b.className = 'chip'; b.dataset.f = f.id;
+      b.setAttribute('aria-pressed', String(f.id === filter));
+      b.innerHTML = f.label + '<span class="n">0</span>';
+      b.addEventListener('click', function () {
+        filter = f.id;
+        $$('#chips .chip').forEach(function (x) { x.setAttribute('aria-pressed', String(x.dataset.f === filter)); });
+        renderLog();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     3. 输出解析（严格对齐固件实际打印格式）
+     ═══════════════════════════════════════════════════════════════════ */
+  function kvParse(text, keys) {
+    var out = {};
+    keys.forEach(function (k) {
+      var m = text.match(new RegExp('\\b' + k + '=(-?[\\d.]+)'));
+      if (m) out[k] = parseFloat(m[1]);
+    });
+    return out;
+  }
+  function parseLine(raw) {
+    var line = raw.replace(/\r$/, '');
+    if (!line.length) return;
+    push(classify(line), line);
+
+    if (line.indexOf('[STAT]') === 0) {
+      var m = kvParse(line, ['up', 'RSSI', 'SNR', 'G', 'AGC', 'SQ', 'SQN', 'FREQ', 'DUPMS', 'I2CE', 'ID',
+                             'RX', 'U', 'DUP', 'UNREAD', 'INBOX', 'DROPN', 'FIX', 'FIX2', 'REP', 'ISRmax']);
+      apply(m);
+      var avg = line.match(/ISRavg=([\d.]+)us/); if (avg) S.isrAvg = parseFloat(avg[1]);
+      var t = line.match(/\bT=([\d-]+ [\d:]+)/); if (t) S.rtc = t[1];
+      renderStatus(); renderLCD();
+    } else if (line.indexOf('R19=') === 0) {
+      var t2 = kvParse(line, ['RSSI', 'SNR', 'G', 'RX', 'U', 'DUP', 'FIX', 'FIX2', 'REP', 'I2CE', 'ID', 'T']);
+      if (t2.RSSI !== undefined) S.rssi = t2.RSSI;
+      if (t2.SNR !== undefined) S.snr = t2.SNR;
+      if (t2.G !== undefined) S.g = t2.G;
+      if (t2.RX !== undefined) S.rx = t2.RX;
+      if (t2.DUP !== undefined) S.dup = t2.DUP;
+      if (t2.FIX !== undefined) S.fix = t2.FIX;
+      if (t2.FIX2 !== undefined) S.fix2 = t2.FIX2;
+      if (t2.REP !== undefined) S.rep = t2.REP;
+      if (t2.ID !== undefined) S.id = t2.ID;
+      renderStatus(); renderLCD();
+    } else if (line.indexOf('S=') === 0) {
+      var sm = line.match(/^S=(\d+)/);
+      if (sm) S.smeter = clamp(parseInt(sm[1], 10), 0, 9);
+      var mu = line.match(/\bM=([01])\b/);
+      if (mu && +mu[1] !== S.mute) {
+        S.mute = +mu[1];
+        $('#muteIn').checked = !!S.mute;
+        $('#valMute').textContent = S.mute ? '断' : '通';
+      }
+      renderStatus(); renderLCD();
+    } else if (line.indexOf('[CFG] ') === 0) {
+      var b = line.slice(6);
+      var g = b.match(/^gain=(\d+) \((\d+)dB\) AGC=(\d)/);
+      if (g) { S.g = +g[1]; S.agc = +g[3]; syncConfigUI(); renderLCD(); }
+      var a = b.match(/^AGC=(\d)/); if (a) { S.agc = +a[1]; syncConfigUI(); }
+      var q = b.match(/^SQ=(\d+)/); if (q) { S.sq = +q[1]; syncConfigUI(); }
+      var qn = b.match(/^SQN=(\d+)/); if (qn) { S.sqn = +qn[1]; syncConfigUI(); }
+      var fr = b.match(/^FREQ=(\d+)kHz/); if (fr) { S.freq = +fr[1]; syncConfigUI(); renderLCD(); }
+      var mu = b.match(/^MUTE=(\d)/); if (mu) { S.mute = +mu[1]; syncConfigUI(); }
+      var du = b.match(/^DUPMS=(\d+)ms/); if (du) { S.dupms = +du[1]; syncConfigUI(); }
+      renderStatus();
+    } else if (line.indexOf('[RTC] ') === 0) {
+      var setM = line.match(/\[RTC\] (?:now|set) ([\d-]+ [\d:]+) (\w+) src=(\S+)/);
+      if (setM) { S.rtc = setM[1] + ' ' + setM[2]; S.rtcSrc = setM[3]; }
+      var sr = line.match(/src=(\S+)/); if (sr && S.rtcSrc === null) S.rtcSrc = sr[1];
+      var tr = line.match(/trim=([+-]?\d+)ppm/); if (tr) { S.trim = +tr[1]; }
+      if (/no-time/.test(line)) { S.rtc = null; }
+      renderStatus(); renderLCD();
+    } else if (line.indexOf('[LOG] n=') === 0) {
+      var n = line.match(/n=(\d+) cap=(\d+) seq_last=(\d+) lost=(\d+)/);
+      if (n) { S.logN = +n[1]; S.logCap = +n[2]; S.logLost = +n[4]; }
+      renderStatus();
+    } else if (line.indexOf('[LOG] ') === 0 && line.indexOf('i=') > 0) {
+      var lg = line.match(/t=([\d-]+ [\d:]+) src=(\S+)/);
+      if (lg) { S.lastFrame = { src: lg[2], body: (line.match(/info=(.*)$/) || [])[1] || '', time: lg[1], rssi: (line.match(/rssi=(\S+)/) || [])[1] }; renderLCD(); }
+    } else if (line.indexOf('[INBOX] n=') === 0) {
+      var ib = kvParse(line, ['n', 'unread', 'dropn']);
+      if (ib.n !== undefined) S.inbox = ib.n;
+      if (ib.unread !== undefined) S.unread = ib.unread;
+      if (ib.dropn !== undefined) S.dropn = ib.dropn;
+      renderStatus(); renderLCD();
+    } else if (line.indexOf('[INBOX] i=') === 0) {
+      var it = line.match(/i=(\d+)\/(\d+) t=(\S+) src=(\S+) dst=(\S+) path=(\S*) rssi=(\S+) snr=(\S+) f=(\S+) r=(\d) h=(\S+) info=(.*)$/);
+      if (it) {
+        var item = { i: +it[1], n: +it[2], t: it[3], src: it[4], dst: it[5], path: it[6], rssi: it[7], snr: it[8], f: it[9], read: it[10] === '1', hash: it[11], body: it[12] };
+        S.inboxItems[item.i - 1] = item;
+        if (item.i === 1) { S.lastFrame = { src: item.src, body: item.body, time: item.t, rssi: item.rssi }; }
+        renderLCD();
+      }
+    } else if (line.indexOf('[FRAME]') >= 0) {
+      var src = (line.match(/src=(\S+)/) || [])[1];
+      var info = (line.match(/info=(.*)$/) || [])[1] || '';
+      var cut = info.search(/ RSSI=(?:-|\d)/);
+      if (cut >= 0) info = info.slice(0, cut);
+      var rs = (line.match(/RSSI=(\d+)/) || [])[1];
+      var snr = (line.match(/SNR=(\d+)/) || [])[1];
+      S.lastFrame = { src: src || '--', body: info, time: nowStamp().slice(0, 8), rssi: rs || '--', snr: snr || '--' };
+      if (lcdState !== 'inbox') setLcdState('unread', true);
+      renderLCD();
+    } else if (/^\s+msg=/.test(line) && S.lastFrame) {
+      S.lastFrame.body = line.replace(/^\s*msg=/, ''); renderLCD();
+    } else if (/^\s+\[(?:POS|MICE)\]/.test(line)) {
+      if (S.lastFrame) { S.lastFrame.pos = line.trim(); renderLCD(); }
+    }
+  }
+  function apply(m) {
+    if (m.RSSI !== undefined) S.rssi = m.RSSI;
+    if (m.SNR !== undefined) S.snr = m.SNR;
+    if (m.G !== undefined) S.g = m.G;
+    if (m.AGC !== undefined) S.agc = m.AGC;
+    if (m.SQ !== undefined) S.sq = m.SQ;
+    if (m.SQN !== undefined) S.sqn = m.SQN;
+    if (m.FREQ !== undefined) S.freq = m.FREQ;
+    if (m.DUPMS !== undefined) S.dupms = m.DUPMS;
+    if (m.I2CE !== undefined) S.i2ce = m.I2CE;
+    if (m.ID !== undefined) S.id = m.ID;
+    if (m.RX !== undefined) S.rx = m.RX;
+    if (m.U !== undefined) S.uniq = m.U;
+    if (m.DUP !== undefined) S.dup = m.DUP;
+    if (m.UNREAD !== undefined) S.unread = m.UNREAD;
+    if (m.INBOX !== undefined) S.inbox = m.INBOX;
+    if (m.DROPN !== undefined) S.dropn = m.DROPN;
+    if (m.FIX !== undefined) S.fix = m.FIX;
+    if (m.FIX2 !== undefined) S.fix2 = m.FIX2;
+    if (m.REP !== undefined) S.rep = m.REP;
+    if (m.ISRmax !== undefined) S.isrMax = m.ISRmax;
+    if (m.up !== undefined) S.upMs = m.up;
+    syncConfigUI();
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     4. 状态面板渲染
+     ═══════════════════════════════════════════════════════════════════ */
+  function fmtUp(ms) {
+    var s = Math.floor(ms / 1000);
+    return pad(Math.floor(s / 3600), 2) + ':' + pad(Math.floor(s / 60) % 60, 2) + ':' + pad(s % 60, 2);
+  }
+  function fmtFreq(khz) { return (khz / 1000).toFixed(3); }
+  function renderKV(sel, rows) {
+    var el = $(sel); if (!el) return;
+    el.innerHTML = rows.map(function (r) {
+      return '<div><dt>' + r[0] + '</dt><dd class="' + r[2] + '">' + r[1] + '</dd></div>';
+    }).join('');
+  }
+
+  function renderStatus() {
+    $('#vRssi').textContent = S.rssi === null ? '--' : S.rssi;
+    $('#vSnr').textContent = S.snr === null ? '--' : S.snr;
+    $('#vFreq').innerHTML = fmtFreq(S.freq) + '<span class="u">MHz</span>';
+
+    var lvl = S.smeter !== null ? S.smeter
+            : (S.rssi === null ? 0 : clamp(Math.round(S.rssi / 127 * 9), 0, 9));
+    $$('#sMeter i').forEach(function (seg, i) {
+      seg.className = i < lvl ? ('on' + (i >= 7 ? ' hi' : '')) : '';
+    });
+
+    var rowsMain = [
+      ['中频增益 G', S.g + ' 档 / ' + (S.g * 3) + ' dB', ''],
+      ['自动增益 AGC', S.agc ? '开' : '关', S.agc ? 'ok' : ''],
+      ['静噪 SQ', String(S.sq), ''],
+      ['去重窗口 DUPMS', S.dupms + ' ms', ''],
+      ['未读 / 总数', S.unread + ' / ' + S.inbox, ''],
+      ['满箱丢弃 DROPN', String(S.dropn), S.dropn > 0 ? 'hot' : 'zero']
+    ];
+    var rowsMore = [
+      ['噪声阈值 SQN', String(S.sqn), ''],
+      ['I2C 错误 I2CE', String(S.i2ce), S.i2ce > 0 ? 'hot' : 'zero'],
+      ['芯片 ID', S.id === null ? '--' : '0x' + S.id.toString(16).toUpperCase() + ' (' + S.id + ')', ''],
+      ['累计帧 RX', String(S.rx), S.rx ? '' : 'zero'],
+      ['独立台站 U', String(S.uniq), S.uniq ? '' : 'zero'],
+      ['冗余合并 DUP', String(S.dup), S.dup ? '' : 'zero'],
+      ['纠错 FIX / FIX2', S.fix + ' / ' + S.fix2, ''],
+      ['参考恢复 REP', String(S.rep), ''],
+      ['ISR 均值 / 峰值', (S.isrAvg === null ? '--' : S.isrAvg.toFixed(2) + ' µs') + ' / ' + (S.isrMax === null ? '--' : S.isrMax + ' µs'), ''],
+      ['上电时长', fmtUp(S.upMs), '']
+    ];
+    renderKV('#statTable', rowsMain);
+    renderKV('#statTableMore', rowsMore);
+
+    $('#rtcNow').textContent = S.rtc || '--';
+    $('#rtcSrc').textContent = S.rtcSrc || '--';
+    $('#valTrim').textContent = (S.trim >= 0 ? '+' : '') + S.trim;
+    var rp = $('#rtcPill');
+    if (S.rtc) { rp.className = 'pill ok'; rp.textContent = '已对时'; }
+    else { rp.className = 'pill warn'; rp.textContent = '未对时'; }
+    $('#logCap').textContent = S.logCap === null ? '--' : S.logCap + ' 条';
+    $('#logN').textContent = S.logN === null ? '--' : S.logN + ' 条';
+    $('#logLost').textContent = S.logLost === null ? '--' : S.logLost + ' 条';
+
+    $('#sbTime').textContent = S.rtc ? 'RTC ' + S.rtc.slice(0, 16) : 'RTC --';
+    var age = $('#statAge');
+    if (S.rssi === null) { age.className = 'pill'; age.textContent = '未读取'; }
+    else { age.className = 'pill ok'; age.textContent = '实时'; }
+    updateStatusbar();
+  }
+  function updateStatusbar() {
+    $('#sbLines').textContent = S.lines;
+    $('#sbFrames').textContent = S.frames;
+    $('#sbDrops').textContent = S.dropn;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     5. 128×64 屏幕镜像（1-bit 像素化，版面取自 design.md §5–§6）
+     ═══════════════════════════════════════════════════════════════════ */
+  var SCALE = 3;
+  var off = document.createElement('canvas'); off.width = 128; off.height = 64;
+  var octx = off.getContext('2d');
+  var lcdState = store.get('lcdState', 'standby');
+  if (['standby', 'unread', 'inbox'].indexOf(lcdState) < 0) lcdState = 'standby';
+  var lcdTheme = store.get('lcdTheme', 'lcd');
+
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function lcdColors() {
+    return lcdTheme === 'oled'
+      ? { ink: cssVar('--lcd-ink-oled'), paper: cssVar('--lcd-paper-oled') }
+      : { ink: cssVar('--lcd-ink-lcd'), paper: cssVar('--lcd-paper-lcd') };
+  }
+  function fit(text, font, maxW) {
+    octx.font = font;
+    if (octx.measureText(text).width <= maxW) return text;
+    var out = text;
+    while (out.length > 1 && octx.measureText(out + '…').width > maxW) out = out.slice(0, -1);
+    return out + '…';
+  }
+  function wrap2(text, font, maxW) {
+    var lines = [], cur = '';
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      octx.font = font;
+      if (octx.measureText(cur + ch).width > maxW && cur) { lines.push(cur); cur = ch; if (lines.length === 2) break; }
+      else cur += ch;
+    }
+    if (lines.length < 2 && cur) lines.push(cur);
+    return [lines[0] || '', lines[1] || ''];
+  }
+  function weekday(w) { return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][w || 0]; }
+  function wdayEn(w) { return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][w || 0]; }
+
+  function lcdLayout() {
+    var texts = [], inv = [];
+    var F10 = '10px ' + cssVar('--font-lcd');
+    var F12 = '12px ' + cssVar('--font-lcd');
+    var F20 = '20px ' + cssVar('--font-lcd');
+    var F24 = '24px ' + cssVar('--font-lcd');
+    var mycall = S.mycall || 'BG5BLH';
+
+    if (lcdState === 'standby') {
+      inv = [[0, 0, 64, 64]];
+      var d = new Date();
+      var clock = S.rtc ? S.rtc.slice(11, 16) : pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2);
+      var dateStr = S.rtc
+        ? weekday(new Date(S.rtc.replace(' ', 'T')).getDay()) + ' ' + (+S.rtc.slice(5, 7)) + '/' + (+S.rtc.slice(8, 10))
+        : weekday(d.getDay()) + ' ' + (d.getMonth() + 1) + '/' + d.getDate();
+      texts.push({ s: clock, x: 32, y: 11, font: F24, align: 'center' });
+      texts.push({ s: dateStr, x: 32, y: 41, font: F12, align: 'center' });
+      texts.push({ s: '本机', x: 96, y: 2, font: F10, align: 'center' });
+      texts.push({ s: fit(mycall, F20, 60), x: 96, y: 12, font: F20, align: 'center' });
+      texts.push({ s: '电量', x: 80, y: 34, font: F10, align: 'center' });
+      texts.push({ s: '高', x: 80, y: 48, font: F12, align: 'center' });
+      texts.push({ s: '未读', x: 112, y: 34, font: F10, align: 'center' });
+      texts.push({ s: fit((S.unread || 0) + '/' + (S.inbox || 0), F12, 30), x: 112, y: 48, font: F12, align: 'center' });
+    } else if (lcdState === 'unread') {
+      inv = [[0, 0, 64, 64]];
+      var lf = S.lastFrame || { src: 'BG5BLH-7', body: '有内鬼 停止交易', time: '14:26:03', rssi: '127' };
+      var body = (lf.body || '').replace(/^[:]\S+\s*:/, '').trim();
+      var l2 = wrap2(body, F12, 58);
+      var pos = (body.match(/(\d{4}\.\d{2}[NS])\/(\d{5}\.\d{2}[EW])/) || []);
+      texts.push({ s: fit(lf.src, F12, 58), x: 32, y: 2, font: F12, align: 'center' });
+      texts.push({ s: l2[0], x: 32, y: 18, font: F12, align: 'center' });
+      texts.push({ s: l2[1], x: 32, y: 34, font: F12, align: 'center' });
+      texts.push({ s: (lf.time || '--').slice(0, 8), x: 32, y: 50, font: F12, align: 'center' });
+      texts.push({ s: fit(pos[1] || '--', F12, 58), x: 96, y: 2, font: F12, align: 'center' });
+      texts.push({ s: fit(pos[2] || '--', F12, 58), x: 96, y: 18, font: F12, align: 'center' });
+      texts.push({ s: 'RSSI', x: 80, y: 34, font: F10, align: 'center' });
+      texts.push({ s: String(S.rssi === null ? '--' : S.rssi), x: 80, y: 48, font: F12, align: 'center' });
+      texts.push({ s: 'SNR', x: 112, y: 34, font: F10, align: 'center' });
+      texts.push({ s: String(S.snr === null ? '--' : S.snr), x: 112, y: 48, font: F12, align: 'center' });
+    } else {
+      inv = [[0, 0, 128, 12]];
+      var lf2 = S.lastFrame || { src: 'BG5BLH-7', body: 'BBcall TEST3/A=000022', path: 'WIDE1-1,WIDE2-1', time: '14:26:03', rssi: '127' };
+      var body2 = (lf2.body || '').replace(/^[:]\S+\s*:/, '').trim();
+      var l3 = wrap2(body2, F12, 118);
+      var n = S.inbox || 1, idx = 1;
+      texts.push({ s: fit(lf2.src, F12, 70), x: 4, y: 0, font: F12, align: 'left' });
+      texts.push({ s: idx + ' / ' + n, x: 124, y: 0, font: F12, align: 'right' });
+      texts.push({ s: l3[0], x: 64, y: 16, font: F12, align: 'center' });
+      texts.push({ s: l3[1], x: 64, y: 28, font: F12, align: 'center' });
+      texts.push({ s: (lf2.time || '--').slice(0, 8), x: 4, y: 40, font: F12, align: 'left' });
+      texts.push({ s: 'RSSI ' + (S.rssi === null ? '--' : S.rssi), x: 76, y: 40, font: F12, align: 'left' });
+      texts.push({ s: fit(lf2.path || '(none)', F12, 88), x: 4, y: 52, font: F12, align: 'left' });
+      texts.push({ s: 'OK', x: 106, y: 52, font: F12, align: 'left' });
+    }
+    return { inv: inv, texts: texts };
+  }
+
+  function renderLCD() {
+    var c = $('#lcd').getContext('2d');
+    var col = lcdColors();
+    var L = lcdLayout();
+    var W = 128 * SCALE, H = 64 * SCALE;
+    c.fillStyle = col.paper; c.fillRect(0, 0, W, H);
+    c.fillStyle = col.ink;
+    L.inv.forEach(function (r) { c.fillRect(r[0] * SCALE, r[1] * SCALE, r[2] * SCALE, r[3] * SCALE); });
+    if (lcdState === 'standby') {
+      [[64, 0, 1, 64], [64, 32, 64, 1], [96, 32, 1, 32]].forEach(function (r) {
+        c.fillRect(r[0] * SCALE, r[1] * SCALE, r[2] * SCALE, r[3] * SCALE);
+      });
+    }
+    octx.clearRect(0, 0, 128, 64);
+    octx.fillStyle = cssVar('--fg');
+    octx.textBaseline = 'top';
+    L.texts.forEach(function (t) {
+      octx.font = t.font; octx.textAlign = t.align || 'left';
+      octx.fillText(t.s, t.x, t.y);
+    });
+    var img = octx.getImageData(0, 0, 128, 64).data;
+    for (var y = 0; y < 64; y++) {
+      for (var x = 0; x < 128; x++) {
+        if (img[(y * 128 + x) * 4 + 3] > 140) {
+          var inverted = false;
+          for (var i = 0; i < L.inv.length; i++) {
+            var r = L.inv[i];
+            if (x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3]) { inverted = true; break; }
+          }
+          c.fillStyle = inverted ? col.paper : col.ink;
+          c.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
+        }
+      }
+    }
+  }
+  function setLcdState(s, silent) {
+    lcdState = s;
+    store.set('lcdState', s);
+    $$('[data-lcd-state]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.lcdState === s)); });
+    renderLCD();
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     6. 链路：Web Serial + 内置设备模拟器
+     ═══════════════════════════════════════════════════════════════════ */
+  var port = null, reader = null, readLoop = null, keepReading = false;
+  var rxBuf = '';
+  var serialSupported = typeof navigator !== 'undefined' && 'serial' in navigator;
+
+  function setLink(state, text) {
+    var el = $('#linkState');
+    el.className = 'linkstate' + (state === 'on' ? ' on' : state === 'warn' ? ' warn' : '');
+    $('#linkText').textContent = text;
+    $('#connectBtn').textContent = (state === 'on') ? '断开连接' : '连接设备';
+    $('#connectBtn').className = 'btn ' + (state === 'on' ? 'btn-danger' : 'btn-primary');
+  }
+  function ingest(chunk) {
+    rxBuf += chunk;
+    var lines = rxBuf.split(/\r?\n/);
+    rxBuf = lines.pop();
+    lines.forEach(parseLine);
+  }
+
+  async function listPorts() {
+    var sel = $('#portSel');
+    var prev = store.get('port', '') || sel.value;
+    sel.innerHTML = '';
+    if (!serialSupported) {
+      var o = document.createElement('option'); o.textContent = '无 Web Serial · 请用模拟设备'; o.value = '';
+      sel.appendChild(o);
+      return;
+    }
+    try {
+      var ports = await navigator.serial.getPorts();
+      if (!ports.length) {
+        var o2 = document.createElement('option'); o2.textContent = '未授权串口 — 点连接授权'; o2.value = '';
+        sel.appendChild(o2);
+      }
+      ports.forEach(function (p, i) {
+        var info = p.getInfo ? p.getInfo() : {};
+        var label = (info.usbVendorId ? 'USB ' + info.usbVendorId.toString(16) : '串口') + ' #' + (i + 1);
+        var opt = document.createElement('option');
+        opt.value = label; opt.textContent = label; opt.dataset.i = i;
+        sel.appendChild(opt);
+      });
+      if (prev) { var found = $$('option', sel).some(function (x) { return x.value === prev; }); if (found) sel.value = prev; }
+    } catch (e) { /* ignore */ }
+  }
+
+  async function connectSerial() {
+    if (!serialSupported) { toast('当前环境不支持 Web Serial，已切到模拟设备', 'warn'); startSim(); return; }
+    try {
+      var p = await navigator.serial.requestPort();
+      await p.open({ baudRate: parseInt($('#baudSel').value, 10) || 115200 });
+      port = p; keepReading = true;
+      S.connected = true; S.mode = 'serial'; S.smeter = null;
+      setLink('on', '已连接 · 实机');
+      toast('已连接串口，开始接收设备输出');
+      readLoop = (async function () {
+        var dec = new TextDecoder();
+        while (keepReading && port && port.readable) {
+          reader = port.readable.getReader();
+          try {
+            while (keepReading) {
+              var res = await reader.read();
+              if (res.done) break;
+              ingest(dec.decode(res.value, { stream: true }));
+            }
+          } catch (e) { push('err', '[link] 读取中断：' + e.message); }
+          finally { try { reader.releaseLock(); } catch (e2) {} }
+        }
+      })();
+      setTimeout(function () { send('PING'); }, 400);
+    } catch (e) {
+      toast('打开串口失败：' + (e && e.message ? e.message : e), 'bad');
+    }
+  }
+
+  async function disconnect() {
+    keepReading = false;
+    try { if (reader) await reader.cancel(); } catch (e) {}
+    try { if (port) await port.close(); } catch (e) {}
+    port = null; reader = null; readLoop = null;
+    S.connected = false; S.mode = 'idle'; S.smeter = null;
+    setLink('', '未连接');
+    toast('已断开');
+  }
+
+  function send(text) {
+    var cmd = String(text || '').trim();
+    if (!cmd) return;
+    push('tx', cmd, 'TX');
+    if (S.mode === 'sim') { Sim.handle(cmd); }
+    else if (S.mode === 'serial' && port && port.writable) {
+      var w = port.writable.getWriter();
+      w.write(new TextEncoder().encode(cmd + '\r\n')).then(function () { w.releaseLock(); });
+    } else {
+      push('err', '[link] 未连接：命令未发出');
+    }
+    hist.add(cmd);
+  }
+
+  /* ─── 设备模拟器：按固件真实格式回答 ─────────────────────────────── */
+  var Sim = (function () {
+    var t = { up: 0 }, timers = [];
+    var logItems = [];
+    var RSSI = 127, SNR = 63;
+    var FRAMES = [
+      { src: 'BG5BLB-12', body: '有内鬼 停止交易' },
+      { src: 'BG5BLH-7', body: 'BBcall TEST3/A=000022', pos: '2945.58N/12137.26E' },
+      { src: 'BG5BLH', body: ':BG5BLH   :Hello APRS 144.640' },
+      { src: 'BG5BLB-12', body: '有内鬼 停止交易', pos: '3952.49N/12028.55E' }
+    ];
+    function emit(line) { parseLine(line); }
+    function rssiNow() {
+      var base = S.agc ? 108 : (72 + S.g * 6);
+      return clamp(Math.round(base + (Math.random() * 24 - 12)), 40, 127);
+    }
+    function tick05() {
+      var s = clamp(Math.round(rssiNow() / 127 * 9), 1, 9);
+      emit('S=' + s + ' MK=' + Math.round(Math.random() * 4000) +
+           ' SP=' + Math.round(Math.random() * 3000) +
+           ' OT=' + Math.round(Math.random() * 90) +
+           ' A0=' + (1500 + Math.round(Math.random() * 400)) +
+           ' A1=' + (2100 + Math.round(Math.random() * 400)) +
+           ' M=' + S.mute);
+    }
+    function tick2() {
+      var r = rssiNow();
+      var snr = clamp(Math.round(r * 0.5 + Math.random() * 10), 0, 63);
+      emit('R19=' + (0x9000 + Math.round(Math.random() * 0x3FFF)) + ' RSSI=' + r + ' SNR=' + snr +
+           ' G=' + S.g + ' AGC=' + S.agc + ' RX=' + S.rx + ' U=' + S.uniq + ' DUP=' + S.dup +
+           ' FIX=' + S.fix + ' FIX2=' + S.fix2 + ' REP=' + S.rep +
+           ' I2CE=' + S.i2ce + ' AFC=' + Math.round(Math.random() * 255) + ' EXN=' + (5 + Math.round(Math.random() * 20)) +
+           ' R22=' + (S.sq ? '0C00' : '0000') + ' R23=' + pad((0x6400 + S.sqn).toString(16).toUpperCase(), 4) +
+           ' ID=18434 T=1 P=' + Math.round(Math.random() * 3000));
+      if (S.rtc) { emit('[STAT] up=' + t.up + 'ms RSSI=' + r + ' SNR=' + snr + ' G=' + S.g + ' AGC=' + S.agc +
+                        ' SQ=' + S.sq + ' SQN=' + S.sqn + ' FREQ=' + S.freq + ' DUPMS=' + S.dupms +
+                        ' I2CE=' + S.i2ce + ' ID=18434 RX=' + S.rx + ' U=' + S.uniq + ' DUP=' + S.dup +
+                        ' UNREAD=' + S.unread + ' INBOX=' + S.inbox + ' DROPN=' + S.dropn +
+                        ' FIX=' + S.fix + ' FIX2=' + S.fix2 + ' REP=' + S.rep +
+                        ' ISRavg=104.20us ISRmax=138us T=' + S.rtc); }
+    }
+    function frame() {
+      var f = FRAMES[Math.floor(Math.random() * FRAMES.length)];
+      var r = rssiNow();
+      var snr = clamp(Math.round(r * 0.45 + Math.random() * 8), 0, 63);
+      var flags = Math.random() < 0.12 ? 'FIX' : (Math.random() < 0.12 ? 'REP' : '');
+      if (flags === 'FIX') S.fix++; else if (flags === 'REP') S.rep++;
+      S.rx++; S.uniq = Math.min(16, S.uniq + (Math.random() < 0.25 ? 1 : 0));
+      S.unread++; S.inbox = Math.min(16, S.inbox + 1);
+      if (S.inbox >= 16) { S.dropn++; }
+      var hash = pad(Math.round(Math.random() * 65535).toString(16).toUpperCase(), 4);
+      var hex = Array.from({ length: 47 }, function () { return pad(Math.round(Math.random() * 255).toString(16).toUpperCase(), 2); }).join('');
+      var path = Math.random() < 0.5 ? 'WIDE1-1,WIDE2-1' : '(none)';
+      emit((flags ? '[' + flags + '] ' : '') + '[T=' + t.up + 'ms]');
+      emit('[RAW] len=47 hex=' + hex);
+      emit('[FRAME] src=' + f.src + ' dest=APRS path=' + path + ' ctrl=3 info=' + f.body +
+           ' RSSI=' + r + ' SNR=' + snr + ' (decode-now)');
+      if (/^:/.test(f.body)) emit(' msg=' + f.body.replace(/^:[^:]*:/, ''));
+      else if (f.pos) { var pp = f.pos.split('/'); emit(' [POS] lat=' + pp[0] + ' lon=' + pp[1]); }
+      S.lastFrame = { src: f.src, body: f.body, time: new Date().toTimeString().slice(0, 8), rssi: String(r), path: path, pos: f.pos };
+      Sim.last = f;
+      logItems.push({ src: f.src, t: S.rtc || ('UP+' + Math.floor(t.up / 1000) + 's'), rssi: r, snr: snr, f: flags || 'OK', h: hash, info: f.body });
+      renderStatus(); renderLCD();
+    }
+    return {
+      last: null,
+      start: function () {
+        if (S.rtcSrc === null) { S.rtcSrc = 'LSE'; }
+        S.trim = 0;
+        emit('[RTC] cfg=1 src=LSE lse=142ms trim=+0ppm (eff=+0ppm) div=32768 seeded=' + new Date().toISOString().slice(0, 19).replace('T', ' '));
+        S.rtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        emit('[LCD] UI v2.0 three-state (design.md), keys: UP/DOWN/OK, long-press 620ms');
+        emit('[LOG] init pages=13 record=72B cap=182 n=9 seq_last=8 base=0800CC00');
+        S.logCap = 182; S.logN = 0; S.logLost = 0;
+        S.id = 18434; S.g = 4; S.agc = 1; S.sq = 0; S.sqn = 255; S.freq = 144640; S.dupms = 2000;
+        S.rx = 12; S.uniq = 3; S.dup = 5; S.unread = 1; S.inbox = 3;
+        S.rssi = rssiNow(); S.snr = 63;
+        renderStatus(); syncConfigUI(); renderLCD();
+        timers.push(setInterval(function () { t.up += 500; tick05(); }, 900));
+        timers.push(setInterval(function () { t.up += 500; tick2(); }, 2600));
+        timers.push(setInterval(function () { if (Math.random() < 0.65) frame(); }, 5200));
+      },
+      stop: function () { timers.forEach(clearInterval); timers = []; },
+      handle: function (cmd) {
+        var c = cmd.trim(), reply = null;
+        var after = function (fn, ms) { setTimeout(fn, ms || (30 + Math.random() * 70)); };
+        if (/^PING$/i.test(c)) { after(function () { emit('[CFG] pong'); }); return; }
+        var m;
+        if ((m = c.match(/^STAT\?$/i))) { after(function () { tick2(); }, 40); return; }
+        if ((m = c.match(/^GAIN=(\d+)$/i))) {
+          var v = parseInt(m[1], 10);
+          if (v > 7) { after(function () { emit('[CFG] err: GAIN=0..7 (3dB/step)'); }); return; }
+          S.g = v; S.agc = 0; syncConfigUI();
+          after(function () { emit('[CFG] gain=' + v + ' (' + v * 3 + 'dB) AGC=0'); }); return;
+        }
+        if ((m = c.match(/^AGC=([01])$/i))) { S.agc = parseInt(m[1], 10); syncConfigUI(); after(function () { emit('[CFG] AGC=' + S.agc); }); return; }
+        if ((m = c.match(/^SQ=(\d+)$/i))) { S.sq = parseInt(m[1], 10); syncConfigUI(); after(function () { emit('[CFG] SQ=' + S.sq); }); return; }
+        if ((m = c.match(/^SQN=(\d+)$/i))) { S.sqn = parseInt(m[1], 10); syncConfigUI(); after(function () { emit('[CFG] SQN=' + S.sqn); }); return; }
+        if ((m = c.match(/^FREQ=(\d+)$/i))) { S.freq = parseInt(m[1], 10); syncConfigUI(); renderLCD(); after(function () { emit('[CFG] FREQ=' + S.freq + 'kHz'); }); return; }
+        if ((m = c.match(/^MUTE=([01])$/i))) { S.mute = parseInt(m[1], 10); syncConfigUI(); after(function () { emit('[CFG] MUTE=' + S.mute); }); return; }
+        if ((m = c.match(/^DUPMS\?$/i))) { after(function () { emit('[CFG] DUPMS=' + S.dupms + 'ms'); }); return; }
+        if ((m = c.match(/^DUPMS=(\d+)$/i))) { S.dupms = parseInt(m[1], 10); syncConfigUI(); after(function () { emit('[CFG] DUPMS=' + S.dupms + 'ms'); }); return; }
+        if (/^TIME\?$/i.test(c)) { after(function () { emit('[RTC] now ' + S.rtc + ' ' + wdayEn(new Date().getDay()) + ' src=' + S.rtcSrc); }); return; }
+        if ((m = c.match(/^(?:TIME|SETTIME)=(.+)$/i))) {
+          var v2 = m[1].trim();
+          if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(v2)) { after(function () { emit('[RTC] err: bad TIME format'); }); return; }
+          S.rtc = v2; renderStatus(); renderLCD();
+          after(function () { emit('[RTC] set ' + v2 + ' ' + wdayEn(new Date(v2.replace(' ', 'T')).getDay()) + ' src=' + S.rtcSrc); }); return;
+        }
+        if ((m = c.match(/^TRIM\?$/i))) { after(function () { var sg = S.trim >= 0 ? '+' : ''; emit('[RTC] src=' + S.rtcSrc + ' trim=' + sg + S.trim + 'ppm (eff=' + sg + S.trim + 'ppm) div=32768'); }); return; }
+        if ((m = c.match(/^TRIM=([+-]?\d+)$/i))) { S.trim = parseInt(m[1], 10); renderStatus(); after(function () { var sg = S.trim >= 0 ? '+' : ''; emit('[RTC] trim set trim=' + sg + S.trim + 'ppm (eff=' + sg + S.trim + 'ppm) div=32768'); }); return; }
+        if (/^INBOX\?$/i.test(c)) {
+          after(function () {
+            var n = S.inbox;
+            emit('[INBOX] n=' + n + ' unread=' + S.unread + ' dropn=' + S.dropn);
+            for (var i = 1; i <= n; i++) {
+              var f = FRAMES[(i - 1) % FRAMES.length];
+              emit('[INBOX] i=' + i + '/' + n + ' t=' + ((S.rtc || '').slice(11, 19) || new Date().toTimeString().slice(0, 8)) + ' src=' + f.src +
+                   ' dst=APRS path=' + (f.pos ? 'WIDE1-1' : '(none)') + ' rssi=' + (110 + i) + ' snr=19 f=OK r=' + (i === 1 ? 0 : 1) +
+                   ' h=' + pad((0x6D6F + i).toString(16).toUpperCase(), 4) + ' info=' + f.body);
+            }
+          }, 60); return;
+        }
+        if (/^LOG\?$/i.test(c)) {
+          after(function () {
+            var n = logItems.length;
+            emit('[LOG] n=' + n + ' cap=182 seq_last=' + (n ? n - 1 : 0) + ' lost=0 order=old2new');
+            for (var i = 0; i < n; i++) {
+              var it = logItems[i];
+              emit('[LOG] i=' + (i + 1) + '/' + n + ' t=' + it.t + ' src=' + it.src + ' rssi=' + it.rssi +
+                   ' snr=' + it.snr + ' f=' + it.f + ' h=' + it.h + ' info=' + it.info);
+            }
+            S.logN = n;
+          }, 60); return;
+        }
+        if (/^LOG0$/i.test(c)) { var old = logItems.length; logItems.length = 0; S.logN = 0; renderStatus(); after(function () { emit('[LOG] erased n=' + old + ' -> 0'); }); return; }
+        after(function () { emit('[RTC] err: TIME=YYYY-MM-DD HH:MM:SS'); });
+      }
+    };
+  })();
+
+  function startSim() {
+    if (S.mode === 'sim') { stopSim(); return; }
+    S.connected = true; S.mode = 'sim'; S.smeter = null;
+    setLink('warn', '模拟设备 · 无硬件');
+    Sim.start();
+    toast('已进入模拟设备模式：命令与输出格式与固件一致');
+  }
+  function stopSim() {
+    Sim.stop(); S.connected = false; S.mode = 'idle'; S.smeter = null;
+    setLink('', '未连接');
+    toast('已退出模拟设备');
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     7. 调参阅写
+     ═══════════════════════════════════════════════════════════════════ */
+  function setFreq(khz) {
+    S.freq = khz; syncConfigUI(); renderStatus(); renderLCD();
+    if (S.connected) send('FREQ=' + khz); else toast('FREQ=' + khz + ' —— 未连接，未下发', 'warn');
+  }
+  function setGain(v) {
+    S.g = v; S.agc = 0; syncConfigUI(); renderStatus();
+    if (S.connected) send('GAIN=' + v); else toast('GAIN=' + v + ' —— 未连接，未下发', 'warn');
+  }
+  function setAgc(on) {
+    S.agc = on ? 1 : 0; syncConfigUI(); renderStatus();
+    if (S.connected) send('AGC=' + S.agc); else toast('AGC=' + S.agc + ' —— 未连接，未下发', 'warn');
+  }
+  function setSq(v) {
+    S.sq = v; syncConfigUI(); renderStatus();
+    if (S.connected) send('SQ=' + v); else toast('SQ=' + v + ' —— 未连接，未下发', 'warn');
+  }
+  function setSqn(v) {
+    S.sqn = v; syncConfigUI();
+    if (S.connected) send('SQN=' + v); else toast('SQN=' + v + ' —— 未连接，未下发', 'warn');
+  }
+  function setMute(on) {
+    S.mute = on ? 1 : 0; syncConfigUI(); renderStatus();
+    if (S.connected) send('MUTE=' + S.mute); else toast('MUTE=' + S.mute + ' —— 未连接，未下发', 'warn');
+  }
+  function setDup(ms) {
+    S.dupms = ms; syncConfigUI();
+    if (S.connected) send('DUPMS=' + ms); else toast('DUPMS=' + ms + ' —— 未连接，未下发', 'warn');
+  }
+
+  function syncConfigUI() {
+    $('#freqIn').value = S.freq;
+    $('#valFreq').innerHTML = S.freq + ' <span style="color:var(--muted)">kHz · ' + fmtFreq(S.freq) + ' MHz</span>';
+    $('#gainIn').value = S.g;
+    $('#valGain').textContent = S.g;
+    $('#valGainDb').textContent = S.g * 3;
+    $('#agcIn').checked = !!S.agc;
+    $('#valAgc').textContent = S.agc ? '开' : '关';
+    $('#sqIn').value = S.sq;
+    $('#valSq').textContent = S.sq;
+    $('#sqnIn').value = S.sqn;
+    $('#valSqn').textContent = S.sqn;
+    $('#muteIn').checked = !!S.mute;
+    $('#valMute').textContent = S.mute ? '断' : '通';
+    if (document.activeElement !== $('#dupIn')) $('#dupIn').value = Math.min(6000, S.dupms);
+    if (document.activeElement !== $('#dupNum')) $('#dupNum').value = S.dupms;
+    $('#valDup').textContent = S.dupms;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     8. 交互接线
+     ═══════════════════════════════════════════════════════════════════ */
+  var hist = (function () {
+    var items = store.get('hist', []), pos = items.length;
+    return {
+      add: function (c) { items.push(c); if (items.length > 60) items.shift(); pos = items.length; store.set('hist', items); },
+      up: function () { if (pos > 0) pos--; return items[pos] || ''; },
+      down: function () { if (pos < items.length - 1) pos++; else pos = items.length; return items[pos] || ''; }
+    };
+  })();
+
+  function wire() {
+    buildChips();
+    // 串口
+    $('#connectBtn').addEventListener('click', function () {
+      if (S.mode === 'serial' || S.mode === 'sim') {
+        if (S.mode === 'sim') stopSim(); else disconnect();
+      } else { connectSerial(); }
+    });
+    $('#simBtn').addEventListener('click', function () { S.mode === 'serial' ? toast('请先断开实机串口') : startSim(); });
+    $('#portSel').addEventListener('change', function () { store.set('port', this.value); renderStatus(); });
+
+    // 命令
+    $('#sendBtn').addEventListener('click', function () { send($('#cmd').value); $('#cmd').value = ''; });
+    $('#cmd').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { send(this.value); this.value = ''; }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); this.value = hist.up(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); this.value = hist.down(); }
+    });
+    var QUICK = ['STAT?', 'PING', 'TIME?', 'INBOX?', 'LOG?'];
+    QUICK.forEach(function (c) {
+      var b = document.createElement('button');
+      b.className = 'btn btn-sm'; b.textContent = c;
+      b.addEventListener('click', function () { send(c); });
+      $('#quick').appendChild(b);
+    });
+    // 控制台工具
+    $('#search').addEventListener('input', function () { searchTerm = this.value.trim().toLowerCase(); renderLog(); });
+    $('#follow').addEventListener('change', function () { store.set('follow', this.checked); if (this.checked) logEl().scrollTop = logEl().scrollHeight; });
+    $('#clearBtn').addEventListener('click', function () { entries = []; counts = { all: 0, frame: 0, raw: 0, stat: 0, cfg: 0, rtc: 0, rec: 0, err: 0 }; renderLog(); renderCounts(); });
+    $('#exportBtn').addEventListener('click', function () {
+      var txt = entries.map(function (e) { return e.t + ' [' + e.tag + '] ' + e.text; }).join('\r\n') + '\r\n';
+      var blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'bbcall-serial-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.log';
+      a.click(); URL.revokeObjectURL(a.href);
+      toast('已导出 ' + entries.length + ' 行日志');
+    });
+
+    // LCD
+    $$('[data-lcd-state]').forEach(function (b) { b.addEventListener('click', function () { setLcdState(b.dataset.lcdState); }); });
+    $$('[data-lcd-theme]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        lcdTheme = b.dataset.lcdTheme; store.set('lcdTheme', lcdTheme);
+        $$('[data-lcd-theme]').forEach(function (x) { x.setAttribute('aria-pressed', String(x.dataset.lcdTheme === lcdTheme)); });
+        renderLCD();
+      });
+    });
+
+    // 右栏标签页
+    var tabs = $$('.tab');
+    function selectTab(id) {
+      tabs.forEach(function (t) { t.setAttribute('aria-selected', String(t.dataset.tab === id)); });
+      $$('[data-tabpanel]').forEach(function (p) { p.setAttribute('data-active', String(p.dataset.tabpanel === id)); });
+    }
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () { selectTab(t.dataset.tab); store.set('tab', t.dataset.tab); });
+    });
+    var savedTab = store.get('tab', 'cfg');
+    selectTab(/^(cfg|time|tools)$/.test(savedTab) ? savedTab : 'cfg');
+
+    // 调参
+    $('#freqIn').addEventListener('change', function () { var v = parseInt(this.value, 10); if (!isNaN(v) && v >= 24000) setFreq(v); else syncConfigUI(); });
+    $$('[data-freq]').forEach(function (b) { b.addEventListener('click', function () { setFreq(parseInt(b.dataset.freq, 10)); }); });
+    $('#gainIn').addEventListener('input', function () { $('#valGain').textContent = this.value; $('#valGainDb').textContent = this.value * 3; });
+    $('#gainIn').addEventListener('change', function () { setGain(parseInt(this.value, 10)); });
+    $('#agcIn').addEventListener('change', function () { setAgc(this.checked); });
+    $('#sqIn').addEventListener('input', function () { $('#valSq').textContent = this.value; });
+    $('#sqIn').addEventListener('change', function () { setSq(parseInt(this.value, 10)); });
+    $('#sqnIn').addEventListener('input', function () { $('#valSqn').textContent = this.value; });
+    $('#sqnIn').addEventListener('change', function () { setSqn(parseInt(this.value, 10)); });
+    $('#muteIn').addEventListener('change', function () { setMute(this.checked); });
+    $('#dupIn').addEventListener('input', function () { $('#valDup').textContent = this.value; $('#dupNum').value = this.value; });
+    $('#dupIn').addEventListener('change', function () { setDup(parseInt(this.value, 10)); });
+    $('#dupNum').addEventListener('change', function () { var v = clamp(parseInt(this.value, 10) || 0, 0, 60000); setDup(v); });
+    $('#resetBtn').addEventListener('click', function () { resetFirmwareDefaults(); toast('已下发固件默认值'); });
+
+    // 对时与工具
+    $('#syncNow').addEventListener('click', function () {
+      var d = new Date();
+      var s = d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2) + ' ' +
+              pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2);
+      send('TIME=' + s);
+    });
+    $('#timeQuery').addEventListener('click', function () { send('TIME?'); });
+    $('#trimQuery').addEventListener('click', function () { send('TRIM?'); });
+    $('#trimSet').addEventListener('click', function () {
+      var v = parseInt($('#trimIn').value, 10) || 0;
+      send('TRIM=' + (v >= 0 ? '+' + v : v));
+    });
+    $('#pingBtn').addEventListener('click', function () { send('PING'); });
+    $('#inboxBtn').addEventListener('click', function () { send('INBOX?'); });
+    $('#logBtn').addEventListener('click', function () { send('LOG?'); });
+    $('#log0Btn').addEventListener('click', function () { send('LOG0'); });
+
+    window.addEventListener('keydown', function (e) {
+      if (e.key === '/' && document.activeElement !== $('#cmd') && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault(); $('#cmd').focus();
+      }
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     9. 启动
+     ═══════════════════════════════════════════════════════════════════ */
+  function boot() {
+    wire();
+    $('#follow').checked = store.get('follow', true);
+    $$('[data-lcd-state]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.lcdState === lcdState)); });
+    $$('[data-lcd-theme]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.lcdTheme === lcdTheme)); });
+    renderCounts(); renderStatus(); syncConfigUI(); renderLCD(); renderLog();
+    listPorts();
+    if (serialSupported && navigator.serial.addEventListener) navigator.serial.addEventListener('connect', listPorts);
+    if (!serialSupported) $('#portSel').innerHTML = '<option>无 Web Serial · 请用模拟设备</option>';
+    push('stat', '就绪 · USART3 / 115200 8N1 · 接线 PB10→适配器 RX、PB11←适配器 TX、共地 · 串口独占，连接前请关闭 SSCOM');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>
+</body>
+</html>

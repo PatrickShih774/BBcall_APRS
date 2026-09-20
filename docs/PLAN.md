@@ -24,8 +24,8 @@
   每条"新内容解出"写一条 72 字节记录（时间戳 / 呼号+SSID / RSSI / SNR / 修复标记 / 整帧哈希 / 正文最多 52 字节），
   1KB 一页 14 槽；**日志区跟在固件映像之后**（链接脚本导出 `_image_end`），页数 = 剩余 Flash 页数（上限 `BBCALL_PKTLOG_PAGES`=16）：
 Debug(-Og) 8 页 = 112 条、Release(-Os) 13 页 = 182 条（页擦除粒度会让实际条数比上限少最多 13 条）；`seq` 最后写当提交标记，掉电半条会被开机扫描忽略；
-  串口 `LOG?` 一次导出（旧 -> 新）、`LOG0` 清空；链接脚本放开 64KB（`FLASH LENGTH = 64K`），改页数上限不再需要动 `.ld`；- **下一步功能规划（2026-09-19）**：**BBCall 小助手**（PC 端 GUI：串口连接 / RTC 校时 / 实时解码监视 /
-  日志导出与 SQLite 管理 / 改本机呼号 / 一键出报告，最终打包单文件 exe 给非开发用户）→ 见 [§13](#13-bbcall-小助手pc-端-gui-管理与调试工具2026-09-19-规划)；
+  串口 `LOG?` 一次导出（旧 -> 新）、`LOG0` 清空；链接脚本放开 64KB（`FLASH LENGTH = 64K`），改页数上限不再需要动 `.ld`；- **BBCall 小助手（PC 端 GUI）**：单文件 HTML 原型（`bbcall-serial-assistant/`，Web Serial + 屏幕镜像 + 无硬件模拟器）
+  **已完成**；待做"改呼号 / 历史库图表 / 打包 exe" → 见 [§13](#13-bbcall-小助手pc-端-gui-管理与调试工具2026-09-20html-原型已完成规划更新)；
   Debug(-Og) `text=56384 / data=56 / bss=19608`、Release(-Os) `text=51696 / data=52 / bss=19576`；
   主机回归 `tools/test_pktlog.c` 8 用例全过（见 [DEBUG_LOG §26](DEBUG_LOG.md)），用途是把"挂 10 小时解码率对账"变成"事后连一次串口导出"；
 - 实测：SunSDR2 DX 手动 MOX 低功率可稳定解出；但**连续发射仍会漏包**，做不到"发一条看到一条"；
@@ -675,11 +675,25 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
 3. **P2 L2/L3 计算与任务省电**：ADC DMA + 批处理 + WFI；
 4. **P3 L4 STOP**：仅在外设调度完成且仍有必要后评估；
 5. **P4 L5 RF duty cycle**：只作为协议化省电方案，不进入默认固件。
-## 13. BBCall 小助手：PC 端 GUI 管理与调试工具（2026-09-19 规划）
+## 13. BBCall 小助手：PC 端 GUI 管理与调试工具（2026-09-20：HTML 原型已完成，规划更新）
 
 > **目标**：把现在散在 `tools/` 里的命令行工具（`serial_bridge.ps1` / `set_rtc_time.ps1` / `aprs_log_report.py`）
 > 收进一个**图形界面 + 单文件 exe**：不懂命令行的用户也能连接设备、RTC 校时、看实时解码、
 > 导出与管理解码数据、修改本机呼号。本节只写方案与验收，不改现有固件行为。
+
+### 13.0 现状基线（2026-09-20：HTML 单文件原型已完成）
+
+仓库里已经有**能用的单文件 HTML 助手**，本节其余内容是"从原型到 exe 产品"的差距计划：
+
+| 文件 | 内容 | 状态 |
+|---|---|---|
+| [`bbcall-serial-assistant/docs/bbcall-serial-assistant.html`](../bbcall-serial-assistant/docs/bbcall-serial-assistant.html) | 助手本体：Web Serial 连接、`STAT?` 全字段解析、`S=`/`R19=` 周期刷新、控制台（5 组过滤/检索/导出/命令历史）、调参 / 对时 / 工具（`INBOX?`/`LOG?`/`LOG0`）、128×64 屏幕镜像、**无硬件模拟器** | 已完成（单文件、无依赖、无构建） |
+| [`bbcall-serial-assistant/docs/design-reference.html`](../bbcall-serial-assistant/docs/design-reference.html) | 设计规范：色彩/排版/点阵母题/栅格/组件库/交互状态/屏幕镜像规范 | 已完成，**助手 UI 的唯一权威** |
+| [`bbcall-serial-assistant/docs/serial-protocol.md`](../bbcall-serial-assistant/docs/serial-protocol.md) | 串口协议参考：链路层、命令表、周期输出、事件输出、字段索引、解析要点 | 已完成，与固件同步 |
+| [`bbcall-serial-assistant/docs/user-guide.md`](../bbcall-serial-assistant/docs/user-guide.md) | 操作手册：连接、各面板、快捷键、故障排查 | 已完成 |
+
+**三个缺口**（本节要补的）：① 固件没有"改呼号"等可持久化配置（见 §13.2）；
+② 助手没有历史库 / 图表 / 解码率对账（见 §13.3）；③ 还没有"双击即用的 exe"（见 §13.4）。
 
 ### 13.1 用户故事（小白视角）
 
@@ -711,79 +725,71 @@ UI harness: firmware-stm32porject/Core/Src/ui_harness.c（三态：待机/有未
 
 **验收**：`CALL=BG5BLH-7` 后断电重启，`INFO?` 回读一致；人为擦掉一半配置页，设备仍能按默认呼号启动。
 
-### 13.3 GUI 功能分期
+### 13.3 从原型到产品：还差什么
 
-**P0 MVP（能用）**
+**已完成（见 §13.0）**：连接/探活、完整状态解析、控制台过滤与导出、调参/对时/工具三页、
+128×64 屏幕镜像、内置模拟器、设计规范与协议文档。
 
-- 串口自动扫描 + 连接/断开；连上先 `INFO?` 认设备；
-- 「状态」页：`STAT?` 解析成表，2 秒刷新（RSSI/SNR/增益/AGC/RX/DUP/FIX/REP/ISR/UNREAD/INBOX/RTC）；
-- 「校时」：`TIME=` 写入 PC 时间并回读显示时差；
-- 「实时」页：文本流 + `[FRAME]/[LOG]/[DUP]` 高亮、按呼号/关键字过滤、可暂停；
-- 「导出」：发 `LOG?` → 解析成表 → 存 CSV/SQLite + 一键出 Markdown 报告（复用现有解析器）。
+**待做**
 
-**P1 管理（好用）**
+1. **固件配套**（§13.2）：`INFO?` / `CALL=` / `CALL?` / `CFG?` / `SAVE` + Flash 配置页双缓冲；
+2. **呼号 UI**：右栏新增「本机」页（或并入调参页）：填 `呼号[-SSID]` → `CALL=` → 回读确认；
+3. **数据管理**：历史入库（网页版用 IndexedDB、桌面版用 SQLite）、按时间/呼号/内容检索、
+   重复包合并、每小时包数 / RSSI·SNR 分布 / 解码率趋势图、参考清单对账（复用 `tools/aprs_log_report.py` 规则）、
+   位置包导出 GPX；
+4. **桌面化（exe）**：见 §13.4；
+5. **协议同步纪律**：固件命令/输出格式一变，`serial-protocol.md` 与助手的 `parseLine()` / `classify()`
+   必须同步更新（既有约定；协议文档是双方契约）。
 
-- 「设置」页：呼号（`CALL=`）、去重窗口（`DUPMS=`）、增益/AGC/静噪（`GAIN/AGC/SQ/SQN`）+「恢复默认」；
-- SQLite 历史库：按时间/呼号/内容检索，重复包合并显示，导出 CSV；位置包额外导出 GPX；
-- 图表：每小时包数、RSSI/SNR 分布、解码率趋势（带 `lost=` 提示）；
-- 参考清单对比：拖入 aprs.fi 清单 → 命中/漏/多 + 解码率。
+### 13.4 桌面化：三条路线（给小白双击 exe）
 
-**P2 进阶（可选）**
+| 路线 | 做法 | 优点 | 代价 |
+|---|---|---|---|
+| **A（推荐）壳 + 本地串口桥** | Tauri 2（或 Electron）把现有 HTML 原样装进 WebView；壳里跑一个 WebSocket↔串口桥；助手把传输层抽成 `SerialTransport`（浏览器走 Web Serial，壳里走 WebSocket） | **UI/逻辑零重写**，浏览器版与 exe 版共用同一份 HTML；绕开 Web Serial 的安全上下文限制；可顺手做"后台常驻记录/开机自启" | 需要 ~200 行桥代码 + 一次传输层抽象 |
+| B Rust 原生插件 | Tauri + `serialport` crate，前端走 Tauri IPC | 体积最小（约 10MB）、无额外进程 | 要写 Rust 胶水；两种形态的传输层分叉更大 |
+| C Python 重写 | PySide6 重写界面 + pyserial | 直接复用 `tools/*.py` | **UI 要重写**，还得把设计规范再实现一遍，收益最低 |
 
-- 报文详情解析（消息/Mic-E/位置/天气/遥测）与地图显示（离线底图可选）；
-- 固件升级页（调用 `STM32_Programmer_CLI` 烧 hex，或 DFU）；
-- 多设备管理、系统托盘后台记录、开机自启。
-
-### 13.4 技术选型（建议）
-
-| 项 | 选择 | 理由 |
-|---|---|---|
-| 语言 | Python 3.11 | 直接复用 `tools/*.py`（日志解析、报告、UI 校验） |
-| GUI | PySide6（Qt） | 表格/图表/后台线程都现成；比 Tkinter 好看，比 Electron 轻 |
-| 串口 | pyserial | 成熟；注意串口独占（与 CubeIDE/SSCOM 冲突要中文提示） |
-| 存储 | SQLite（标准库） | 单文件免安装，Excel/Python 都能直接读 |
-| 打包 | PyInstaller `--onefile --windowed` | 单 exe；目标 ≤ 40MB、启动 ≤ 3s |
-| 备选 | C#/.NET 8 WPF 单文件 | 体积更小、免杀软白名单；但无法复用现有 Python 工具 |
-
-> 选 Python 的关键理由：`tools/aprs_log_report.py`（`[LOG]` 解析 + 参考清单对比 + 报告）已经是验证过的实现，
-> GUI 直接 `import`，避免"两套解析逻辑算出两个解码率"。
+**推荐 A**：串口从 UI 里抽成 `connect/send/onData` 接口，桌面壳只实现同一接口的 WebSocket 版本；
+此后"呼号/历史库/图表"等新功能一次开发、两种形态都能用。
 
 ### 13.5 给小白的分发与体验
 
-- 产物：`BBCall助手_v1.0.exe`（单文件免安装）+ 一页图文《3 步上手》（插线 → 连接 → 导出）；
-- 首次运行向导：自动扫描串口（只有一个就直接连；多个则列出并标注"建议选 USB-SERIAL"）；
-- 常见错误中文提示且可操作：串口被占用（关 CubeIDE/SSCOM）、驱动未装（给 CH340/CP210x 下载说明）、
-  `INFO?` 无响应（检查 TX/RX 交叉与 115200）；
-- **无设备也能用**：支持"打开已有日志文件"离线出报告（帮别人看数据不用板子）；
-- 安全与信任：exe 附 SHA256；同时发布源码 zip（`pip install pyserial PySide6` 后 `python bbcall_assistant.py`）；
-- 杀软误报预案：优先试 Nuitka 一次性编译；必要时发布 zip 免安装版（onedir，不打单文件）。
+- 产物：`BBCall助手_v1.0.exe`（Tauri 约 10MB；Electron 约 150MB，二选一）+ 一页图文《3 步上手》；
+- 首次运行向导：壳内直接枚举 COM（不再有浏览器授权弹窗）→ 一键「连接 → 校时 → 开始记录」；
+- 常见错误中文提示：串口被占用（关 CubeIDE/SSCOM）、驱动未装（CH340/CP210x 说明）、
+  设备无响应（PB10/PB11 是否交叉、是否共地、115200 8N1）；
+- **无设备也能用**：桌面版支持"打开已有日志文件"离线出报告（与网页版模拟器互补）；
+- 信任与安全：exe 附 SHA256 + 源码；同时保留浏览器单文件版（免安装、免授权）；
+- 杀软误报预案：Tauri 产物误报少；Electron 单文件易被拦，必要时改用安装包（NSIS）而不是单文件。
 
-### 13.6 里程碑与验收
+### 13.6 里程碑与验收（2026-09-20 更新）
 
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
-| M1 固件配套 | `INFO?` / `CALL=` / `CALL?` / `CFG?` / `SAVE` + 配置页双缓冲 + 主机自测 | 改呼号 → 断电重启 → 回读一致；配置页损坏能回退默认值 |
-| M2 核心库 | `bbcall_core/`：串口会话（连接/命令/超时/解析）+ 复用日志解析 | 命令行 `python -m bbcall_core --port COM5 --dump` 与 `serial_bridge + LOG?` 结果完全一致 |
-| M3 GUI MVP | 连接 / 状态 / 校时 / 实时 / 导出 五页 | 同一台设备同一份日志：状态数值、条数、解码率与命令行工具**数字一致** |
-| M4 管理功能 | 设置页 + SQLite 历史 + 图表 + 参考清单对比 | 6 小时挂机数据一键出报告与图表；重复包合并口径与 `RX/DUP` 一致 |
-| M5 打包发布 | exe + 首次运行向导 + 图文说明 + SHA256 | 在**没装 Python** 的 Windows 上双击可用；≤3 步完成"连接 → 校时 → 开始记录" |
-| M6 实测验收 | 找一位非开发用户按说明书独立操作 | 全程无命令行；3 类典型错误能按提示自行解决 |
+| **M0 原型（已完成）** | 单文件 HTML 助手 + 设计规范 + 协议 + 手册 | 浏览器能连设备或模拟器跑通全部交互；无硬件可完整演示 |
+| M1 固件配套 | `INFO?` / `CALL=` / `CALL?` / `CFG?` / `SAVE` + 配置页双缓冲；同步 `serial-protocol.md` | 改呼号 → 断电重启 → 回读一致；配置页损坏能回退默认值 |
+| M2 助手管理功能 | 呼号 UI + 历史库（IndexedDB/SQLite）+ 图表 + 参考清单对账 | 6 小时挂机数据一键出报告与图表；重复包口径与 `RX/DUP` 一致 |
+| M3 传输层抽象 | `SerialTransport`（Web Serial / WebSocket 两个实现） | 浏览器版行为不变；WebSocket 版收发与浏览器版一致 |
+| M4 桌面壳与打包 | Tauri/Electron 壳 + 本地桥 + 打包 exe | 双击 exe 能连接/校时/导出；启动 ≤ 3s |
+| M5 小白验收 | 找一位非开发用户按一页说明独立操作 | 全程无命令行、无浏览器地址栏；3 类典型错误能按提示解决 |
 
 ### 13.7 风险与对策
 
 | 风险 | 对策 |
 |---|---|
-| 串口独占（GUI 与 CubeIDE/SSCOM 抢口） | 连接前探测 + 中文提示；失败不崩溃、可重试 |
-| 配置页写坏导致开不了机 | 双缓冲 + magic/CRC 校验 + 编译期默认值兜底；只按用户操作擦写 |
-| 打包 exe 被杀软误报 | 提供源码 zip 与 onedir 免安装版；必要时 Nuitka/签名 |
-| 体积大 / 启动慢（PySide6 + onefile） | 先出 onedir 验证；超标时退 Tkinter 或换 C# |
-| "两套解析逻辑"数字对不上 | 解析与报告只保留一份实现（`tools/aprs_log_report.py`），GUI 只做展示 |
-| 国内网络（自动更新/地图瓦片） | 默认不联网；地图用离线底图或只给坐标 + 链接 |
+| 协议漂移（固件改了输出格式，助手解析悄悄失效） | `serial-protocol.md` 当契约：改固件必须同步改文档与 `parseLine()`/`classify()`；新增命令要有回读 |
+| 串口独占（助手与 CubeIDE/SSCOM 抢口） | 连接前探测 + 中文提示；连接失败不崩溃、可重试 |
+| 配置页写坏导致开不了机 | 双缓冲 + magic/CRC + 编译期默认值兜底；只按用户操作擦写 |
+| Web Serial 安全上下文（`file://` 不可用） | 网页版用本地静态服务器或模拟器；桌面壳内不再有此限制 |
+| WebView2 运行时缺失 | Tauri 依赖 Win10/11 自带 WebView2；发布页附"安装 WebView2 Runtime"说明，或改用 Electron |
+| 打包 exe 被杀软误报 | Tauri 优先；提供源码与 zip 免安装版；必要时签名 |
+| "两套解析逻辑"数字对不上 | 解析与报告只保留一份实现（`tools/aprs_log_report.py` 为基准），助手只做展示 |
 
 ### 13.8 与现有工具的关系
 
-- `tools/serial_bridge.ps1` → GUI 内部的串口会话（PowerShell 版保留，供脚本/CI 用）；
-- `tools/set_rtc_time.ps1` → 「校时」按钮；
-- `tools/aprs_log_report.py` → 直接 import（解析 + 报告 + 解码率对比）；
+- `bbcall-serial-assistant/`（单文件 HTML）→ **本项目 PC 端 GUI 助手的基线**，浏览器版继续可用；
+- `tools/serial_bridge.ps1` → 脚本/CI 用的串口桥；桌面壳的本地桥可与它共用同一套命令语义；
+- `tools/set_rtc_time.ps1` → 「校时」按钮的行为参考；
+- `tools/aprs_log_report.py` → 解析/对账/报告的**唯一实现**，助手与桌面版都复用它；
 - `tools/make_hex.ps1` → 未来「固件升级」页；
 - 固件侧新命令遵循既有约定：固定前缀、可回读、错误可恢复（`[CFG] err: ...`）。

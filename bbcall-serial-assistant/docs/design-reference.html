@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设计参考 · BBcall 串口调试助手</title>
+<style>
+  /* ═══ 令牌：与本助手本体 bbcall-serial-assistant.html 完全一致 ═══════
+     方向：tech-utility（Datadog / GitHub）暗色衍生。
+     设备屏 ink/paper 取自 firmware docs/design.md §2，仅用于 128×64 镜像。 */
+  :root {
+    --bg:        oklch(16% 0.012 250);
+    --surface:   oklch(20% 0.014 250);
+    --surface-2: oklch(24% 0.014 250);
+    --fg:        oklch(95% 0.005 250);
+    --muted:     oklch(67% 0.015 245);
+    --border:    oklch(31% 0.014 250);
+    --accent:    oklch(76% 0.16 145);
+
+    --ok:     oklch(72% 0.14 150);
+    --warn:   oklch(80% 0.15 78);
+    --danger: oklch(68% 0.19 25);
+    --info:   oklch(74% 0.11 240);
+
+    /* 设备屏（docs/design.md §2） */
+    --lcd-ink-oled:   oklch(19% 0.015 250);
+    --lcd-paper-oled: oklch(100% 0 0);
+    --lcd-ink-lcd:    oklch(28% 0.03 250);
+    --lcd-paper-lcd:  oklch(76% 0.012 155);
+
+    --font-ui:   -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Microsoft YaHei UI', monospace;
+    --font-display: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Microsoft YaHei UI', monospace;
+    --font-lcd:  'Microsoft YaHei UI', 'PingFang SC', ui-monospace, monospace;
+
+    --gap-1: 4px; --gap-2: 8px; --gap-3: 12px; --gap-4: 16px; --gap-5: 24px;
+    --radius: 0px;
+
+    /* 点阵底板：4px 栅格上的单像素点，全站唯一装饰母题 */
+    --dot:        oklch(25% 0.014 250);
+    --dot-soft:   oklch(24% 0.013 250);
+    --dottex:      radial-gradient(circle, var(--dot) 1px, transparent 1.2px);
+    --dottex-soft: radial-gradient(circle, var(--dot-soft) 1px, transparent 1.2px);
+
+    /* 硬阴影：像素风位移影，不用模糊 */
+    --shadow-btn:   2px 2px 0 oklch(0% 0 0 / .38);
+    --shadow-card:  4px 4px 0 oklch(0% 0 0 / .45);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    background-image: var(--dottex);
+    background-size: 4px 4px;
+    color: var(--fg);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; background: none; border: 0; }
+  h1, h2, h3, p, dl, dd, dt { margin: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  /* ─── app bar ─────────────────────────────────────────────────────── */
+  .appbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: var(--gap-4);
+    padding: 0 var(--gap-4); height: 58px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+  .brand b { font-family: var(--font-display); font-size: 17px; white-space: nowrap; }
+  .brand b::before { content: ''; display: inline-block; width: 8px; height: 8px; background: var(--accent); margin-right: 9px; }
+  .brand span { color: var(--muted); font-size: 12px; font-family: var(--font-mono); white-space: nowrap; }
+  .appbar .spacer { flex: 1 1 auto; }
+  .ver {
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+    border: 1px solid var(--border); padding: 3px 8px; white-space: nowrap;
+  }
+
+  /* ─── shell ───────────────────────────────────────────────────────── */
+  .wrap {
+    display: grid; grid-template-columns: 232px minmax(0, 1fr);
+    max-width: 1280px; margin: 0 auto; gap: 0;
+    align-items: start;
+  }
+  .toc {
+    position: sticky; top: 58px; align-self: start;
+    max-height: calc(100vh - 58px); overflow-y: auto;
+    padding: 26px var(--gap-4) 40px var(--gap-4);
+    border-right: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .toc h3 {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em;
+    color: var(--muted); text-transform: uppercase; margin-bottom: 12px;
+  }
+  .toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .toc a {
+    display: flex; gap: 9px; padding: 6px 8px; text-decoration: none;
+    color: var(--muted); border-left: 2px solid transparent;
+  }
+  .toc a:hover { color: var(--fg); background: var(--surface); }
+  .toc a:focus-visible { outline-offset: -2px; }
+  .toc a .n { font-family: var(--font-mono); font-size: 11.5px; opacity: .8; flex: none; }
+
+  .doc { padding: 30px var(--gap-5) 120px; min-width: 0; }
+
+  /* ─── sections ────────────────────────────────────────────────────── */
+  .sec { padding-bottom: 46px; }
+  .sec + .sec { border-top: 1px solid var(--border); padding-top: 42px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .sec-head .idx {
+    font-family: var(--font-mono); font-size: 12px; color: var(--accent);
+    border: 1px solid color-mix(in oklch, var(--accent) 45%, transparent);
+    padding: 1px 6px; flex: none;
+  }
+  .sec-head h2 { font-family: var(--font-display); font-size: 20px; letter-spacing: .01em; }
+  .lede { color: var(--muted); font-size: 14px; max-width: 74ch; margin-bottom: 22px; }
+  .lede code, .doc code {
+    font-family: var(--font-mono); color: oklch(82% 0.01 250);
+    background: var(--surface-2); padding: 1px 5px; border: 1px solid var(--border);
+  }
+  h3.sub {
+    font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .1em;
+    color: var(--muted); text-transform: uppercase; margin: 26px 0 12px;
+  }
+  h3.sub:first-of-type { margin-top: 0; }
+
+  /* ─── swatches ────────────────────────────────────────────────────── */
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: var(--gap-3); }
+  .sw { border: 1px solid var(--border); background: var(--surface); }
+  .sw .chipbox { height: 58px; display: flex; align-items: flex-end; padding: 7px 9px; border-bottom: 1px solid var(--border); }
+  .sw .chipbox span { font-family: var(--font-mono); font-size: 11px; }
+  .sw .meta { padding: 9px 10px 11px; }
+  .sw .name { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; }
+  .sw .val { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .sw .role { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+
+  /* ─── tables ──────────────────────────────────────────────────────── */
+  table.spec { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.spec th, table.spec td { text-align: left; padding: 8px 10px; border-bottom: 1px dotted var(--border); vertical-align: top; }
+  table.spec th {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em;
+    color: var(--muted); text-transform: uppercase; border-bottom: 1px solid var(--border);
+  }
+  table.spec td.m { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.spec tr:hover td { background: var(--surface); }
+
+  /* ─── demo surface ────────────────────────────────────────────────── */
+  .demo {
+    border: 1px solid var(--border); background: var(--surface);
+    background-image: var(--dottex-soft); background-size: 4px 4px;
+    padding: var(--gap-4); margin-bottom: var(--gap-3);
+  }
+  .demo-label {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em;
+    color: var(--muted); text-transform: uppercase; margin-bottom: 11px;
+  }
+  .stack { display: flex; flex-direction: column; gap: 14px; }
+  .row { display: flex; align-items: center; gap: var(--gap-2); flex-wrap: wrap; }
+  .row .lab { font-size: 12px; color: var(--muted); flex: none; width: 86px; font-family: var(--font-mono); }
+
+  /* ─── component classes (与本体同名同值) ──────────────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 34px; padding: 0 13px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface-2); color: var(--fg);
+    font-family: var(--font-mono); font-size: 13px; font-weight: 500; white-space: nowrap;
+    box-shadow: var(--shadow-btn);
+    transition: background .1s steps(2, end), border-color .1s steps(2, end), color .1s steps(2, end);
+  }
+  .btn:hover { border-color: oklch(45% 0.018 250); background: oklch(29% 0.015 250); }
+  .btn:active { transform: translate(2px, 2px); box-shadow: none; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; box-shadow: none; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: oklch(18% 0.03 150); font-weight: 600; }
+  .btn-primary:hover { background: oklch(83% 0.16 145); border-color: oklch(83% 0.16 145); }
+  .btn-danger { background: transparent; border-color: color-mix(in oklch, var(--danger) 55%, var(--border)); color: var(--danger); }
+  .btn-danger:hover { background: color-mix(in oklch, var(--danger) 16%, transparent); border-color: var(--danger); }
+  .btn-quiet { background: transparent; border-color: var(--border); }
+  .btn-sm { height: 30px; padding: 0 10px; font-size: 12px; box-shadow: 1px 1px 0 oklch(0% 0 0 / .35); }
+
+  .input, .select {
+    height: 34px; padding: 0 9px;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 13px; font-family: var(--font-mono);
+  }
+  .select { font-family: var(--font-ui); }
+  .input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent); }
+  .input::placeholder { color: oklch(66% 0.012 245); }
+  .input.w-sm { width: 86px; }
+
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 6px; background: var(--surface-2); border: 1px solid var(--border); }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 16px; margin-top: -6px; background: var(--fg); border: 0; }
+  input[type="range"]:hover::-webkit-slider-thumb { background: var(--accent); }
+  input[type="range"]::-moz-range-track { height: 6px; background: var(--surface-2); border: 1px solid var(--border); }
+  input[type="range"]::-moz-range-thumb { width: 14px; height: 16px; background: var(--fg); border: 0; border-radius: 0; }
+
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; position: relative; }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .track { width: 40px; height: 20px; background: var(--surface-2); border: 1px solid var(--border); position: relative; transition: background .1s steps(2, end), border-color .1s steps(2, end); flex: none; }
+  .switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: var(--muted); transition: transform .1s steps(3, end), background .1s steps(2, end); }
+  .switch input:checked + .track { background: color-mix(in oklch, var(--accent) 26%, transparent); border-color: var(--accent); }
+  .switch input:checked + .track::after { transform: translateX(20px); background: var(--accent); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .tab {
+    position: relative; padding: 9px 15px 11px;
+    font-size: 13.5px; color: var(--muted); font-family: var(--font-mono);
+  }
+  .tab:hover { color: var(--fg); background: var(--surface-2); }
+  .tab[aria-selected="true"] { color: var(--fg); font-weight: 600; }
+  .tab[aria-selected="true"]::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px;
+    background-image: repeating-linear-gradient(90deg, var(--accent) 0 3px, transparent 3px 6px);
+  }
+
+  .chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .chip {
+    height: 30px; padding: 0 11px; font-size: 12.5px; font-family: var(--font-mono);
+    border: 1px solid var(--border); color: var(--muted); background: transparent;
+  }
+  .chip:hover { color: var(--fg); border-color: oklch(45% 0.018 250); }
+  .chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  .chip .n { font-family: var(--font-mono); opacity: .75; margin-left: 4px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--border); overflow: hidden; background: var(--surface-2); }
+  .seg button {
+    height: 28px; padding: 0 11px; font-size: 12px; color: var(--muted); font-family: var(--font-mono);
+    border-right: 1px solid var(--border);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { color: var(--fg); background: oklch(27% 0.015 250); }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); font-weight: 600; box-shadow: inset 0 -3px 0 var(--accent); }
+
+  .pill {
+    display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px;
+    background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
+  }
+  .pill.ok   { color: var(--ok);     border-color: color-mix(in oklch, var(--ok) 45%, var(--border));     background: color-mix(in oklch, var(--ok) 12%, transparent); }
+  .pill.warn { color: var(--warn);   border-color: color-mix(in oklch, var(--warn) 45%, var(--border));   background: color-mix(in oklch, var(--warn) 12%, transparent); }
+  .pill.bad  { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 45%, var(--border)); background: color-mix(in oklch, var(--danger) 12%, transparent); }
+  .pill.info { color: var(--info);   border-color: color-mix(in oklch, var(--info) 45%, var(--border));   background: color-mix(in oklch, var(--info) 12%, transparent); }
+
+  .linkstate { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .linkstate .dot { width: 9px; height: 9px; background: var(--muted); flex: none; }
+  .linkstate.on { color: var(--accent); }
+  .linkstate.on .dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent); }
+  .linkstate.warn { color: var(--warn); }
+  .linkstate.warn .dot { background: var(--warn); }
+
+  .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-2); max-width: 420px; }
+  .kpi-card { position: relative; background: var(--surface); border: 1px solid var(--border); padding: 11px 12px; }
+  .kpi-card::after { content: ''; position: absolute; top: 0; left: 0; width: 5px; height: 5px; background: var(--border); }
+  .kpi-card .k { font-size: 11px; color: var(--muted); font-family: var(--font-mono); letter-spacing: .1em; }
+  .kpi-card .v { font-family: var(--font-mono); font-size: 27px; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .kpi-card .u { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; font-size: 14.5px; max-width: 460px; }
+  .kv dt { color: var(--muted); padding: 5px 0; border-bottom: 1px dotted var(--border); }
+  .kv dd { padding: 5px 0; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; border-bottom: 1px dotted var(--border); }
+  .kv dd.zero { color: var(--muted); }
+  .kv dd.hot { color: var(--warn); }
+
+  .smeter { display: flex; gap: 3px; align-items: flex-end; }
+  .smeter i { flex: 1; height: 7px; background: var(--border); }
+  .smeter i.on { background: var(--ok); }
+  .smeter i.on.hi { background: var(--warn); }
+
+  .log { background: var(--surface); border: 1px solid var(--border); font-family: var(--font-mono); font-size: 13.5px; line-height: 1.62; }
+  .ln { display: flex; gap: 10px; padding: 2px var(--gap-4); white-space: pre-wrap; word-break: break-word; border-bottom: 1px dotted oklch(27% 0.013 250); }
+  .ln:last-child { border-bottom: 0; }
+  .ln:hover { background: oklch(26% 0.014 250); }
+  .ln .t { color: oklch(71% 0.014 245); flex: 0 0 102px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ln .tag {
+    flex: 0 0 auto; font-size: 11px; letter-spacing: .05em; padding: 0 6px; height: 19px; line-height: 19px;
+    white-space: nowrap; align-self: flex-start; margin-top: 2px; color: var(--muted); background: var(--surface-2);
+    border: 1px solid color-mix(in oklch, currentColor 32%, transparent);
+  }
+  .ln .m { flex: 1 1 auto; min-width: 0; color: oklch(88% 0.008 250); }
+  .ln.k-frame .tag { color: var(--ok); background: color-mix(in oklch, var(--ok) 16%, transparent); }
+  .ln.k-frame .m { color: var(--fg); }
+  .ln.k-raw .m { color: oklch(72% 0.012 245); }
+  .ln.k-stat .m { color: oklch(74% 0.02 245); }
+  .ln.k-cfg .tag { color: var(--info); background: color-mix(in oklch, var(--info) 16%, transparent); }
+  .ln.k-rtc .tag { color: var(--warn); background: color-mix(in oklch, var(--warn) 16%, transparent); }
+  .ln.k-rec .tag { color: var(--info); background: color-mix(in oklch, var(--info) 14%, transparent); }
+  .ln.k-err .tag { color: var(--danger); background: color-mix(in oklch, var(--danger) 16%, transparent); }
+  .ln.k-err .m { color: color-mix(in oklch, var(--danger) 82%, var(--fg)); }
+  .ln.k-tx { background: color-mix(in oklch, var(--accent) 8%, transparent); }
+  .ln.k-tx .tag { color: var(--accent); background: color-mix(in oklch, var(--accent) 18%, transparent); }
+  .ln.k-tx .m { color: var(--fg); font-weight: 600; }
+
+  .toast {
+    background: var(--surface-2); border: 1px solid var(--border); border-top: 3px solid var(--accent);
+    padding: 9px 13px; font-size: 13px; max-width: 340px; box-shadow: var(--shadow-card);
+  }
+  .toast.bad { border-top-color: var(--danger); }
+  .toast.warn { border-top-color: var(--warn); }
+
+  /* ─── dot motif ───────────────────────────────────────────────────── */
+  .dots {
+    height: 96px; border: 1px solid var(--border);
+    background-color: var(--surface); background-image: var(--dottex); background-size: 4px 4px;
+  }
+  .dots.soft { background-color: var(--surface); background-image: var(--dottex-soft); }
+  .dots.flat { background-color: var(--bg); background-image: none; }
+
+  /* ─── grid diagram ────────────────────────────────────────────────── */
+  .griddiagram { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 3px; height: 132px; }
+  .griddiagram div {
+    background: var(--surface-2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-align: center; padding: 6px;
+  }
+  .griddiagram div:nth-child(2) { background: var(--surface); color: var(--fg); }
+
+  /* ─── LCD mirror ──────────────────────────────────────────────────── */
+  .lcdgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: var(--gap-3); }
+  .lcdcard { border: 1px solid var(--border); background: var(--surface); padding: var(--gap-3); }
+  .lcdcard .t { font-family: var(--font-mono); font-size: 12px; color: var(--fg); margin-bottom: 9px; }
+  .lcdcard .t em { color: var(--muted); font-style: normal; font-size: 11px; margin-left: 6px; }
+  /* 128×64 → 3× 放大，整数倍，不插值 */
+  .lcdpix {
+    width: 384px; height: 192px; max-width: 100%;
+    background: var(--paper); color: var(--ink);
+    font-family: var(--font-lcd); position: relative; overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .lcdpix .band { position: absolute; left: 0; right: 0; display: flex; align-items: center; }
+  .lcdpix .band.top { top: 0; height: 30px; padding: 0 9px; justify-content: space-between; font-size: 15px; border-bottom: 3px solid var(--ink); }
+  .lcdpix .band.main { top: 42px; padding: 0 9px; justify-content: space-between; }
+  .lcdpix .band.main .big { font-size: 33px; font-weight: 700; letter-spacing: .02em; }
+  .lcdpix .band.main .sm { font-size: 14px; }
+  .lcdpix .bar { position: absolute; left: 9px; right: 9px; top: 96px; display: flex; gap: 4px; }
+  .lcdpix .bar i { flex: 1; height: 12px; background: color-mix(in oklch, var(--ink) 22%, transparent); }
+  .lcdpix .bar i.on { background: var(--ink); }
+  .lcdpix .band.foot { bottom: 0; height: 27px; padding: 0 9px; font-size: 14px; border-top: 3px solid var(--ink); }
+  .lcdpix.oled { --ink: var(--lcd-ink-oled); --paper: var(--lcd-paper-oled); }
+  .lcdpix.lcd  { --ink: var(--lcd-ink-lcd);  --paper: var(--lcd-paper-lcd); }
+  .lcdnote { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); margin-top: 9px; }
+
+  /* ─── state matrix ────────────────────────────────────────────────── */
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: var(--gap-3); }
+  .state { border: 1px solid var(--border); background: var(--surface); padding: 12px; }
+  .state .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+
+  /* ─── rules / principles ──────────────────────────────────────────── */
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: var(--gap-3); }
+  .rule { border: 1px solid var(--border); background: var(--surface); padding: 13px 14px; }
+  .rule .n { font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+  .rule .h { font-size: 14px; font-weight: 600; margin: 5px 0 6px; }
+  .rule p { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+
+  footer.docfoot {
+    border-top: 1px solid var(--border); margin-top: 8px; padding-top: 20px;
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  }
+
+  @media (max-width: 900px) {
+    .wrap { grid-template-columns: 1fr; }
+    .toc { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--border); padding-bottom: 18px; }
+    .toc ol { flex-direction: row; flex-wrap: wrap; }
+    .doc { padding: 24px var(--gap-4) 80px; }
+    .row .lab { width: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header class="appbar" data-od-id="ref-appbar">
+  <div class="brand">
+    <b>设计参考</b>
+    <span>BBcall 串口调试助手 · 视觉与组件规范</span>
+  </div>
+  <div class="spacer"></div>
+  <span class="ver">v1.0</span>
+</header>
+
+<div class="wrap">
+  <nav class="toc" data-od-id="ref-toc" aria-label="目录">
+    <h3>目录</h3>
+    <ol>
+      <li><a href="#s01"><span class="n">01</span><span>设计定位</span></a></li>
+      <li><a href="#s02"><span class="n">02</span><span>色彩令牌</span></a></li>
+      <li><a href="#s03"><span class="n">03</span><span>排版系统</span></a></li>
+      <li><a href="#s04"><span class="n">04</span><span>点阵母题</span></a></li>
+      <li><a href="#s05"><span class="n">05</span><span>布局栅格</span></a></li>
+      <li><a href="#s06"><span class="n">06</span><span>组件库</span></a></li>
+      <li><a href="#s07"><span class="n">07</span><span>屏幕镜像</span></a></li>
+      <li><a href="#s08"><span class="n">08</span><span>交互状态</span></a></li>
+      <li><a href="#s09"><span class="n">09</span><span>结构与约定</span></a></li>
+    </ol>
+  </nav>
+
+  <main class="doc">
+
+    <section class="sec" id="s01" data-od-id="ref-s01">
+      <div class="sec-head"><span class="idx">01</span><h2>设计定位</h2></div>
+      <p class="lede">
+        一句话：<b>用工程仪表盘的语汇承载 PC 端外壳，用设备的 1-bit 点阵承载屏幕镜像</b>。
+        外壳是暗色工具界面（tech-utility 语汇：Datadog / GitHub 一类的高信息密度控制台），
+        设备屏则严格回到固件 <code>docs/design.md §2</code> 的 ink / paper 双色，两者不互相污染。
+      </p>
+
+      <div class="rules">
+        <div class="rule">
+          <div class="n">原则 01</div>
+          <div class="h">数字优先</div>
+          <p>所有数值走等宽字体并开启 <code>tabular-nums</code>，纵向对齐；读数、时间戳、寄存器一律不参与比例字体排版。</p>
+        </div>
+        <div class="rule">
+          <div class="n">原则 02</div>
+          <div class="h">直角与硬边</div>
+          <p>圆角恒为 0，阴影是不模糊的位移影（<code>2px 2px 0</code>）。按下时按钮位移吃掉阴影——这是全站唯一的“动效语言”。</p>
+        </div>
+        <div class="rule">
+          <div class="n">原则 03</div>
+          <div class="h">单一强调色</div>
+          <p>accent 只表达“当前/可操作/发送中”。状态色 ok / warn / danger / info 只在标签与数值上着色，不用于大面积填充。</p>
+        </div>
+        <div class="rule">
+          <div class="n">原则 04</div>
+          <div class="h">点阵是唯一装饰</div>
+          <p>4px 栅格上的单像素点构成全站唯一的装饰母题。除此之外不引入纹理、渐变、插画或图标集。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="s02" data-od-id="ref-s02">
+      <div class="sec-head"><span class="idx">02</span><h2>色彩令牌</h2></div>
+      <p class="lede">
+        全部颜色以 <code>oklch()</code> 定义在 <code>:root</code>，页面上不出现任何裸 hex。
+        派生色一律用 <code>color-mix(in oklch, …)</code>，避免手写“近似色”。
+      </p>
+
+      <h3 class="sub">基础面与前景</h3>
+      <div class="swatches">
+        <div class="sw">
+          <div class="chipbox" style="background: var(--bg)"><span style="color: var(--muted)">--bg</span></div>
+          <div class="meta"><div class="name">--bg</div><div class="val">oklch(16% 0.012 250)</div>
+          <div class="role">页面底色。承载点阵纹理 <code>--dottex</code>。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--surface)"><span style="color: var(--muted)">--surface</span></div>
+          <div class="meta"><div class="name">--surface</div><div class="val">oklch(20% 0.014 250)</div>
+          <div class="role">顶栏、状态栏、面板与卡片底。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--surface-2)"><span style="color: var(--fg)">--surface-2</span></div>
+          <div class="meta"><div class="name">--surface-2</div><div class="val">oklch(24% 0.014 250)</div>
+          <div class="role">次级底：按钮、标签、toast、滑轨。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--fg)"><span style="color: var(--bg)">--fg</span></div>
+          <div class="meta"><div class="name">--fg</div><div class="val">oklch(95% 0.005 250)</div>
+          <div class="role">主要文本。与 <code>--bg</code> 成对，按 ≥ 4.5:1 选定。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--muted)"><span style="color: var(--bg)">--muted</span></div>
+          <div class="meta"><div class="name">--muted</div><div class="val">oklch(67% 0.015 245)</div>
+          <div class="role">次要文本：标签、单位、说明。仍满足正文 ≥ 4.5:1。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--border)"><span style="color: var(--fg)">--border</span></div>
+          <div class="meta"><div class="name">--border</div><div class="val">oklch(31% 0.014 250)</div>
+          <div class="role">1px 实线分隔与点线分隔。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--accent)"><span style="color: oklch(18% 0.03 150)">--accent</span></div>
+          <div class="meta"><div class="name">--accent</div><div class="val">oklch(76% 0.16 145)</div>
+          <div class="role">唯一强调色：主按钮、焦点环、选中下划线、发送行、S-meter 高段。</div></div>
+        </div>
+      </div>
+
+      <h3 class="sub">状态色</h3>
+      <div class="swatches">
+        <div class="sw">
+          <div class="chipbox" style="background: color-mix(in oklch, var(--ok) 16%, var(--surface))"><span style="color: var(--ok)">--ok</span></div>
+          <div class="meta"><div class="name">--ok</div><div class="val">oklch(72% 0.14 150)</div>
+          <div class="role">帧解码成功、链路正常、S-meter 常规段。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: color-mix(in oklch, var(--warn) 16%, var(--surface))"><span style="color: var(--warn)">--warn</span></div>
+          <div class="meta"><div class="name">--warn</div><div class="val">oklch(80% 0.15 78)</div>
+          <div class="role">RTC / 对时类输出、S-meter 高强度段、需注意的读数。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: color-mix(in oklch, var(--danger) 16%, var(--surface))"><span style="color: var(--danger)">--danger</span></div>
+          <div class="meta"><div class="name">--danger</div><div class="val">oklch(68% 0.19 25)</div>
+          <div class="role">错误行、危险操作按钮、失败 toast。</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: color-mix(in oklch, var(--info) 16%, var(--surface))"><span style="color: var(--info)">--info</span></div>
+          <div class="meta"><div class="name">--info</div><div class="val">oklch(74% 0.11 240)</div>
+          <div class="role">配置类回显、收件箱 / 记录类标签。</div></div>
+        </div>
+      </div>
+
+      <h3 class="sub">设备屏（仅用于 128×64 镜像）</h3>
+      <div class="swatches">
+        <div class="sw">
+          <div class="chipbox" style="background: var(--lcd-ink-oled)"><span style="color: var(--lcd-paper-oled)">OLED ink</span></div>
+          <div class="meta"><div class="name">--lcd-ink-oled</div><div class="val">oklch(19% 0.015 250)</div><div class="role">OLED 主题·笔色</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--lcd-paper-oled)"><span style="color: var(--lcd-ink-oled)">OLED paper</span></div>
+          <div class="meta"><div class="name">--lcd-paper-oled</div><div class="val">oklch(100% 0 0)</div><div class="role">OLED 主题·纸色</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--lcd-ink-lcd)"><span style="color: var(--lcd-paper-lcd)">LCD ink</span></div>
+          <div class="meta"><div class="name">--lcd-ink-lcd</div><div class="val">oklch(28% 0.03 250)</div><div class="role">ST7567 黄绿屏·笔色</div></div>
+        </div>
+        <div class="sw">
+          <div class="chipbox" style="background: var(--lcd-paper-lcd)"><span style="color: var(--lcd-ink-lcd)">LCD paper</span></div>
+          <div class="meta"><div class="name">--lcd-paper-lcd</div><div class="val">oklch(76% 0.012 155)</div><div class="role">ST7567 黄绿屏·纸色</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="s03" data-od-id="ref-s03">
+      <div class="sec-head"><span class="idx">03</span><h2>排版系统</h2></div>
+      <p class="lede">
+        四个字体栈各司其职：界面用系统无衬线，数据用等宽，标题与眉标复用等宽字栈（<code>--font-display</code> 即 mono），
+        设备屏单独一套（中文点阵感优先）。<b>不引入任何网络字体</b>，全部走系统栈以保证离线可用。
+      </p>
+
+      <table class="spec">
+        <thead><tr><th>令牌</th><th>字栈</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td class="m">--font-ui</td><td class="m">系统无衬线 / 微软雅黑 / 苹方</td><td>正文、按钮、下拉、说明文字</td></tr>
+          <tr><td class="m">--font-mono</td><td class="m">JetBrains Mono → 系统等宽</td><td>数值、命令、日志、时间戳、标签</td></tr>
+          <tr><td class="m">--font-display</td><td class="m">同 mono</td><td>品牌字、面板标题、区块标题</td></tr>
+          <tr><td class="m">--font-lcd</td><td class="m">微软雅黑 / 苹方 → 等宽</td><td>128×64 屏幕镜像（中文点阵优先）</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="sub">字号阶梯</h3>
+      <table class="spec">
+        <thead><tr><th>字号</th><th>用途</th><th>样例</th></tr></thead>
+        <tbody>
+          <tr><td class="m">11px</td><td>pill / 标签 / 面板小标</td><td><span class="pill">TAG 11</span></td></tr>
+          <tr><td class="m">12–12.5px</td><td>单位、状态栏、chip</td><td><span class="mono" style="color:var(--muted)">12.5px · 已收 1 284</span></td></tr>
+          <tr><td class="m">13–13.5px</td><td>说明文字、日志正文、按钮</td><td><span style="font-size:13.5px">说明行：写入后自动关闭 AGC。</span></td></tr>
+          <tr><td class="m">14–15px</td><td>侧栏基准、字段表、命令输入</td><td><span style="font-size:15px" class="mono">FREQ 144.640 MHz</span></td></tr>
+          <tr><td class="m">20px</td><td>区块标题</td><td><span style="font-family:var(--font-display);font-size:20px">区块标题</span></td></tr>
+          <tr><td class="m">27px</td><td>KPI 读数</td><td><span class="mono" style="font-size:27px;letter-spacing:-.02em">1 284</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sec" id="s04" data-od-id="ref-s04">
+      <div class="sec-head"><span class="idx">04</span><h2>点阵母题</h2></div>
+      <p class="lede">
+        背景不是纯色，而是 4px 栅格上的 1px 圆点（<code>radial-gradient</code> 平铺）。
+        两种强度：<code>--dottex</code> 用于页面底，<code>--dottex-soft</code> 用于中栏与卡片底以便压低对比。
+        这是全站唯一的装饰笔触，不叠加其他纹理。
+      </p>
+      <div class="dots" style="margin-bottom:var(--gap-3)"></div>
+      <div class="dots soft" style="margin-bottom:var(--gap-3)"></div>
+      <div class="dots flat"></div>
+      <table class="spec" style="margin-top:var(--gap-3)">
+        <thead><tr><th>令牌</th><th>值</th><th>落点</th></tr></thead>
+        <tbody>
+          <tr><td class="m">--dot</td><td class="m">oklch(25% 0.014 250)</td><td>页面底 · <code>--dottex</code></td></tr>
+          <tr><td class="m">--dot-soft</td><td class="m">oklch(24% 0.013 250)</td><td>中栏 / 卡片底 · <code>--dottex-soft</code></td></tr>
+          <tr><td class="m">background-size</td><td class="m">4px 4px</td><td>与点阵栅格对齐，缩放时保持整数倍</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sec" id="s05" data-od-id="ref-s05">
+      <div class="sec-head"><span class="idx">05</span><h2>布局栅格</h2></div>
+      <p class="lede">
+        三栏固定工作区。关键决定：<b>余量按 1 : 1.6 : 1 比例分给三栏</b>，而不是让中栏独占 <code>1fr</code>。
+        否则在 1920 宽下中栏会吃掉千余像素、日志行又短，视觉上就“空”。
+      </p>
+      <div class="griddiagram" aria-hidden="true">
+        <div>左栏<br>状态 / 镜像<br>1fr</div>
+        <div>中栏 · 控制台<br>1.6fr</div>
+        <div>右栏<br>调参 / 对时 / 工具<br>1fr</div>
+      </div>
+      <table class="spec" style="margin-top:var(--gap-4)">
+        <thead><tr><th>视口</th><th>grid-template-columns</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="m">≥ 1280px</td><td class="m">minmax(320px,1fr) minmax(420px,1.6fr) minmax(300px,1fr)</td><td>默认三栏</td></tr>
+          <tr><td class="m">≤ 1280px</td><td class="m">minmax(296px,1fr) minmax(380px,1.45fr) minmax(276px,1fr)</td><td>侧栏下限收紧</td></tr>
+          <tr><td class="m">≤ 980px</td><td class="m">1fr</td><td>单栏堆叠，分栏线转为上边框</td></tr>
+        </tbody>
+      </table>
+      <p class="lede" style="margin-top:var(--gap-4);margin-bottom:0">
+        间距令牌：<code>--gap-1..5 = 4 / 8 / 12 / 16 / 24px</code>；行高基准 <code>32px</code>；圆角 <code>0</code>。
+        触控目标下限 44px 由控件高度（按钮 34px + 外围间距）与状态栏 32px 共同保证；桌面端以指针精度为主。
+      </p>
+    </section>
+
+    <section class="sec" id="s06" data-od-id="ref-s06">
+      <div class="sec-head"><span class="idx">06</span><h2>组件库</h2></div>
+      <p class="lede">以下均为可交互的实时样例（悬停 / 聚焦 / 按下可直接试）。类名与本体 <code>bbcall-serial-assistant.html</code> 一致。</p>
+
+      <h3 class="sub">按钮</h3>
+      <div class="demo">
+        <div class="row" style="margin-bottom:12px">
+          <span class="lab">默认</span>
+          <button class="btn">读取状态</button>
+          <button class="btn btn-sm">小号</button>
+          <button class="btn btn-quiet">次要</button>
+          <button class="btn btn-danger">擦除日志</button>
+          <button class="btn btn-primary">连接</button>
+        </div>
+        <div class="row">
+          <span class="lab">禁用</span>
+          <button class="btn" disabled>读取状态</button>
+          <button class="btn btn-primary" disabled>连接</button>
+          <span class="lab" style="width:auto">悬停位移影消失即按下态；主按钮仅用于当前唯一主动作。</span>
+        </div>
+      </div>
+
+      <h3 class="sub">输入控件</h3>
+      <div class="demo">
+        <div class="row" style="margin-bottom:12px">
+          <span class="lab">文本</span>
+          <input class="input w-sm" value="144640" />
+          <input class="input" placeholder="输入命令，回车发送" style="width:230px" />
+        </div>
+        <div class="row" style="margin-bottom:12px">
+          <span class="lab">下拉</span>
+          <select class="select" style="width:190px"><option>COM5 — 115200</option><option>模拟设备</option></select>
+          <span class="lab" style="width:auto">串口下拉宽上限 232px</span>
+        </div>
+        <div class="row" style="margin-bottom:12px">
+          <span class="lab">滑杆</span>
+          <input type="range" min="0" max="7" value="4" style="width:230px" />
+        </div>
+        <div class="row">
+          <span class="lab">开关</span>
+          <label class="switch"><input type="checkbox" /><span class="track"></span><span>AGC 自动增益</span></label>
+          <label class="switch"><input type="checkbox" checked /><span class="track"></span><span>静音</span></label>
+        </div>
+      </div>
+
+      <h3 class="sub">导航与过滤</h3>
+      <div class="demo" style="padding-bottom:0">
+        <div class="tabs" style="margin-bottom:14px">
+          <button class="tab" aria-selected="true">调参</button>
+          <button class="tab" aria-selected="false">对时</button>
+          <button class="tab" aria-selected="false">工具</button>
+        </div>
+        <div class="row" style="padding-bottom:var(--gap-4)">
+          <span class="lab">过滤</span>
+          <div class="chips">
+            <button class="chip" aria-pressed="true">全部<span class="n">312</span></button>
+            <button class="chip" aria-pressed="false">帧<span class="n">48</span></button>
+            <button class="chip" aria-pressed="false">状态<span class="n">120</span></button>
+            <button class="chip" aria-pressed="false">记录<span class="n">9</span></button>
+            <button class="chip" aria-pressed="false">错误<span class="n">3</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="demo">
+        <div class="row">
+          <span class="lab">分段</span>
+          <div class="seg"><button aria-pressed="true">OLED</button><button aria-pressed="false">LCD</button></div>
+          <span class="lab">链路</span>
+          <span class="linkstate on"><i class="dot"></i>已连接</span>
+          <span class="linkstate warn"><i class="dot"></i>模拟设备</span>
+          <span class="linkstate"><i class="dot"></i>未连接</span>
+        </div>
+      </div>
+
+      <h3 class="sub">标签与读数</h3>
+      <div class="demo">
+        <div class="row" style="margin-bottom:14px">
+          <span class="lab">状态标签</span>
+          <span class="pill ok">OK</span>
+          <span class="pill info">CFG</span>
+          <span class="pill warn">RTC</span>
+          <span class="pill bad">ERR</span>
+          <span class="pill">IDLE</span>
+        </div>
+        <div class="kpi">
+          <div class="kpi-card"><div class="k">RECEIVED</div><div class="v">1284</div></div>
+          <div class="kpi-card"><div class="k">RSSI</div><div class="v">-92<span class="u">dBm</span></div></div>
+        </div>
+      </div>
+
+      <div class="demo">
+        <div class="demo-label">字段表 — 常看 6 行，其余折叠</div>
+        <dl class="kv">
+          <dt>频点</dt><dd>144.640 MHz</dd>
+          <dt>增益</dt><dd>4 / 7</dd>
+          <dt>静噪</dt><dd>12</dd>
+          <dt>解码帧</dt><dd class="hot">48</dd>
+          <dt>满箱丢弃</dt><dd class="zero">0</dd>
+          <dt>RTC</dt><dd>2026-09-20 21:04</dd>
+        </dl>
+        <div class="demo-label" style="margin:14px 0 8px">信号强度条</div>
+        <div class="smeter" aria-hidden="true">
+          <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+          <i class="on hi"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+      </div>
+
+      <h3 class="sub">日志行</h3>
+      <div class="log">
+        <div class="ln k-tx"><span class="t">21:03:58.004</span><span class="tag">TX</span><span class="m">STAT?</span></div>
+        <div class="ln k-stat"><span class="t">21:03:58.061</span><span class="tag">STAT</span><span class="m">FREQ=144640 GAIN=4 AGC=0 SQ=12 RX=1284 DROPN=0</span></div>
+        <div class="ln k-frame"><span class="t">21:04:01.220</span><span class="tag">FRAME</span><span class="m">info=APRS · RSSI=-92 SNR=6.5 (decode-now)</span></div>
+        <div class="ln k-cfg"><span class="t">21:04:06.480</span><span class="tag">CFG</span><span class="m">GAIN=5 AGC=off</span></div>
+        <div class="ln k-rtc"><span class="t">21:04:09.115</span><span class="tag">RTC</span><span class="m">TIME=2026-09-20 21:04:09</span></div>
+        <div class="ln k-rec"><span class="t">21:04:12.700</span><span class="tag">INBOX</span><span class="m">01/03 144.640 · 21:03 · 呼叫中继</span></div>
+        <div class="ln k-raw"><span class="t">21:04:15.339</span><span class="tag">RAW</span><span class="m">7E 00 82 A0 B4 9C 60 7E</span></div>
+        <div class="ln k-err"><span class="t">21:04:18.902</span><span class="tag">ERR</span><span class="m">err: SQ 需在 0..255</span></div>
+      </div>
+      <p class="lcdnote">标签配色映射：FRAME→ok · CFG→info · RTC→warn · INBOX/LOG→info · ERR→danger · TX→accent 且整行加 8% accent 底。</p>
+
+      <h3 class="sub">提示条</h3>
+      <div class="demo">
+        <div class="toast" style="display:block">已发送 STAT? · 等待回包</div>
+        <div class="toast warn" style="display:block;margin-top:8px">模拟设备已启动，未占用任何串口</div>
+        <div class="toast bad" style="display:block;margin-top:8px">写入失败：串口被其他程序占用</div>
+      </div>
+    </section>
+
+    <section class="sec" id="s07" data-od-id="ref-s07">
+      <div class="sec-head"><span class="idx">07</span><h2>屏幕镜像</h2></div>
+      <p class="lede">
+        镜像不是“画一张屏幕图”，而是把设备 128×64 的 <b>1-bit 帧缓冲</b>按整数倍放大复刻：
+        离屏渲染 128×64 → 关闭插值 → 整倍放大。因此镜像里只有两种颜色（ink / paper），换主题即换这一对令牌。
+      </p>
+      <div class="lcdgrid">
+        <div class="lcdcard">
+          <div class="t">OLED 主题<em>ink 19% / paper 100%</em></div>
+          <div class="lcdpix oled">
+            <div class="band top"><span>BBcall</span><span>21:04</span></div>
+            <div class="band main"><span class="big">144.640</span><span class="sm">MHz</span></div>
+            <div class="bar" aria-hidden="true">
+              <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+              <i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <div class="band foot"><span>APRS · RX 1284</span></div>
+          </div>
+          <p class="lcdnote">版式示意（非设备实录）：顶部状态带 / 主信息 / 强度条 / 底部提示。</p>
+        </div>
+        <div class="lcdcard">
+          <div class="t">LCD 主题<em>ST7567 黄绿 · ink 28% / paper 76%</em></div>
+          <div class="lcdpix lcd">
+            <div class="band top"><span>BBcall</span><span>21:04</span></div>
+            <div class="band main"><span class="big">144.640</span><span class="sm">MHz</span></div>
+            <div class="bar" aria-hidden="true">
+              <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+              <i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <div class="band foot"><span>APRS · RX 1284</span></div>
+          </div>
+          <p class="lcdnote">两主题仅切换 ink / paper 一对令牌，版式与几何完全一致。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="s08" data-od-id="ref-s08">
+      <div class="sec-head"><span class="idx">08</span><h2>交互状态</h2></div>
+      <p class="lede">
+        规则：<b>状态变化只改背景 / 边框 / 位置，绝不把前景色往背景方向推</b>。
+        默认态与悬停态的文本对比度要求一致（正文 ≥ 4.5:1，大字与图标 ≥ 3:1）；只有禁用态允许降对比。
+      </p>
+      <div class="states">
+        <div class="state"><div class="k">Default</div><button class="btn">读取状态</button></div>
+        <div class="state"><div class="k">Hover</div><button class="btn">读取状态</button>
+          <p class="lcdnote">底色 24%→29%，纹理（边框）提亮，前景不变。</p></div>
+        <div class="state" style="outline:2px solid var(--accent);outline-offset:-1px">
+          <div class="k">Focus-visible</div><button class="btn">读取状态</button>
+          <p class="lcdnote">2px accent 焦点环，offset 2px，全站统一。</p></div>
+        <div class="state"><div class="k">Active</div>
+          <button class="btn" style="transform:translate(2px,2px);box-shadow:none">读取状态</button>
+          <p class="lcdnote">位移吃掉阴影，位置 +2px/+2px。</p></div>
+        <div class="state"><div class="k">Disabled</div><button class="btn" disabled>读取状态</button>
+          <p class="lcdnote">opacity .45，唯一允许降对比的状态。</p></div>
+        <div class="state"><div class="k">Selected</div>
+          <button class="chip" aria-pressed="true">帧</button>
+          <p class="lcdnote">chip 反相：底=fg，字=bg，对比反而升高。</p></div>
+      </div>
+
+      <h3 class="sub">对比度清单</h3>
+      <table class="spec">
+        <thead><tr><th>配对</th><th>用法</th><th>目标</th></tr></thead>
+        <tbody>
+          <tr><td class="m">--fg / --bg · --surface</td><td>正文、数值、按钮文字</td><td class="m">≥ 4.5:1</td></tr>
+          <tr><td class="m">--muted / --bg</td><td>次要文本、单位、说明</td><td class="m">≥ 4.5:1</td></tr>
+          <tr><td class="m">accent / bg</td><td>焦点环、选中下划线、链路点</td><td class="m">≥ 3:1（图形）</td></tr>
+          <tr><td class="m">ok·warn·danger·info / surface-2</td><td>标签文字（11px）</td><td class="m">≥ 4.5:1</td></tr>
+          <tr><td class="m">实心主按钮：oklch(18% .03 150) / accent</td><td>主按钮文字</td><td class="m">≥ 4.5:1，悬停时同时反转两者</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sec" id="s09" data-od-id="ref-s09">
+      <div class="sec-head"><span class="idx">09</span><h2>结构与约定</h2></div>
+      <table class="spec">
+        <thead><tr><th>项</th><th>约定</th></tr></thead>
+        <tbody>
+          <tr><td class="m">载体</td><td>单文件 HTML，内联 CSS/JS，零构建、零网络依赖；另存即可用</td></tr>
+          <tr><td class="m">定位标注</td><td>每个可被引用的区域 / 标题 / 控件带 <code>data-od-id</code>（kebab-case，重复卡片各自唯一）</td></tr>
+          <tr><td class="m">持久化</td><td><code>localStorage</code>，键前缀 <code>bbcall.*</code>：串口、波特率、右栏标签页、日志过滤、镜像主题</td></tr>
+          <tr><td class="m">滚动</td><td>禁用 <code>scrollIntoView</code>（会破坏内嵌预览），改用容器自身的 scrollTop</td></tr>
+          <tr><td class="m">颜色写法</td><td>令牌在 <code>:root</code> 用 <code>oklch()</code>；页面上不出现裸 hex，派生色用 <code>color-mix(in oklch, …)</code></td></tr>
+          <tr><td class="m">动画</td><td>只用 <code>steps()</code> 的像素式过渡与位移影，无缓动曲线、无模糊</td></tr>
+          <tr><td class="m">无障碍</td><td><code>:focus-visible</code> 焦点环、<code>aria-selected</code> / <code>aria-pressed</code> 表达选中、<code>prefers-reduced-motion</code> 关闭动效</td></tr>
+          <tr><td class="m">响应式</td><td>920–980px 由三栏折为单栏，不横向滚动；不写死像素宽度</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer class="docfoot">
+      本页为本助手的视觉与组件参考，令牌取自同目录的 <code>bbcall-serial-assistant.html</code>；设备屏色值取自固件 <code>docs/design.md §2</code>。
+      操作说明见 <code>user-guide.md</code>，串口协议见 <code>serial-protocol.md</code>。
+    </footer>
+
+  </main>
+</div>
+
+</body>
+</html>
