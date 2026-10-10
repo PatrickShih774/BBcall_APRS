@@ -112,6 +112,17 @@
 #define KEY_DOWN_PIN       GPIO_PIN_13
 #define KEY_OK_GPIO        GPIOB
 #define KEY_OK_PIN         GPIO_PIN_14
+/* ---------- 按键上拉 / 按键诊断（排查用，2026-10-10） ----------
+ * BBCALL_KEY_PULLUP：1 = 键脚用 MCU 内部上拉（约 40kΩ，正常运行值）；
+ *                    0 = GPIO_NOPULL（松开时引脚悬空！可能出现误触发，仅"按键是否影响背光/供电"的对照实验用）；
+ * BBCALL_KEY_DEBUG ：1 = 按键扫描时把三个键的原始电平变化打印成 [KEY] up=1 dn=1 ok=0 一行，
+ *                    用来确认"按键到底接在哪个脚"（默认 0 = 不打印）。 */
+#ifndef BBCALL_KEY_PULLUP
+#define BBCALL_KEY_PULLUP 1u
+#endif
+#ifndef BBCALL_KEY_DEBUG
+#define BBCALL_KEY_DEBUG 0u
+#endif
 /* ---------- 对讲机侧按键（MM-Radio: PA2=PWR, PA4=PTT, 上升沿/无内拉） ---------- */
 #define KEY_PWR_GPIO       GPIOA
 #define KEY_PWR_PIN        GPIO_PIN_2

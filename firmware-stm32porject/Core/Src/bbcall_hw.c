@@ -87,9 +87,9 @@ void hw_board_pins_init(void)
   HAL_GPIO_Init(LCD_BL_GPIO, &g);
   HAL_GPIO_WritePin(LCD_BL_GPIO, LCD_BL_PIN, GPIO_PIN_RESET);
 
-  /* 按键（上拉输入） */
+  /* 按键（上拉输入；BBCALL_KEY_PULLUP=0 时为 NOPULL，仅排查用） */
   g.Mode = GPIO_MODE_INPUT;
-  g.Pull = GPIO_PULLUP;
+  g.Pull = (BBCALL_KEY_PULLUP != 0u) ? GPIO_PULLUP : GPIO_NOPULL;
   g.Pin = KEY_UP_PIN;
   HAL_GPIO_Init(KEY_UP_GPIO, &g);
   g.Pin = KEY_DOWN_PIN;

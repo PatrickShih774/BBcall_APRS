@@ -466,6 +466,25 @@ static void ui_keys_poll(void)
       ui_backlight_wake();
     }
   }
+#if BBCALL_KEY_DEBUG
+  /* 按键诊断：三个键的原始电平一变就打印（50ms 限流），用来确认按键实际接在哪个脚。
+   * 关内部上拉（BBCALL_KEY_PULLUP=0）时，松开状态引脚悬空，这一行会看到随机跳变，属正常。 */
+  {
+    static uint8_t last_r[3] = { 0xFFu, 0xFFu, 0xFFu };
+    static uint32_t t_ktx = 0u;
+    if (raw[0] != last_r[0] || raw[1] != last_r[1] || raw[2] != last_r[2]) {
+      if ((uint32_t)(now - t_ktx) >= 50u) {
+        t_ktx = now;
+        last_r[0] = raw[0]; last_r[1] = raw[1]; last_r[2] = raw[2];
+        hw_console_puts("[KEY] up="); hw_console_u8(raw[0]);
+        hw_console_puts(" dn=");      hw_console_u8(raw[1]);
+        hw_console_puts(" ok=");      hw_console_u8(raw[2]);
+        hw_console_puts(" (1=松开 0=按下)\r\n");
+      }
+    }
+  }
+#endif
+
   /* ▲▼ 长按自动重复 */
   for (i = 0u; i < 2u; i++) {
     if (lvl[i] == 0u && (uint32_t)(now - down_ms[i]) >= 600u &&
