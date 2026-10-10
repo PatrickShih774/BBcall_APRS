@@ -216,6 +216,27 @@ void lcd_flush(void)
   }
 }
 
+/* 局部刷新：只写 [x0,x1] x [y0,y1] 覆盖到的页/列窗口。
+ * 寻址与 lcd_flush 一致（页 = y/8，列起点带 LCD_COL_OFFSET）；越界在这里夹紧。 */
+void lcd_flush_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1)
+{
+  uint8_t p0, p1, col;
+
+  if (x0 > x1 || y0 > y1) return;
+  if (x1 >= LCD_W) x1 = (uint8_t)(LCD_W - 1u);
+  if (y1 >= LCD_H) y1 = (uint8_t)(LCD_H - 1u);
+  p0 = (uint8_t)(y0 / 8u);
+  p1 = (uint8_t)(y1 / 8u);
+  col = (uint8_t)(LCD_COL_OFFSET + x0);
+
+  for (uint8_t page = p0; page <= p1; page++) {
+    lcd_cmd((uint8_t)(0xB0u | page));
+    lcd_cmd((uint8_t)(0x10u | ((col >> 4) & 0x0Fu)));
+    lcd_cmd((uint8_t)(col & 0x0Fu));
+    lcd_data_bytes(&fb[page * LCD_W + x0], (uint16_t)(x1 - x0 + 1u));
+  }
+}
+
 void lcd_backlight(uint8_t on)
 {
 #ifdef LCD_SIM

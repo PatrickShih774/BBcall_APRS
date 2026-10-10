@@ -56,6 +56,7 @@ static uint8_t   s_count, s_idx, s_vscroll;
 static uint8_t   s_view = UI_SCREEN_IDLE;   /* 状态机当前态（= 屏幕编号 1/2/3） */
 static uint32_t  s_now_ms;                  /* 设备时钟（uptime；--clock 固定） */
 static uint8_t   s_wday = 0xFFu, s_mon, s_mday;  /* 0xFF = 无 RTC */
+static char      s_clk_prev[8];                 /* 上一次画到屏上的时钟数字（HH:MM），用来判断"分钟进位" */
 static int8_t    s_batt = -1;               /* -1 无采样 */
 static char      s_mycall[10] = "NOCALL";
 static uint32_t  s_freq_khz = 144640u;
@@ -843,14 +844,51 @@ uint16_t ui_dup_total(void) { return s_dup_total; }
 uint32_t ui_clock_ms(void) { return s_now_ms; }
 uint8_t  ui_current_screen(void) { return s_view; }
 
+/* 待机页时钟：只重绘"时钟带"并只把真正变了的部分刷进面板。
+ *   只有冒号翻相位 -> 只刷冒号那一格（12x24，48 字节）；
+ *   分钟进位（数字变了）-> 刷整条时钟带（64x24，256 字节）。
+ * 旧实现每次冒号闪烁都整屏重绘 + 整帧 1KB 位敲 SPI，会让背光/面板出现可见抖动
+ * （实机现象：待机页与有未读页闪、收件箱页不闪，正好对应"有/无 500ms 周期重绘"）。
+ * 冒号闪烁开关：BBCALL_UI_CLOCK_BLINK=0 时只保留分钟进位刷新（排查抖动时可做 A/B）。 */
+#ifndef BBCALL_UI_CLOCK_BLINK
+#define BBCALL_UI_CLOCK_BLINK 1u
+#endif
+
+static void idle_clock_repaint(uint8_t blink_en)
+{
+  char clk[8], digits[8];
+  uint32_t t = (s_now_ms % 86400000u) / 1000u;
+  sfb_t b;
+  uint8_t changed = 0u;
+
+  sfb_init(&b, clk, (uint8_t)sizeof(clk));
+  sfb_u32w(&b, t / 3600u, 2u); sfb_ch(&b, ':'); sfb_u32w(&b, (t / 60u) % 60u, 2u);
+  for (uint8_t i = 0u; i < sizeof(s_clk_prev); i++) {
+    digits[i] = clk[i];
+    if (clk[i] != s_clk_prev[i]) changed = 1u;
+  }
+  if (blink_en && (((s_now_ms / 500u) & 1u) != 0u)) clk[2] = ' ';   /* 冒号熄灭相位 */
+
+  lcd_fill_rect(0u, 11u, 63u, 35u, 1u);       /* 时钟带恢复反显底：把上一次的冒号擦掉 */
+  fp_text(fp_cx(clk, 12, 0, 63, 2u), 11, clk, 12, 0u, 2u);
+
+  if (changed) {
+    for (uint8_t i = 0u; i < sizeof(s_clk_prev); i++) s_clk_prev[i] = digits[i];
+    lcd_flush_rect(0u, 11u, 63u, 35u);        /* 分钟变了：整条时钟带 */
+  } else if (blink_en) {
+    lcd_flush_rect(26u, 11u, 37u, 34u);       /* 只有冒号：一个字符格（5 字符串的第 3 个，12px 档 x2） */
+  }
+}
+
 void ui_tick(uint32_t ms)
 {
   static uint8_t colon = 0xFFu;
   s_now_ms += ms;
 
-  /* 只在画面真的会变时重绘：态 1/2 的大格时钟冒号（design.md §4.4） */
-  if (s_view == UI_SCREEN_IDLE || s_view == UI_SCREEN_UNREAD) {
+  /* 只有待机页有时钟：冒号闪烁（或分钟进位）走局部重绘，见 idle_clock_repaint()。
+   * 有未读页没有时钟 -> 不再每 500ms 白重绘一次；收件箱页本来就不周期重绘。 */
+  if (s_view == UI_SCREEN_IDLE) {
     uint8_t c = (uint8_t)((s_now_ms / 500u) & 1u);
-    if (c != colon) { colon = c; redraw(); }
+    if (c != colon) { colon = c; idle_clock_repaint((uint8_t)BBCALL_UI_CLOCK_BLINK); }
   }
 }

@@ -8,6 +8,9 @@
 void lcd_init(void);
 void lcd_clear(uint8_t color);
 void lcd_flush(void);
+/* 局部刷新：只把 [x0,x1]x[y0,y1] 覆盖到的页/列写进面板。
+ * 用于"只变一小块"的重绘（待机页冒号闪烁），避免整帧 1KB 位敲 SPI 带来的可见抖动。 */
+void lcd_flush_rect(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1);
 void lcd_pixel(uint8_t x, uint8_t y, uint8_t on);
 void lcd_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, uint8_t on);
 /* 实心矩形：用于反显选中行 / 弹窗底纹 */

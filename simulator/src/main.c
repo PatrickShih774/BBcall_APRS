@@ -73,6 +73,8 @@ int main(int argc, char **argv)
 {
   int scale = 4;
   int selftest = 0;
+  int tick_ms = 0;                 /* --tick MS：自检里先推进设备时钟一次（验证局部刷新路径） */
+  int rescreen = 0;                /* --rescreen：tick 之后再整帧重绘一次，用于逐像素对比 */
   int screen = 0;                     /* 0 = 按状态机自动（未读>0 则有未读态） */
   int demo = 0;
   int clock_sec = -1;
@@ -99,6 +101,8 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = argv[++i];
     else if (!strcmp(argv[i], "--keymap")) { keymap_report(); return 0; }
     else if (!strcmp(argv[i], "--demo")) demo = 1;
+  else if (!strcmp(argv[i], "--tick") && i + 1 < argc) tick_ms = atoi(argv[++i]);
+  else if (!strcmp(argv[i], "--rescreen")) rescreen = 1;
     else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { usage(); return 0; }
   }
 
@@ -157,6 +161,11 @@ int main(int argc, char **argv)
     /* 按键之后再报一次当前页，便于自检断言按键结果（1=待机 2=有未读 3=收件箱） */
     printf("[sim] 按键后状态机当前页 = %u\n", (unsigned)ui_current_screen());
   }
+  /* --tick MS：推进设备时钟一次，让 ui_tick 走"冒号局部重绘"路径再做截图，
+   * 便于与整帧重绘（--clock 换相位）的结果逐像素对比。 */
+  if (tick_ms > 0) ui_tick((uint32_t)tick_ms);
+  if (rescreen && screen) ui_show(screen);   /* 局部刷新 vs 整帧重绘：结果应逐像素一致 */
+
   lcd_sim_render();
 
   if (selftest) {
@@ -176,7 +185,12 @@ int main(int argc, char **argv)
     while ((key = lcd_sim_get_key()) != 0) ui_handle_key(key);
 
     ui_tick(16);
-    lcd_sim_render();
+    /* --tick MS：推进设备时钟一次，让 ui_tick 走"冒号局部重绘"路径再做截图，
+   * 便于与整帧重绘（--clock 换相位）的结果逐像素对比。 */
+  if (tick_ms > 0) ui_tick((uint32_t)tick_ms);
+  if (rescreen && screen) ui_show(screen);   /* 局部刷新 vs 整帧重绘：结果应逐像素一致 */
+
+  lcd_sim_render();
     SDL_Delay(16);
   }
   lcd_sim_shutdown();
