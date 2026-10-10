@@ -51,6 +51,18 @@ void hw_delay_us(uint32_t us)
   while ((DWT->CYCCNT - start) < ticks) { }
 }
 
+/* 纳秒级短延时（位敲 SPI 提速用）：DWT 周期计数，"至少等 ns 纳秒"。
+ * 72MHz 下 200ns ≈ 14 周期；函数调用/GPIO 翻转本身还有十几周期开销，
+ * 实际半周期会略大于 200ns，对 ST7567（串行时钟最小周期 80ns）仍是安全方向。 */
+void hw_delay_ns(uint32_t ns)
+{
+  uint32_t cyc = (SystemCoreClock / 1000000u) * ns / 1000u;
+  uint32_t start;
+  if (cyc == 0u) cyc = 1u;
+  start = DWT->CYCCNT;
+  while ((DWT->CYCCNT - start) < cyc) { }
+}
+
 /* ---------------- GPIO ---------------- */
 void hw_board_pins_init(void)
 {

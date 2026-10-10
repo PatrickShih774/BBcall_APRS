@@ -18,7 +18,7 @@
  *   20   52   info（正文，超出 PKTLOG_INFO_MAX 截断）
  * 环形写入：当前页写满后擦下一页（那一页装的是最旧数据）。
  * 日志区位置：**固件映像之后**（链接脚本导出 _image_end）到 Flash 末尾；页数 = 剩余页数，
- * 上限由 bbcall_cfg.h 的 BBCALL_PKTLOG_PAGES 决定（实测 Debug 约 9 页、Release 约 13 页）。 */
+ * 上限由 bbcall_cfg.h 的 BBCALL_PKTLOG_PAGES 决定（实测 2026-10-10：Debug 8 页 = 112 条、Release 12 页 = 168 条）。 */
 #ifndef PKTLOG_H
 #define PKTLOG_H
 

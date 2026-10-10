@@ -7,6 +7,8 @@ uint8_t hw_clock_is72(void);
 /* 微秒延时（DWT 周期计数，需 hw_delay_init 后可用） */
 void hw_delay_init(void);
 void hw_delay_us(uint32_t us);
+/* 纳秒级短延时（位敲外设提速用）；精度受调用开销限制，用于"至少等这么多" */
+void hw_delay_ns(uint32_t ns);
 /* 板级通用 GPIO（LED/蜂鸣/振动/按键） */
 void hw_board_pins_init(void);
 /* 寄存器级 USART3 控制台（PB10=TX, PB11=RX） */

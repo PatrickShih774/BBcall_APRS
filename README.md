@@ -382,7 +382,7 @@ python tools/gen_afsk_wav.py --src BG5BLB-12 --pos --random-pos --seed 20260916 
 
 - **存储**：内部 Flash 的**固件映像之后到 Flash 末尾**全给环形日志（`pktlog.c`）；1KB 一页 = 14 槽，每槽 72 字节。
   日志区起点来自链接脚本导出的 `_image_end`（**跟着固件大小走**），页数上限由 `BBCALL_PKTLOG_PAGES` 限定（默认 16）：
-  **Debug(-Og) 8 页 = 112 条；Release(-Os) 13 页 = 182 条**（页擦除粒度会让实际条数比上限少最多 13 条，`n=` 如实报）；
+  **Debug(-Og) 8 页 = 112 条；Release(-Os) 12 页 = 168 条**（2026-10-10 数值，页擦除粒度会让实际条数比上限少最多 13 条，`n=` 如实报）；
 - **不用再改链接脚本**：早期版本从 Flash 尾部硬扣 8KB、改页数必须同步改 `.ld`；现在 `.ld` 放开 64KB、容量自动算（验证方法：`_image_end` 与 `objcopy` 出来的 `.bin` 大小逐字节吻合）；
 - **写入节流**：只记"新内容"（DUP 不占记录，口径同 `RX=`）；写 Flash 会停机 20~40ms（页擦除），所以记录**先暂存、延后 200ms** 再落盘，避开"一包刚收完又来下一包"的窗口。
 
@@ -422,7 +422,7 @@ python tools\aprs_log_report.py aprs_10h.log --mode log --ref 网络包清单.tx
 - Release 版开机行：`[LOG] init pages=013 record=72B cap=00182 n=00009 seq_last=00008 base=0800CC00`；
 - **烧录不清日志**：Debug 与 Release 两种布局来回烧，9 条记录照样读出来（`_image_end` 两者都是页对齐的，page 序虽不同但按 seq 排序导出）；
 - `TIME=` 对时（`[RTC] set ...`）、`LOG0` 清空（`[LOG] erased n=00009 -> 0`）、`LOG?` 导出都在串口桥上跑通过；
-- 6 小时全覆盖建议烧 **Release（182 条）**，Debug 只有 112 条；导出头行的 `lost=` 会如实报被覆盖的条数。
+- 6 小时全覆盖建议烧 **Release（168 条）**，Debug 只有 112 条；导出头行的 `lost=` 会如实报被覆盖的条数。
 
 实现细节与验证见 [docs/DEBUG_LOG.md](docs/DEBUG_LOG.md) §26 / §28。
 
@@ -459,7 +459,7 @@ python tools\aprs_log_report.py aprs_10h.log --mode log --ref 网络包清单.tx
 4. 烧录后打开 USART3（PB10/PB11，115200）看串口输出；
 5. **构建配置**：`Debug` 现在用 **`-Og`**（工程 `.cproject` 已改）：保留调试信息的优化档，比 -O0 小 12.8KB，
    工具栏直接选 Debug 就能烧（`text=56384 / data=56 / bss=19608`）；`Release` 仍是 `-Os`（`text=51696 / data=52 / bss=19576`，余约 **5.6KB**）。
-   注意**几小时无人值守的长跑建议烧 Release**：日志区跟在固件映像之后，`Release` 能拿 13 页 = **182 条**，`Debug` 只有 8 页 = 112 条。
+   注意**几小时无人值守的长跑建议烧 Release**：日志区跟在固件映像之后，`Release` 能拿 12 页 = **168 条**，`Debug` 只有 8 页 = 112 条（2026-10-10 实测：写入端 SPI 提速让映像长大了 56 字节，Release 正好跨过一页边界）。
    加新功能前先看余量：Debug 快满时把 `BBCALL_TUNE_CMDS` 置 0（省约 2.6KB）或改用 Release；
    另外固件已不用 newlib printf/malloc（见 [DEBUG_LOG §23](docs/DEBUG_LOG.md#23-代码内存优化去掉-newlib-printf让-debug-o0-也能装下2026-09-19)），别再引入 `printf/snprintf/malloc`。
 6. **Release 配置不产出 `.hex`**（只有 elf/list/map）：用 `powershell -ExecutionPolicy Bypass -File tools\make_hex.ps1 -Elf firmware-stm32porject\Release\BBCall_APRS.elf` 生成，或在 CubeIDE 里直接 Run（烧 elf）。

@@ -124,7 +124,7 @@
  * 布局：1KB 一页、每页 14 条（每条 72 字节），**日志区跟在固件映像之后**（链接脚本导出
  *       _image_end），页数 = 剩余 Flash 页数，上限 = 本宏。所以固件越大日志越小，
  *       Release(-Os) 比 Debug(-Og) 多存上百条；改本宏不再需要同步改 .ld。
- * 实测（2026-09-19）：Debug(-Og) 映像 56.2KB → 9 页（上限 126 条）；Release(-Os) 51.5KB → 13 页（上限 182 条）。
+ * 实测（2026-10-10）：Debug(-Og) 映像 57.0KB → 8 页（112 条）；Release(-Os) 映像 52.3KB → 12 页（168 条）。
  * 页擦除粒度决定实际条数比上限少最多 13 条（刚擦完一页时最少）。 */
 #ifndef BBCALL_PKTLOG_PAGES
 #define BBCALL_PKTLOG_PAGES 16u

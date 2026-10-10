@@ -26,13 +26,17 @@ static uint8_t fb[LCD_FB_BYTES];
 static void pin_hi(uint16_t p){ HAL_GPIO_WritePin(LCD_GPIO, p, GPIO_PIN_SET); }
 static void pin_lo(uint16_t p){ HAL_GPIO_WritePin(LCD_GPIO, p, GPIO_PIN_RESET); }
 
+/* 位敲 SPI 的节拍：ST7567 串行时钟最小周期 80ns（≈12.5MHz 上限），这里取 ≈200ns 半周期
+ * （SCLK ≈2.5MHz，留 5 倍余量）。旧值是 1us 半周期（500kHz）：
+ * 整帧 1KB 要 ≈17ms，换页/周期重绘时的长电流尖峰会让背光 LED 可见地暗一下（2026-10-10 排查结论）。
+ * 新节拍下整帧 ≈2ms。若某个模组因排线长/干扰在 2.5MHz 下出花屏，把 200 改 400 即可。 */
 static void lcd_byte(uint8_t b)
 {
   for (int i = 7; i >= 0; i--) {
     if (b & (1u << i)) pin_hi(LCD_MOSI_PIN); else pin_lo(LCD_MOSI_PIN);
-    hw_delay_us(1);
+    hw_delay_ns(200u);
     pin_hi(LCD_CLK_PIN);
-    hw_delay_us(1);
+    hw_delay_ns(200u);
     pin_lo(LCD_CLK_PIN);
   }
 }
